@@ -72,6 +72,7 @@ describe('request-level dynamic profiles', () => {
       displayName: 'openai',
       settingsNs: 'llm-pi-ai',
       settingsPath: ['providers', 'openai'],
+      enabledPath: ['providers', 'openai', 'enabled'],
       declared: false,
     })
     await ctx.settings.update(NS, {
@@ -154,6 +155,21 @@ describe('request-level dynamic profiles', () => {
       jitterRatio: 0.2,
     })
     expect(ctx.llm.listProviders().map(provider => provider.id)).toEqual(['openai'])
+  })
+
+  it('keeps a disabled profile configurable while removing its live route', async () => {
+    const dir = await home()
+    const ctx = await boot(dir, { providers: { openai: {} } })
+
+    await ctx.settings.update(NS, { providers: { openai: { enabled: false } } })
+    expect(ctx.llm.listProviders()).toEqual([])
+    expect(ctx.llm.listConfigurableProviders()).toContainEqual(expect.objectContaining({
+      provider: 'openai',
+      enabledPath: ['providers', 'openai', 'enabled'],
+    }))
+
+    await ctx.settings.update(NS, { providers: { openai: { enabled: true } } })
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'openai', name: 'openai' }])
   })
 
   it('refuses a settings write this adapter could not serve, leaving its routes alone', async () => {

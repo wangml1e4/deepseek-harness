@@ -3378,6 +3378,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           displayName: entry.displayName,
           settingsNs: entry.settingsNs,
           settingsPath: [...entry.settingsPath],
+          ...entry.enabledPath === undefined ? {} : { enabledPath: [...entry.enabledPath] },
           active: active.has(entry.provider),
           ...entry.declared === undefined ? {} : { declared: entry.declared },
         }))

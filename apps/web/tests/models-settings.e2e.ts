@@ -3,8 +3,9 @@
 // reference-free profile for provider-native auth, and typing an API key later
 // stores it write-only under the derived reference (`MINIMAX_CN_API_KEY`)
 // while the settings document records only that reference. Each saved row
-// appears after route topology invalidation without presenting liveness as
-// provider status. The customized-settings fold writes its curated fields —
+// appears after route topology invalidation, and its switch writes and follows
+// the adapter-declared activation field. The
+// customized-settings fold writes its curated fields —
 // the endpoint, and a declared route's own name and protocol — as merge
 // patches against the stored profile. Zero model calls: configuration is pure
 // settings/credentials/llm-domain traffic, so there is no fixture and a
@@ -175,6 +176,31 @@ describe('web e2e: Models settings page configures a dormant provider', () => {
     expect(document).toContain('apiKeyEnv: MINIMAX_CN_API_KEY')
     const snapshot = await captureStableAria(page, '[role="dialog"]', scaffold.workspaceCwd)
     await compareOrRefreshGolden(CONFIGURED_EXPECTED, snapshot, MODE)
+    expect(tripwire.pageErrors).toEqual([])
+  }, 60_000)
+
+  it('disables and re-enables a provider from its row switch', async () => {
+    onTestFailed(() => saveFailureShot(page, 'web-e2e-models-toggle'))
+    const dialog = page.getByRole('dialog', { name: '设置' })
+    const disable = dialog.getByRole('switch', { name: '停用 minimax-cn' })
+    await disable.waitFor({ timeout: 10_000 })
+    expect(await disable.getAttribute('aria-checked')).toBe('true')
+
+    await disable.click()
+    const enable = dialog.getByRole('switch', { name: '启用 minimax-cn' })
+    await enable.waitFor({ timeout: 10_000 })
+    expect(await enable.getAttribute('aria-checked')).toBe('false')
+    await expect.poll(
+      async () => readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8'),
+      { timeout: 10_000 },
+    ).toContain('enabled: false')
+
+    await enable.click()
+    await dialog.getByRole('switch', { name: '停用 minimax-cn' }).waitFor({ timeout: 10_000 })
+    await expect.poll(
+      async () => readFile(join(scaffold.harnessHome, 'settings.yaml'), 'utf8'),
+      { timeout: 10_000 },
+    ).toContain('enabled: true')
     expect(tripwire.pageErrors).toEqual([])
   }, 60_000)
 

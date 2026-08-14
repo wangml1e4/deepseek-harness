@@ -21,6 +21,8 @@ export interface ConfigurableProviderView {
   settingsNs: string
   /** Path from that section's root to the provider's profile object (empty = whole section). */
   settingsPath: string[]
+  /** Non-empty boolean settings path that manually enables the route, when the adapter offers one. */
+  enabledPath?: string[]
   /** Whether the route is currently registered (its models are requestable). */
   active: boolean
   /**

@@ -23,6 +23,7 @@
     - listitem:
       - text: DeepSeek
       - img "API 密钥缺失"
+      - switch "停用 DeepSeek (deepseek-official)" [checked]
       - button "编辑 DeepSeek (deepseek-official)": 编辑
   - text: 提供方
   - combobox "提供方":

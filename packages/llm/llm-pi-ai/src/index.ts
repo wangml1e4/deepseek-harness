@@ -93,6 +93,7 @@ const NS = settingsNamespace('llm-pi-ai')
  */
 function registrationFacts(profiles: ReadonlyMap<string, ResolvedPiAiProviderProfile>): unknown {
   return [...profiles.entries()]
+    .filter(([, profile]) => profile.enabled !== false)
     // `displayName` rides along because the registry hands it to every selector
     // through `providerInfo()`: a rename that did not re-register would leave
     // the old label showing until some unrelated fact happened to change.
@@ -128,6 +129,7 @@ function directoryEntries(
       displayName,
       settingsNs: NS,
       settingsPath: ['providers', provider],
+      enabledPath: ['providers', provider, 'enabled'],
       // Membership of the installed catalog, not of the settings document:
       // narrowing a shipped provider's models stores a profile too, and that
       // route is still one pi-ai knows.
@@ -259,7 +261,9 @@ export function apply(ctx: Context, config: Config): void {
     // conflicting route leaves the previous routes serving requests, and
     // `registeredFacts` only advances once the registry actually holds the
     // new set — so returning to a working configuration always re-applies.
-    const routes = [...profiles().keys()]
+    const routes = [...profiles()]
+      .filter(([, profile]) => profile.enabled !== false)
+      .map(([provider]) => provider)
     if (registration === undefined) {
       // Dormant bare mount: nothing is registered until a section supplies
       // profiles, and an empty section keeps it that way.

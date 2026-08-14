@@ -107,27 +107,44 @@ describe('configurable-provider directory', () => {
     const events = vi.fn()
     ctx.on('llm/adapters-updated', events)
     ctx.llm.registerConfigurableProviders([
-      entry({ provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] }),
+      entry({
+        provider: 'deepseek-official',
+        displayName: 'DeepSeek',
+        settingsNs: 'llm-deepseek',
+        settingsPath: [],
+        enabledPath: ['enabled'],
+      }),
       entry(),
     ])
     expect(events).toHaveBeenCalledTimes(1)
     const listed = ctx.llm.listConfigurableProviders()
     expect(listed).toEqual([
-      { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [] },
+      {
+        provider: 'deepseek-official',
+        displayName: 'DeepSeek',
+        settingsNs: 'llm-deepseek',
+        settingsPath: [],
+        enabledPath: ['enabled'],
+      },
       { provider: 'openai', displayName: 'OpenAI', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'] },
     ])
     listed[0]!.displayName = 'mutated'
+    ;(listed[0]!.enabledPath as string[]).push('mutated')
     ;(listed[1]!.settingsPath as string[]).push('mutated')
     expect(ctx.llm.listConfigurableProviders()[0]!.displayName).toBe('DeepSeek')
+    expect(ctx.llm.listConfigurableProviders()[0]!.enabledPath).toEqual(['enabled'])
     expect(ctx.llm.listConfigurableProviders()[1]!.settingsPath).toEqual(['providers', 'openai'])
   })
 
   it('detaches stored entries from caller-owned objects', async () => {
     const ctx = await setup()
-    const source = entry()
+    const source = entry({ enabledPath: ['providers', 'openai', 'enabled'] })
     ctx.llm.registerConfigurableProviders([source])
     source.displayName = 'mutated'
+    ;(source.enabledPath as string[]).push('mutated')
     expect(ctx.llm.listConfigurableProviders()[0]!.displayName).toBe('OpenAI')
+    expect(ctx.llm.listConfigurableProviders()[0]!.enabledPath)
+      .toEqual(['providers', 'openai', 'enabled'])
   })
 
   it('withdraws every entry when the registration disposes', async () => {
@@ -164,6 +181,8 @@ describe('configurable-provider directory', () => {
     [entry({ displayName: '' }), /non-empty provider/],
     [entry({ settingsNs: '' }), /non-empty provider/],
     [entry({ settingsPath: ['providers', ''] }), /empty settingsPath segment/],
+    [entry({ enabledPath: [] }), /non-empty enabledPath/],
+    [entry({ enabledPath: ['providers', 'openai', ''] }), /non-empty enabledPath/],
   ])('rejects invalid entries all-or-nothing', async (invalid, message) => {
     const ctx = await setup()
     expect(() => ctx.llm.registerConfigurableProviders([entry({ provider: 'valid-first' }), invalid])).toThrow(message)

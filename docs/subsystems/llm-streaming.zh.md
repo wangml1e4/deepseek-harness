@@ -361,7 +361,7 @@ interface LlmProviderInfo {
 }
 ```
 
-适配器插件还会通过 `registerConfigurableProviders()` 声明哪些路由*可以*运行，并指明每条路由的用户设置分节，使配置界面能在任何路由注册之前就呈现休眠的提供方。
+适配器插件还会通过 `registerConfigurableProviders()` 声明哪些路由*可以*运行，并指明每条路由的用户设置分节及可选的手动启用设置，使配置界面能在任何路由注册之前就呈现休眠的提供方，并且只切换支持该操作的路由。
 
 ```ts type-equiv
 /**
@@ -382,6 +382,12 @@ interface LlmConfigurableProvider {
    * object; empty when the whole section is the profile.
    */
   settingsPath: readonly string[]
+  /**
+   * Non-empty path from the settings namespace root to the boolean that
+   * controls whether this route registers. Absent when the adapter offers no
+   * manual activation control.
+   */
+  enabledPath?: readonly string[]
   /**
    * Whether the owning adapter knows this route only because configuration
    * declared it — a gateway or self-hosted server it ships nothing about.

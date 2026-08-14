@@ -1,8 +1,9 @@
 /**
  * Models settings section: the provider rows joined from the configurable
  * directory, settings namespaces, and credential states, with one editor
- * card at a time. Rows expose only confirmed API-key state through accessible
- * solid configured or missing dots. A whole-section provider without a
+ * card at a time. Adapter-declared activation paths render as accessible
+ * manual switches; rows expose only confirmed API-key state through solid
+ * configured or missing dots. A whole-section provider without a
  * configured key renders as its open setup card instead of a row, but only in
  * the first-run posture — no provider on the page can serve requests yet — and
  * only until the user closes that card; the add flow is a card carrying the
@@ -15,6 +16,7 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
 import type { IApiClient } from '@deepseek-ai/dsh-api-remotes/client'
+import { getPath } from '@deepseek-ai/dsh-client-schema-form'
 import { Button, IconPlusOutline16, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-web-react'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
@@ -117,6 +119,36 @@ export async function removeProviderProfile(
 }
 
 /**
+ * Persist one provider's manual activation choice, then refresh the joined
+ * settings state that drives the switch. The directory owns the exact boolean
+ * path; the page never assumes a field name inside an adapter's namespace.
+ * @param api - settings wire face.
+ * @param controller - the page store to refresh after a successful write.
+ * @param target - namespace, revision, and adapter-declared activation path.
+ * @param enabled - whether the route should register.
+ * @returns the failure message, or undefined once the write and reload landed.
+ */
+export async function setProviderEnabled(
+  api: Pick<IApiClient, 'settings'>,
+  controller: ModelsSettingsStore,
+  target: { settingsNs: string; enabledPath: readonly string[]; expectedRevision: number },
+  enabled: boolean,
+): Promise<string | undefined> {
+  try {
+    const response = await api.settings.mutate({
+      ns: target.settingsNs,
+      ops: [{ op: 'set', path: [...target.enabledPath], value: enabled }],
+      expectedRevision: target.expectedRevision,
+    })
+    if (!response.result.ok) return response.result.error.message
+  } catch (error) {
+    return messageOf(error)
+  }
+  await controller.load()
+  return undefined
+}
+
+/**
  * Whether a whole-section provider still needs its first key: an unconfigured
  * credential opens the setup card instead of showing a row. This is the
  * first-run posture alone — a user who can already reach some provider gets an
@@ -185,6 +217,8 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
   const [savedTarget, setSavedTarget] = useState<ProviderIdentity | undefined>(undefined)
   const [declaring, setDeclaring] = useState(false)
   const [dismissedSetup, setDismissedSetup] = useState<ReadonlySet<string>>(() => new Set())
+  const [togglingProvider, setTogglingProvider] = useState<string | undefined>(undefined)
+  const [toggleFailure, setToggleFailure] = useState<{ provider: string; message: string } | undefined>(undefined)
 
   const announceSaved = (target: ProviderIdentity): void => {
     // Announced only once the refreshed directory is in the snapshot the
@@ -310,6 +344,11 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
           const credentialMissing = !credentialConfigured
             && row.apiKeyEnv !== undefined
             && row.credential?.configured === false
+          const toggleBusy = togglingProvider === row.entry.provider
+          const enabledPath = row.entry.enabledPath
+          const manuallyEnabled = enabledPath === undefined
+            ? undefined
+            : getPath(namespace.value, enabledPath) === true
           return (
             <li key={row.entry.provider} className={styles['rowCard']}>
               <div className={styles['rowHead']}>
@@ -342,6 +381,42 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                       : null}
                 </span>
                 <span className={styles['rowActions']}>
+                  {enabledPath === undefined
+                    ? null
+                    : (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={manuallyEnabled}
+                        aria-busy={toggleBusy}
+                        aria-label={providerCopy(
+                          manuallyEnabled ? t('disableProvider') : t('enableProvider'),
+                          target,
+                        )}
+                        title={providerCopy(
+                          manuallyEnabled ? t('disableProvider') : t('enableProvider'),
+                          target,
+                        )}
+                        className={styles['providerSwitch']}
+                        disabled={!state.writable || togglingProvider !== undefined}
+                        onClick={() => {
+                          setSavedTarget(undefined)
+                          setToggleFailure(undefined)
+                          setTogglingProvider(row.entry.provider)
+                          void setProviderEnabled(api, controller, {
+                            settingsNs: row.entry.settingsNs,
+                            enabledPath,
+                            expectedRevision: namespace.revision,
+                          }, !manuallyEnabled)
+                            .then((failure) => {
+                              if (failure !== undefined) {
+                                setToggleFailure({ provider: row.entry.provider, message: failure })
+                              }
+                            })
+                            .finally(() => { setTogglingProvider(undefined) })
+                        }}
+                      />
+                    )}
                   <button
                     type="button"
                     className={styles['secondaryButton']}
@@ -377,6 +452,13 @@ function Loaded({ injected }: { injected: ModelsSectionInjected }): ReactNode {
                     : null}
                 </span>
               </div>
+              {toggleFailure?.provider === row.entry.provider
+                ? (
+                  <p className={styles['error']}>
+                    {`${providerCopy(t('toggleFailed'), target)}: ${toggleFailure.message}`}
+                  </p>
+                )
+                : null}
               {open
                 ? renderProviderEditor({
                   target,
