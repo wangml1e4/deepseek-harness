@@ -1,0 +1,182 @@
+[
+  {
+    "endpoint": "/api/taskboard/workspace",
+    "request": {
+      "args": {
+        "workspaceId": "{{workspaceId}}"
+      }
+    },
+    "status": 200,
+    "response": {
+      "type": "server-response",
+      "rpcId": "taskboard-workspace",
+      "result": {
+        "ok": true,
+        "value": {
+          "ok": true,
+          "value": {
+            "workspaceId": "{{workspaceId}}",
+            "title": "Protocol Workspace",
+            "prefix": "PROTOCOLWORK",
+            "version": 1,
+            "createdAt": "{{timestamp}}",
+            "updatedAt": "{{timestamp}}"
+          }
+        }
+      }
+    }
+  },
+  {
+    "endpoint": "/api/taskboard/createIssue",
+    "request": {
+      "args": {
+        "input": {
+          "workspaceId": "{{workspaceId}}",
+          "title": "Invalid status",
+          "status": "ready"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "type": "server-response",
+      "rpcId": "taskboard-invalid-create",
+      "result": {
+        "ok": false,
+        "error": {
+          "code": "internal",
+          "message": "typert gateway: taskboard/createIssue: wire field \"input\" failed boundary validation",
+          "details": {}
+        }
+      }
+    }
+  },
+  {
+    "endpoint": "/api/taskboard/createIssue",
+    "request": {
+      "args": {
+        "input": {
+          "workspaceId": "{{workspaceId}}",
+          "title": "Exercise the protocol",
+          "status": "todo",
+          "priority": "high",
+          "labels": [
+            "remote",
+            "snapshot"
+          ]
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "type": "server-response",
+      "rpcId": "taskboard-create",
+      "result": {
+        "ok": true,
+        "value": {
+          "ok": true,
+          "value": {
+            "id": "{{uuid}}",
+            "identifier": "PROTOCOLWORK-1",
+            "workspaceId": "{{workspaceId}}",
+            "title": "Exercise the protocol",
+            "description": "",
+            "status": "todo",
+            "priority": "high",
+            "labels": [
+              "remote",
+              "snapshot"
+            ],
+            "assignee": "unassigned",
+            "startDate": null,
+            "dueDate": null,
+            "sortOrder": 1000,
+            "version": 1,
+            "archivedAt": null,
+            "createdAt": "{{timestamp}}",
+            "updatedAt": "{{timestamp}}"
+          }
+        }
+      }
+    }
+  },
+  {
+    "endpoint": "/api/taskboard/listIssues",
+    "request": {
+      "args": {
+        "input": {
+          "workspaceId": "{{workspaceId}}",
+          "status": "todo"
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "type": "server-response",
+      "rpcId": "taskboard-list",
+      "result": {
+        "ok": true,
+        "value": {
+          "ok": true,
+          "value": {
+            "items": [
+              {
+                "id": "{{uuid}}",
+                "identifier": "PROTOCOLWORK-1",
+                "workspaceId": "{{workspaceId}}",
+                "title": "Exercise the protocol",
+                "description": "",
+                "status": "todo",
+                "priority": "high",
+                "labels": [
+                  "remote",
+                  "snapshot"
+                ],
+                "assignee": "unassigned",
+                "startDate": null,
+                "dueDate": null,
+                "sortOrder": 1000,
+                "version": 1,
+                "archivedAt": null,
+                "createdAt": "{{timestamp}}",
+                "updatedAt": "{{timestamp}}"
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "endpoint": "/api/taskboard/updateIssue",
+    "request": {
+      "args": {
+        "input": {
+          "reference": "PROTOCOLWORK-1",
+          "expectedVersion": 0,
+          "status": "in_progress",
+          "actor": {
+            "type": "user",
+            "id": "protocol-user",
+            "name": "Protocol User"
+          }
+        }
+      }
+    },
+    "status": 200,
+    "response": {
+      "type": "server-response",
+      "rpcId": "taskboard-conflict",
+      "result": {
+        "ok": true,
+        "value": {
+          "ok": false,
+          "error": {
+            "code": "version_conflict",
+            "message": "cannot update Issue 'PROTOCOLWORK-1': expected version 0, found 1"
+          }
+        }
+      }
+    }
+  }
+]

@@ -104,6 +104,12 @@ Taskboard is permanent Workspace product UI backed by host-owned data. It is unr
 
 Implementation delivery follows independently verifiable PRs or one formal stack in this order: domain and SQLite; Host Remote, CLI, and skill; Dashboard, Board, List, and detail UI; Gantt and dependencies; Patrol scheduling; Git, Session, and permissions; Reviewer and human review; recovery, audit, and final verification. Each later PR declares its dependency on the preceding layer, keeps every capability role complete at its merge point, and enters human review without automatic merge.
 
+## Current implementation
+
+The first two stack layers provide the Workspace-owned Taskboard Service Definition, local SQLite Provider, Host Typert Remote, JSON `taskctl` command line, and bundled `manage-taskboard` skill. The standard Web Host mounts those roles together, and the installed `dsh` package exposes both `dsh` and `taskctl` executables. The Remote and CLI cover Workspace metadata, Issue lifecycle and order, Comments, Activity, and dependency relations; they do not yet expose attachments, Client live events, Patrol state, Development Context, or review evidence.
+
+The browser Taskboard UI, Gantt renderer, Patrol scheduler, Git and Session execution, independent Reviewer, human review controls, and recovery layer remain proposed. Their absence does not weaken the current Service's no-delete, optimistic-version, append-only-history, and Workspace-identity rules.
+
 ## Alternatives considered
 
 **Retain independent Taskboard Projects.** Rejected because a Project would duplicate Workspace identity and require users and Agents to maintain a second mapping to the same directory and Sessions.

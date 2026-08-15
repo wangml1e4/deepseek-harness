@@ -733,6 +733,7 @@
     },
     "apps/cli": {
       "entry": [
+        "src/taskctl-bin.ts",
         "tests/**/*.spec.ts",
         "tests/**/*.e2e.ts",
         "tests/**/*.snapshot.ts"

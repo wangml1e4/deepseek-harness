@@ -24,6 +24,12 @@ Issue archiving is reversible. The service has no permanent Issue, Comment, or A
 
 Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, and Activity consistent.
 
+`@deepseek-ai/dsh-taskboard-remote` exposes the Service under the Typert `taskboard` namespace and validates Workspace identities against `ctx.workspaceRegistry`. Domain failures remain typed business results while carrier validation and infrastructure failures remain distinct. The browser API assembly mounts its generated Client contribution.
+
+`@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
+
+The current Consumer layer does not expose a Web Taskboard view, live update events, attachments, Patrol scheduling, development-context bindings, or review evidence. Those remain later layers of the ordered Taskboard PR stack, and version one does not publish or synchronize GitHub Issues.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>
@@ -153,4 +159,121 @@ abstract getIssue(reference: IssueReference): Promise<Issue | undefined>
 ```
 
 Source: [`packages/taskboard/taskboard/src/index.ts:63`](../../packages/taskboard/taskboard/src/index.ts)
+
+<a id="ctxtaskboardremote--taskboardremote"></a>
+
+### `ctx.taskboardRemote` — `TaskboardRemote`
+
+Host Remote adapter that keeps Workspace identity authoritative.
+
+```ts cordis-catalog
+/**
+ * Ensure and read the implicit Taskboard for one registered Workspace.
+ * @param workspaceId - Authoritative Workspace identity.
+ * @returns Taskboard metadata or a stable business failure.
+ */
+@Remote('workspace') workspace(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<WorkspaceTaskboard>>
+
+/**
+ * Change a Taskboard prefix before its first Issue.
+ * @param input - Prefix mutation with optimistic version.
+ * @returns updated Taskboard metadata or a stable business failure.
+ */
+@Remote('setPrefix') setPrefix(input: SetWorkspacePrefixInput): Promise<TaskboardRemoteResult<WorkspaceTaskboard>>
+
+/**
+ * List Issues in one registered Workspace.
+ * @param input - Workspace and filters.
+ * @returns ordered Issues or a stable business failure.
+ */
+@Remote('listIssues') listIssues(input: ListIssuesInput): Promise<TaskboardRemoteResult<TaskboardIssueListValue>>
+
+/**
+ * Look up one Issue.
+ * @param reference - Opaque id or human-readable identifier.
+ * @returns explicit nullable Issue result.
+ */
+@Remote('getIssue') getIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardIssueValue>>
+
+/**
+ * Create an Issue in one registered Workspace.
+ * @param input - Issue fields.
+ * @returns created Issue or a stable business failure.
+ */
+@Remote('createIssue') createIssue(input: CreateIssueInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * Update or reorder an Issue using optimistic concurrency.
+ * @param input - Issue mutation.
+ * @returns updated Issue or a stable business failure.
+ */
+@Remote('updateIssue') updateIssue(input: UpdateIssueInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * Move an Issue to another registered Workspace.
+ * @param input - destination and optimistic version.
+ * @returns moved Issue or a stable business failure.
+ */
+@Remote('moveIssue') moveIssue(input: MoveIssueInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * Archive an Issue without deleting it.
+ * @param input - Issue reference, observed version, and actor.
+ * @returns archived Issue or a stable business failure.
+ */
+@Remote('archiveIssue') archiveIssue(input: VersionedIssueInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * Restore one archived Issue.
+ * @param input - Issue reference, observed version, and actor.
+ * @returns restored Issue or a stable business failure.
+ */
+@Remote('restoreIssue') restoreIssue(input: VersionedIssueInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * List one Issue's Comments.
+ * @param reference - Opaque id or human-readable identifier.
+ * @returns ordered Comments or a stable business failure.
+ */
+@Remote('listComments') listComments(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardCommentListValue>>
+
+/**
+ * Append one attributed Comment.
+ * @param input - Issue reference, body, and author.
+ * @returns appended Comment or a stable business failure.
+ */
+@Remote('addComment') addComment(input: AddCommentInput): Promise<TaskboardRemoteResult<Comment>>
+
+/**
+ * List one Issue's append-only Activity.
+ * @param reference - Opaque id or human-readable identifier.
+ * @returns ordered Activity or a stable business failure.
+ */
+@Remote('listActivities') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>
+
+/**
+ * List one Issue's dependency views.
+ * @param reference - Opaque id or human-readable identifier.
+ * @returns ordered relation views or a stable business failure.
+ */
+@Remote('listRelations') listRelations(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>
+
+/**
+ * Add one directed Issue dependency.
+ * @param input - Anchor, related Issue, direction, version, and actor.
+ * @returns relation mutation or a stable business failure.
+ */
+@Remote('addRelation') addRelation(input: AddIssueRelationInput): Promise<TaskboardRemoteResult<IssueRelationMutation>>
+
+/**
+ * Remove one Issue dependency without deleting its Activity.
+ * @param input - Anchor, relation id, observed version, and actor.
+ * @returns updated Issue or a stable business failure.
+ */
+@Remote('removeRelation') removeRelation(input: RemoveIssueRelationInput): Promise<TaskboardRemoteResult<Issue>>
+```
+
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:44`](../../packages/taskboard/taskboard-remote/src/index.ts)
 <!-- END GENERATED cordis-surface -->

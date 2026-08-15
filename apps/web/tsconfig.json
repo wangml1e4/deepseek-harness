@@ -26,6 +26,8 @@
     "tests/scaffold-hermetic.e2e.ts",
     "tests/minimal-preset.snapshot.ts",
     "tests/message-feedback-protocol.snapshot.ts",
+    "tests/taskboard-protocol.snapshot.ts",
+    "tests/taskctl-built.e2e.ts",
     "tests/live-interactions.e2e.ts",
     "tests/question-composer.e2e.ts",
     "tests/approval-composer.e2e.ts",

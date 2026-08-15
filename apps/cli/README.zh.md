@@ -15,6 +15,10 @@
 
 运行命令时所在的目录将作为默认 workspace 根目录。`web` 和 `headless` profile 在首次使用时会从随附模板自动初始化；其他任何 profile 都必须通过 `dsh plugin` 创建。
 
+## 配套命令
+
+本包还会安装 `taskctl`，用于执行持久 Workspace Taskboard 操作的 JSON 命令行。它默认连接运行中的 Web Host `http://127.0.0.1:3080`；其命令、输出、环境与退出码约定由 [`@deepseek-ai/dsh-taskctl`](../../packages/taskboard/taskctl/README.md) 持有。
+
 ## 应用参数
 
 启动器只解析自身的 flag，并将其后的所有内容交给已启动的 profile；注入该 profile 的任意应用插件都可以解析这份共享的不可变快照（[`dsh-cmdline`](../../packages/boot/cmdline/README.md)）。因此，启动器的 flag 必须写在最前面；启动器无法识别的第一个 token 标志着应用参数的开始：

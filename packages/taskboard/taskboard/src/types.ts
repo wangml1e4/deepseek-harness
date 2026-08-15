@@ -1,6 +1,6 @@
 /** Public Taskboard value types. @module @deepseek-ai/dsh-taskboard/types */
 
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ActivityId, CommentId, IssueId, IssueIdentifier, RelationId, TaskboardActorId } from './brand.ts'
 
 export type { ActivityId, CommentId, IssueId, IssueIdentifier, RelationId, TaskboardActorId } from './brand.ts'

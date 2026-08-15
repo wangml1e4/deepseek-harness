@@ -1840,6 +1840,103 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'taskboardRemote',
+    summary: 'Host Remote adapter that keeps Workspace identity authoritative.',
+    description: 'Host Remote adapter that keeps Workspace identity authoritative.',
+    methods: [
+      {
+        signature: '@Remote(\'workspace\') workspace(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<WorkspaceTaskboard>>',
+        description: 'Ensure and read the implicit Taskboard for one registered Workspace.',
+        parameters: [{ name: 'workspaceId', description: 'Authoritative Workspace identity.' }],
+        returns: 'Taskboard metadata or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'setPrefix\') setPrefix(input: SetWorkspacePrefixInput): Promise<TaskboardRemoteResult<WorkspaceTaskboard>>',
+        description: 'Change a Taskboard prefix before its first Issue.',
+        parameters: [{ name: 'input', description: 'Prefix mutation with optimistic version.' }],
+        returns: 'updated Taskboard metadata or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listIssues\') listIssues(input: ListIssuesInput): Promise<TaskboardRemoteResult<TaskboardIssueListValue>>',
+        description: 'List Issues in one registered Workspace.',
+        parameters: [{ name: 'input', description: 'Workspace and filters.' }],
+        returns: 'ordered Issues or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'getIssue\') getIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardIssueValue>>',
+        description: 'Look up one Issue.',
+        parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
+        returns: 'explicit nullable Issue result.',
+      },
+      {
+        signature: '@Remote(\'createIssue\') createIssue(input: CreateIssueInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Create an Issue in one registered Workspace.',
+        parameters: [{ name: 'input', description: 'Issue fields.' }],
+        returns: 'created Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'updateIssue\') updateIssue(input: UpdateIssueInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Update or reorder an Issue using optimistic concurrency.',
+        parameters: [{ name: 'input', description: 'Issue mutation.' }],
+        returns: 'updated Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'moveIssue\') moveIssue(input: MoveIssueInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Move an Issue to another registered Workspace.',
+        parameters: [{ name: 'input', description: 'destination and optimistic version.' }],
+        returns: 'moved Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'archiveIssue\') archiveIssue(input: VersionedIssueInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Archive an Issue without deleting it.',
+        parameters: [{ name: 'input', description: 'Issue reference, observed version, and actor.' }],
+        returns: 'archived Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'restoreIssue\') restoreIssue(input: VersionedIssueInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Restore one archived Issue.',
+        parameters: [{ name: 'input', description: 'Issue reference, observed version, and actor.' }],
+        returns: 'restored Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listComments\') listComments(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardCommentListValue>>',
+        description: 'List one Issue\'s Comments.',
+        parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
+        returns: 'ordered Comments or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'addComment\') addComment(input: AddCommentInput): Promise<TaskboardRemoteResult<Comment>>',
+        description: 'Append one attributed Comment.',
+        parameters: [{ name: 'input', description: 'Issue reference, body, and author.' }],
+        returns: 'appended Comment or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listActivities\') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>',
+        description: 'List one Issue\'s append-only Activity.',
+        parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
+        returns: 'ordered Activity or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listRelations\') listRelations(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>',
+        description: 'List one Issue\'s dependency views.',
+        parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
+        returns: 'ordered relation views or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'addRelation\') addRelation(input: AddIssueRelationInput): Promise<TaskboardRemoteResult<IssueRelationMutation>>',
+        description: 'Add one directed Issue dependency.',
+        parameters: [{ name: 'input', description: 'Anchor, related Issue, direction, version, and actor.' }],
+        returns: 'relation mutation or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'removeRelation\') removeRelation(input: RemoveIssueRelationInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Remove one Issue dependency without deleting its Activity.',
+        parameters: [{ name: 'input', description: 'Anchor, relation id, observed version, and actor.' }],
+        returns: 'updated Issue or a stable business failure.',
+      },
+    ],
+  },
+  {
     key: 'terminals',
     summary: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
     description: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
@@ -4445,12 +4542,52 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
   },
   {
+    name: 'TaskboardActivityListValue',
+    declaration: 'export interface TaskboardActivityListValue {\n    readonly items: readonly Activity[];\n}',
+  },
+  {
     name: 'TaskboardActor',
     declaration: 'export interface TaskboardActor {\n    readonly type: \'user\' | \'patrol_agent\' | \'reviewer\' | \'system\';\n    readonly id: TaskboardActorId;\n    readonly name: string;\n    readonly avatarUrl?: string;\n}',
   },
   {
     name: 'TaskboardActorId',
     declaration: 'export type TaskboardActorId = Branded<\'TaskboardActorId\'>;',
+  },
+  {
+    name: 'TaskboardCommentListValue',
+    declaration: 'export interface TaskboardCommentListValue {\n    readonly items: readonly Comment[];\n}',
+  },
+  {
+    name: 'TaskboardErrorCode',
+    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\';',
+  },
+  {
+    name: 'TaskboardIssueListValue',
+    declaration: 'export interface TaskboardIssueListValue {\n    readonly items: readonly Issue[];\n}',
+  },
+  {
+    name: 'TaskboardIssueValue',
+    declaration: 'export interface TaskboardIssueValue {\n    readonly issue: Issue | null;\n}',
+  },
+  {
+    name: 'TaskboardRelationListValue',
+    declaration: 'export interface TaskboardRelationListValue {\n    readonly items: readonly IssueRelation[];\n}',
+  },
+  {
+    name: 'TaskboardRemoteFailure',
+    declaration: 'export interface TaskboardRemoteFailure {\n    readonly code: TaskboardErrorCode;\n    readonly message: string;\n}',
+  },
+  {
+    name: 'TaskboardRemoteRejected',
+    declaration: 'export interface TaskboardRemoteRejected {\n    readonly ok: false;\n    readonly error: TaskboardRemoteFailure;\n}',
+  },
+  {
+    name: 'TaskboardRemoteResult',
+    declaration: 'export type TaskboardRemoteResult<T> = TaskboardRemoteSuccess<T> | TaskboardRemoteRejected;',
+  },
+  {
+    name: 'TaskboardRemoteSuccess',
+    declaration: 'export interface TaskboardRemoteSuccess<T> {\n    readonly ok: true;\n    readonly value: T;\n}',
   },
   {
     name: 'TerminalBackend',

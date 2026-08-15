@@ -15,6 +15,10 @@ The `dsh` command is the product launcher for profiles: ordered stacks of plugin
 
 The invoking directory is the default workspace root. The `web` and `headless` profiles auto-initialize on first use from shipped templates; any other profile must be created through `dsh plugin`.
 
+## Companion command
+
+The package also installs `taskctl`, the JSON command line for durable Workspace Taskboard operations. It targets the running Web Host at `http://127.0.0.1:3080` by default; [`@deepseek-ai/dsh-taskctl`](../../packages/taskboard/taskctl/README.md) owns its command, output, environment, and exit-code contracts.
+
 ## App arguments
 
 The launcher parses only its own flags and hands everything after them to the booted profile, where any injected app plugin may parse the shared immutable snapshot ([`dsh-cmdline`](../../packages/boot/cmdline/README.md)). Launcher flags therefore come first, and the first token the launcher does not recognize starts the app's arguments:

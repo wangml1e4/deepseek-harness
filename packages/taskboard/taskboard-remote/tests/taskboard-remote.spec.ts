@@ -1,0 +1,221 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
+import SqliteTaskboard from '@deepseek-ai/dsh-taskboard-sqlite'
+import { WorkspaceId, type Workspace, type WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
+import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
+import TaskboardRemote from '../src/index.ts'
+
+const contexts: Context[] = []
+const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000101')
+const secondWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000102')
+const actor = {
+  type: 'user' as const,
+  id: TaskboardActorId('remote-user'),
+  name: 'Remote User',
+}
+
+function workspace(id = workspaceId, title = 'Alpha Workspace'): Workspace {
+  return {
+    id,
+    path: `/workspace/${id}`,
+    title,
+    createdAt: '2026-08-15T00:00:00.000Z',
+    updatedAt: '2026-08-15T00:00:00.000Z',
+    sessionIds: [],
+    setTitle: () => Promise.resolve(),
+    attachSession: () => Promise.resolve(),
+    insertSessionBefore: () => Promise.resolve(),
+    detachSession: () => Promise.resolve(),
+    status: () => Promise.resolve('ok'),
+  }
+}
+
+async function harness() {
+  const ctx = new Context()
+  contexts.push(ctx)
+  const registered = new Map([
+    [workspaceId, workspace()],
+    [secondWorkspaceId, workspace(secondWorkspaceId, 'Beta Workspace')],
+  ])
+  ctx.provide('workspaceRegistry', {
+    get: (id: WorkspaceId) => registered.get(id),
+  } as WorkspaceRegistry)
+  await ctx.plugin(SqliteTaskboard, { path: ':memory:', journalMode: 'delete' })
+  await ctx.plugin(TaskboardRemote)
+  return ctx
+}
+
+afterEach(async () => {
+  await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+})
+
+describe('Taskboard Remote Consumer', () => {
+  it('publishes the complete V1 domain namespace as direct methods', async () => {
+    const ctx = await harness()
+    expect(ctx.taskboardRemote.typertRemote).toMatchObject({
+      serviceKey: 'taskboardRemote',
+      namespace: 'taskboard',
+    })
+    expect(remoteMethods(ctx.taskboardRemote)).toEqual([
+      { method: 'workspace', invocation: { kind: 'direct' } },
+      { method: 'setPrefix', invocation: { kind: 'direct' } },
+      { method: 'listIssues', invocation: { kind: 'direct' } },
+      { method: 'getIssue', invocation: { kind: 'direct' } },
+      { method: 'createIssue', invocation: { kind: 'direct' } },
+      { method: 'updateIssue', invocation: { kind: 'direct' } },
+      { method: 'moveIssue', invocation: { kind: 'direct' } },
+      { method: 'archiveIssue', invocation: { kind: 'direct' } },
+      { method: 'restoreIssue', invocation: { kind: 'direct' } },
+      { method: 'listComments', invocation: { kind: 'direct' } },
+      { method: 'addComment', invocation: { kind: 'direct' } },
+      { method: 'listActivities', invocation: { kind: 'direct' } },
+      { method: 'listRelations', invocation: { kind: 'direct' } },
+      { method: 'addRelation', invocation: { kind: 'direct' } },
+      { method: 'removeRelation', invocation: { kind: 'direct' } },
+    ])
+  })
+
+  it('derives Taskboard metadata from the authoritative Workspace', async () => {
+    const ctx = await harness()
+    await expect(ctx.taskboardRemote.workspace(workspaceId)).resolves.toMatchObject({
+      ok: true,
+      value: { workspaceId, title: 'Alpha Workspace', prefix: 'ALPHAWORKSPA' },
+    })
+    await expect(ctx.taskboardRemote.workspace(WorkspaceId('missing'))).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'workspace_not_found',
+        message: "Workspace 'missing' does not exist",
+      },
+    })
+  })
+
+  it('delegates mutations and preserves stable optimistic-concurrency failures', async () => {
+    const ctx = await harness()
+    await ctx.taskboardRemote.workspace(workspaceId)
+    const created = await ctx.taskboardRemote.createIssue({
+      workspaceId,
+      title: 'Remote mutation',
+      status: 'todo',
+    })
+    if (!created.ok) throw new Error(created.error.message)
+
+    await expect(ctx.taskboardRemote.updateIssue({
+      reference: created.value.id,
+      expectedVersion: 0,
+      title: 'Stale mutation',
+      actor,
+    })).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'version_conflict',
+        message: `cannot update Issue '${created.value.id}': expected version 0, found 1`,
+      },
+    })
+
+    await expect(ctx.taskboardRemote.updateIssue({
+      reference: created.value.identifier,
+      expectedVersion: 1,
+      status: 'in_progress',
+      actor,
+    })).resolves.toMatchObject({
+      ok: true,
+      value: { identifier: created.value.identifier, status: 'in_progress', version: 2 },
+    })
+  })
+
+  it('exposes the complete Issue, comment, Activity, and relation lifecycle', async () => {
+    const ctx = await harness()
+    const ensured = await ctx.taskboardRemote.workspace(workspaceId)
+    if (!ensured.ok) throw new Error(ensured.error.message)
+    await expect(ctx.taskboardRemote.setPrefix({
+      workspaceId,
+      prefix: 'ALPHA',
+      expectedVersion: ensured.value.version,
+    })).resolves.toMatchObject({ ok: true, value: { prefix: 'ALPHA', version: 2 } })
+
+    const first = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'First', status: 'todo' })
+    const second = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Second' })
+    if (!first.ok || !second.ok) throw new Error('fixture Issue creation failed')
+
+    await expect(ctx.taskboardRemote.listIssues({ workspaceId })).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ identifier: 'ALPHA-2' }, { identifier: 'ALPHA-1' }] },
+    })
+    await expect(ctx.taskboardRemote.getIssue(first.value.identifier)).resolves.toMatchObject({
+      ok: true,
+      value: { issue: { id: first.value.id } },
+    })
+    await expect(ctx.taskboardRemote.getIssue('UNKNOWN-1' as typeof first.value.identifier)).resolves.toEqual({
+      ok: true,
+      value: { issue: null },
+    })
+
+    await expect(ctx.taskboardRemote.addComment({
+      reference: first.value.id,
+      body: 'Ready for the next step',
+      actor,
+    })).resolves.toMatchObject({ ok: true, value: { body: 'Ready for the next step' } })
+    await expect(ctx.taskboardRemote.listComments(first.value.id)).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ body: 'Ready for the next step' }] },
+    })
+    const related = await ctx.taskboardRemote.addRelation({
+      reference: first.value.id,
+      relatedReference: second.value.id,
+      type: 'blocks',
+      expectedVersion: first.value.version,
+      actor,
+    })
+    if (!related.ok) throw new Error(related.error.message)
+    const activities = await ctx.taskboardRemote.listActivities(first.value.id)
+    if (!activities.ok) throw new Error(activities.error.message)
+    expect(activities.value.items.length).toBeGreaterThan(0)
+    await expect(ctx.taskboardRemote.listRelations(first.value.id)).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ id: related.value.relation.id, type: 'blocks' }] },
+    })
+    const removed = await ctx.taskboardRemote.removeRelation({
+      reference: first.value.id,
+      relationId: related.value.relation.id,
+      expectedVersion: related.value.issue.version,
+      actor,
+    })
+    if (!removed.ok) throw new Error(removed.error.message)
+
+    const moved = await ctx.taskboardRemote.moveIssue({
+      reference: first.value.id,
+      targetWorkspaceId: secondWorkspaceId,
+      expectedVersion: removed.value.version,
+      actor,
+    })
+    if (!moved.ok) throw new Error(moved.error.message)
+    await expect(ctx.taskboardRemote.listIssues({ workspaceId: secondWorkspaceId })).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ id: first.value.id, workspaceId: secondWorkspaceId }] },
+    })
+
+    const archived = await ctx.taskboardRemote.archiveIssue({
+      reference: first.value.id,
+      expectedVersion: moved.value.version,
+      actor,
+    })
+    if (!archived.ok) throw new Error(archived.error.message)
+    await expect(ctx.taskboardRemote.restoreIssue({
+      reference: first.value.id,
+      expectedVersion: archived.value.version,
+      actor,
+    })).resolves.toMatchObject({ ok: true, value: { archivedAt: null } })
+  })
+
+  it('rejects unknown Workspace operations and preserves infrastructure failures', async () => {
+    const ctx = await harness()
+    await expect(ctx.taskboardRemote.listIssues({ workspaceId: WorkspaceId('missing') })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'workspace_not_found' },
+    })
+    vi.spyOn(ctx.taskboard, 'getIssue').mockRejectedValueOnce(new Error('storage unavailable'))
+    await expect(ctx.taskboardRemote.getIssue('UNKNOWN-1' as never)).rejects.toThrow('storage unavailable')
+  })
+})
