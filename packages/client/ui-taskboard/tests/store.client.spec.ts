@@ -12,16 +12,18 @@ describe('Taskboard view store', () => {
     first.actions.setStatus('todo')
     first.actions.setPriority('high')
     first.actions.setLabel('ui')
+    first.actions.setGanttZoom('month')
 
     expect(first.getSnapshot()).toEqual({
-      mode: 'board', query: 'frontend', status: 'todo', priority: 'high', label: 'ui',
+      mode: 'board', query: 'frontend', status: 'todo', priority: 'high', label: 'ui', ganttZoom: 'month',
     })
 
     const restored = createTaskboardViewStore().create()
     expect(restored.getSnapshot()).toEqual(first.getSnapshot())
+    restored.actions.setMode('gantt')
     restored.actions.resetFilters()
     expect(restored.getSnapshot()).toEqual({
-      mode: 'board', query: '', status: 'all', priority: 'all', label: '',
+      mode: 'gantt', query: '', status: 'all', priority: 'all', label: '', ganttZoom: 'month',
     })
   })
 })

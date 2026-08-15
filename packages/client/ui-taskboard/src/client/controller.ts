@@ -40,6 +40,9 @@ export interface TaskboardClientRemote {
   listComments: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardCommentListValue>>>
   addComment: (input: AddCommentInput) => Promise<RemoteResult<TaskboardRemoteResult<Comment>>>
   listActivities: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardActivityListValue>>>
+  listWorkspaceRelations: (
+    workspaceId: WorkspaceId,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardRelationListValue>>>
   listRelations: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardRelationListValue>>>
   addRelation: (input: AddIssueRelationInput) => Promise<RemoteResult<TaskboardRemoteResult<IssueRelationMutation>>>
   removeRelation: (input: RemoveIssueRelationInput) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>
@@ -60,6 +63,7 @@ export interface TaskboardSnapshot {
   readonly detailPhase: TaskboardDetailPhase
   readonly comments: readonly Comment[]
   readonly activities: readonly Activity[]
+  readonly workspaceRelations: readonly IssueRelation[]
   readonly relations: readonly IssueRelation[]
   readonly error: string | null
   readonly detailError: string | null
@@ -85,6 +89,7 @@ const EMPTY: TaskboardSnapshot = Object.freeze({
   detailPhase: 'idle',
   comments: Object.freeze([]),
   activities: Object.freeze([]),
+  workspaceRelations: Object.freeze([]),
   relations: Object.freeze([]),
   error: null,
   detailError: null,
@@ -129,6 +134,17 @@ function ordered(issues: readonly Issue[]): readonly Issue[] {
     || a.sortOrder - b.sortOrder
     || a.identifier.localeCompare(b.identifier)
   ))
+}
+
+/** Normalize either endpoint's relation view into the stored blocker-to-blocked direction. */
+function canonicalRelation(relation: IssueRelation): IssueRelation {
+  if (relation.type === 'blocks') return relation
+  return {
+    ...relation,
+    type: 'blocks',
+    issueId: relation.relatedIssueId,
+    relatedIssueId: relation.issueId,
+  }
 }
 
 /** Browser object layer for the active Workspace's durable Taskboard. */
@@ -180,6 +196,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspaceId,
       workspace: result.value[0],
       issues: ordered(result.value[1].items),
+      workspaceRelations: result.value[2].items,
     })
     return OK
   }
@@ -207,6 +224,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       phase: 'ready',
       workspace: result.value[0],
       issues,
+      workspaceRelations: result.value[2].items,
       selectedIssue: selected,
       detailPhase: selected === null ? 'idle' : 'loading',
       comments: selected === null ? [] : this.snapshot.comments,
@@ -389,7 +407,13 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
         actor,
       }),
       () => this.isSelectedIssue(generation),
-      (result) => { this.replaceIssue(result.issue, [...this.snapshot.relations, result.relation]) },
+      (result) => {
+        this.replaceIssue(
+          result.issue,
+          [...this.snapshot.relations, result.relation],
+          [...this.snapshot.workspaceRelations, canonicalRelation(result.relation)],
+        )
+      },
     )
   }
 
@@ -411,7 +435,13 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
         actor,
       }),
       () => this.isSelectedIssue(generation),
-      (updated) => { this.replaceIssue(updated, this.snapshot.relations.filter(candidate => candidate.id !== relation.id)) },
+      (updated) => {
+        this.replaceIssue(
+          updated,
+          this.snapshot.relations.filter(candidate => candidate.id !== relation.id),
+          this.snapshot.workspaceRelations.filter(candidate => candidate.id !== relation.id),
+        )
+      },
     )
   }
 
@@ -424,18 +454,25 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
   }
 
   /** Read one Workspace Taskboard and its active Issue list as a single view. */
-  private async readWorkspace(workspaceId: WorkspaceId): Promise<ValueResult<readonly [WorkspaceTaskboard, TaskboardIssueListValue]>> {
+  private async readWorkspace(workspaceId: WorkspaceId): Promise<ValueResult<readonly [
+    WorkspaceTaskboard,
+    TaskboardIssueListValue,
+    TaskboardRelationListValue,
+  ]>> {
     try {
-      const [workspaceResponse, issueResponse] = await Promise.all([
+      const [workspaceResponse, issueResponse, relationResponse] = await Promise.all([
         this.remote.workspace(workspaceId),
         this.remote.listIssues({ workspaceId }),
+        this.remote.listWorkspaceRelations(workspaceId),
       ])
       const workspace = unwrap(workspaceResponse)
       if (!workspace.ok) return workspace
       const issues = unwrap(issueResponse)
-      return issues.ok
-        ? { ok: true, value: [workspace.value, issues.value] }
-        : issues
+      if (!issues.ok) return issues
+      const relations = unwrap(relationResponse)
+      return relations.ok
+        ? { ok: true, value: [workspace.value, issues.value, relations.value] }
+        : relations
     } catch (error: unknown) {
       return rejected(error)
     }
@@ -505,13 +542,18 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
   }
 
   /** Replace one Issue in both list and selected-detail projections. */
-  private replaceIssue(issue: Issue, relations = this.snapshot.relations): void {
+  private replaceIssue(
+    issue: Issue,
+    relations = this.snapshot.relations,
+    workspaceRelations = this.snapshot.workspaceRelations,
+  ): void {
     const issues = this.snapshot.issues.map(candidate => candidate.id === issue.id ? issue : candidate)
     this.publish({
       ...this.snapshot,
       issues: ordered(issues),
       selectedIssue: this.snapshot.selectedIssue?.id === issue.id ? issue : this.snapshot.selectedIssue,
       relations,
+      workspaceRelations,
       actionError: null,
     })
   }

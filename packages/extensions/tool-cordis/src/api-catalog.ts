@@ -1814,6 +1814,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'append-only field changes in chronological order.',
       },
       {
+        signature: 'abstract listWorkspaceRelations(workspaceId: EnsureWorkspaceInput[\'workspaceId\']): Promise<readonly IssueRelation[]>',
+        description: 'List every directed dependency in one Workspace from its blocking Issue\'s perspective.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose canonical dependency records are listed.' }],
+        returns: 'relation views in append order with type `blocks`.',
+      },
+      {
         signature: 'abstract addRelation(input: AddIssueRelationInput): Promise<IssueRelationMutation>',
         description: 'Add one directed dependency between two Issues.',
         parameters: [{ name: 'input', description: 'Anchor, direction, related Issue, version, and actor.' }],
@@ -1915,6 +1921,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List one Issue\'s append-only Activity.',
         parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
         returns: 'ordered Activity or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listWorkspaceRelations\') listWorkspaceRelations(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>',
+        description: 'List one registered Workspace\'s canonical dependency records.',
+        parameters: [{ name: 'workspaceId', description: 'Authoritative Workspace identity.' }],
+        returns: 'ordered `blocks` relation views or a stable business failure.',
       },
       {
         signature: '@Remote(\'listRelations\') listRelations(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>',

@@ -1659,7 +1659,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       id: 'fx-issue-2', identifier: 'FIX-2', workspaceId: fixtureWorkspaceId,
       title: 'Review persistence model', description: 'Confirm durable Issue history and optimistic versions.',
       status: 'in_review', priority: 'medium', labels: ['sqlite'], assignee: 'user',
-      startDate: '2020-01-01', dueDate: '2020-01-02', sortOrder: 1000, version: 1,
+      startDate: '2026-08-10', dueDate: '2026-08-14', sortOrder: 1000, version: 1,
       archivedAt: null, createdAt: fixtureTaskboardTime, updatedAt: '2026-08-15T09:00:00.000Z',
     },
     {
@@ -1675,11 +1675,14 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' }, createdAt: fixtureTaskboardTime,
   }]
   const taskboardActivities: FxTaskboardActivity[] = []
-  const taskboardRelations: FxTaskboardRelation[] = []
+  const taskboardRelations: FxTaskboardRelation[] = options.empty ? [] : [{
+    id: 'fx-relation-1', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-2',
+    createdAt: fixtureTaskboardTime,
+  }]
   let nextTaskboardIssue = 4
   let nextTaskboardComment = 2
   let nextTaskboardActivity = 1
-  let nextTaskboardRelation = 1
+  let nextTaskboardRelation = taskboardRelations.length + 1
   // Registry-global archive set mirroring the host: archived sessions keep
   // their workspace accounting slot and only grouping surfaces hide them.
   const archivedSessionIds: SessionId[] = []
@@ -3381,6 +3384,20 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           })),
       })
     },
+    listWorkspaceRelations(workspaceId: WorkspaceId) {
+      const workspaceIssueIds = new Set(
+        taskboardIssues.filter(issue => issue.workspaceId === workspaceId).map(issue => issue.id),
+      )
+      return taskboardOk({
+        items: taskboardRelations.flatMap((relation): FxTaskboardRelation[] => {
+          const sourceId = relation.type === 'blocks' ? relation.issueId : relation.relatedIssueId
+          const targetId = relation.type === 'blocks' ? relation.relatedIssueId : relation.issueId
+          return workspaceIssueIds.has(sourceId) && workspaceIssueIds.has(targetId)
+            ? [{ ...relation, type: 'blocks', issueId: sourceId, relatedIssueId: targetId }]
+            : []
+        }),
+      })
+    },
     listRelations(reference: string) {
       const issue = findTaskboardIssue(reference)
       if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
@@ -3467,6 +3484,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/listComments': return Promise.resolve(taskboardRemotes.listComments(args.reference as string))
         case 'taskboard/addComment': return Promise.resolve(taskboardRemotes.addComment(args.input as never))
         case 'taskboard/listActivities': return Promise.resolve(taskboardRemotes.listActivities(args.reference as string))
+        case 'taskboard/listWorkspaceRelations': {
+          return Promise.resolve(taskboardRemotes.listWorkspaceRelations(args.workspaceId as WorkspaceId))
+        }
         case 'taskboard/listRelations': return Promise.resolve(taskboardRemotes.listRelations(args.reference as string))
         case 'taskboard/addRelation': return Promise.resolve(taskboardRemotes.addRelation(args.input as never))
         case 'taskboard/removeRelation': return Promise.resolve(taskboardRemotes.removeRelation(args.input as never))

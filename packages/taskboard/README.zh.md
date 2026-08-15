@@ -11,6 +11,6 @@
 | [`taskboard-remote/`](taskboard-remote/README.md) | 通过 Host Typert API 暴露 Taskboard 操作 | `ctx.taskboardRemote` |
 | [`taskctl/`](taskctl/README.md) | 提供机器可读的 Taskboard 命令行 | 二进制消费方 |
 | [`skill-manage-taskboard/`](skill-manage-taskboard/README.md) | 注册内置交互式 Taskboard 工作流 | `ctx.skills` 提供方 |
-| [`../client/ui-taskboard/`](../client/ui-taskboard/README.md) | 在浏览器中展示 Dashboard、Board、List 和 Issue 详情 | UI 消费方 |
+| [`../client/ui-taskboard/`](../client/ui-taskboard/README.md) | 在浏览器中展示 Dashboard、Board、List、Gantt 和 Issue 详情 | UI 消费方 |
 
 标准 Web Host 会挂载 SQLite Provider、Remote 与 UI 消费方和内置 skill。[Workspace Taskboard Agent Note](../../.agents/notes/proposed/feature/2026-08-15-workspace-taskboard.md)负责产品行为、Patrol policy 和分阶段交付决策。

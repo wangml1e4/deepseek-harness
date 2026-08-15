@@ -200,6 +200,44 @@
 .issueLink { display: flex; width: 100%; gap: 9px; border: 0; padding: 0; background: transparent; color: var(--dsw-alias-label-primary); text-align: left; cursor: pointer; }
 .issueLink span { color: var(--dsw-alias-label-tertiary); font-family: var(--ds-font-family-code); }
 
+.ganttShell { width: 100%; height: 100%; overflow: hidden; background: var(--dsw-alias-bg-base); }
+.ganttCanvas { width: 100%; height: 100%; }
+.ganttShell :global(.gantt_container),
+.ganttShell :global(.gantt_grid),
+.ganttShell :global(.gantt_task),
+.ganttShell :global(.gantt_layout_cell) {
+  border-color: var(--dsw-alias-border-l1);
+  background: var(--dsw-alias-bg-base);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+}
+.ganttShell :global(.gantt_grid_scale),
+.ganttShell :global(.gantt_task_scale) { border-color: var(--dsw-alias-border-l1); background: var(--dsw-alias-bg-layer-1); }
+.ganttShell :global(.gantt_grid_head_cell),
+.ganttShell :global(.gantt_scale_cell),
+.ganttShell :global(.gantt_row),
+.ganttShell :global(.gantt_task_row),
+.ganttShell :global(.gantt_cell),
+.ganttShell :global(.gantt_task_cell) { border-color: var(--dsw-alias-border-l1); }
+.ganttShell :global(.gantt_row),
+.ganttShell :global(.gantt_task_row) { background: var(--dsw-alias-bg-base); }
+.ganttShell :global(.gantt_row:hover),
+.ganttShell :global(.gantt_task_row:hover) { background: var(--dsw-alias-interactive-bg-hover); }
+.ganttShell :global(.gantt_tree_content) { display: flex; align-items: center; gap: 8px; }
+.ganttShell :global(.dsh-gantt-grid-id) { color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxxs-11); }
+.ganttShell :global(.dsh-gantt-grid-title) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--dsw-font-xs-strong-13); }
+.ganttShell :global(.gantt_task_line) { border: 0; border-radius: 6px; background: var(--dsw-alias-brand-primary); }
+.ganttShell :global(.dsh-gantt-status-in_progress.gantt_task_line) { background: var(--dsw-alias-state-warn-primary); }
+.ganttShell :global(.dsh-gantt-status-in_review.gantt_task_line),
+.ganttShell :global(.dsh-gantt-status-done.gantt_task_line) { background: var(--dsw-alias-state-success-primary); }
+.ganttShell :global(.dsh-gantt-status-blocked.gantt_task_line) { background: var(--dsw-alias-state-error-primary); }
+.ganttShell :global(.dsh-gantt-status-canceled.gantt_task_line) { opacity: .5; }
+.ganttShell :global(.gantt_task_content) { padding: 0 10px; color: var(--dsw-alias-label-primary-foreground); font: var(--dsw-font-xxs-strong-12); }
+.ganttShell :global(.gantt_link_line_down),
+.ganttShell :global(.gantt_link_line_left),
+.ganttShell :global(.gantt_link_line_right),
+.ganttShell :global(.gantt_link_line_up) { border-color: var(--dsw-alias-label-tertiary); }
+
 .dialogMask { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: var(--dsw-alias-bg-mask-2); }
 .dialog { width: min(440px, calc(100% - 32px)); border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 18px; background: var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-shadow-lv3); }
 .dialog header,

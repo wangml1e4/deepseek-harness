@@ -187,6 +187,19 @@ export class TaskboardRemote extends TypertRemoteService {
   }
 
   /**
+   * List one registered Workspace's canonical dependency records.
+   * @param workspaceId - Authoritative Workspace identity.
+   * @returns ordered `blocks` relation views or a stable business failure.
+   */
+  @Remote('listWorkspaceRelations')
+  listWorkspaceRelations(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardRelationListValue>> {
+    return this.result(async () => {
+      this.requireWorkspace(workspaceId)
+      return { items: await this.ctx.taskboard.listWorkspaceRelations(workspaceId) }
+    })
+  }
+
+  /**
    * List one Issue's dependency views.
    * @param reference - Opaque id or human-readable identifier.
    * @returns ordered relation views or a stable business failure.

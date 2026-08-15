@@ -3,8 +3,10 @@
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
 import type { IssuePriority, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
 
-/** Views shipped by the Taskboard center surface before the Gantt extension. */
-export type TaskboardMode = 'dashboard' | 'board' | 'list'
+/** Views shipped by the Taskboard center surface. */
+export type TaskboardMode = 'dashboard' | 'board' | 'list' | 'gantt'
+/** Persisted Gantt timeline scale. */
+export type TaskboardGanttZoom = 'day' | 'week' | 'month'
 /** Status filter including the unfiltered choice. */
 export type TaskboardStatusFilter = IssueStatus | 'all'
 /** Priority filter including the unfiltered choice. */
@@ -17,6 +19,7 @@ export interface TaskboardViewState {
   status: TaskboardStatusFilter
   priority: TaskboardPriorityFilter
   label: string
+  ganttZoom: TaskboardGanttZoom
 }
 
 type TaskboardViewActions = {
@@ -25,6 +28,7 @@ type TaskboardViewActions = {
   setStatus: (draft: TaskboardViewState, status: TaskboardStatusFilter) => void
   setPriority: (draft: TaskboardViewState, priority: TaskboardPriorityFilter) => void
   setLabel: (draft: TaskboardViewState, label: string) => void
+  setGanttZoom: (draft: TaskboardViewState, zoom: TaskboardGanttZoom) => void
   resetFilters: (draft: TaskboardViewState) => void
 }
 
@@ -40,6 +44,7 @@ export function createTaskboardViewStore(): EngineStoreHandle<TaskboardViewState
       status: 'all',
       priority: 'all',
       label: '',
+      ganttZoom: 'week',
     }),
     persist: 'dsh.taskboard.view.v1',
     actions: {
@@ -48,6 +53,7 @@ export function createTaskboardViewStore(): EngineStoreHandle<TaskboardViewState
       setStatus: (draft, status) => { draft.status = status },
       setPriority: (draft, priority) => { draft.priority = priority },
       setLabel: (draft, label) => { draft.label = label },
+      setGanttZoom: (draft, zoom) => { draft.ganttZoom = zoom },
       resetFilters: (draft) => {
         draft.query = ''
         draft.status = 'all'

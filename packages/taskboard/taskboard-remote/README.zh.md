@@ -6,7 +6,7 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 ## Remote 方法
 
-`taskboard` namespace 提供 `workspace`、`setPrefix`、`listIssues`、`getIssue`、`createIssue`、`updateIssue`、`moveIssue`、`archiveIssue`、`restoreIssue`、`listComments`、`addComment`、`listActivities`、`listRelations`、`addRelation` 和 `removeRelation`。
+`taskboard` namespace 提供 `workspace`、`setPrefix`、`listIssues`、`getIssue`、`createIssue`、`updateIssue`、`moveIssue`、`archiveIssue`、`restoreIssue`、`listComments`、`addComment`、`listActivities`、`listWorkspaceRelations`、`listRelations`、`addRelation` 和 `removeRelation`。
 
 按 Workspace 划分的方法会在接触 Taskboard 状态前拒绝未知 Workspace id。需要隐式 Taskboard 的读取会根据当前已注册 Workspace 的标题确保其存在。移动 Issue 时也会校验并确保目标 Workspace 存在。
 
@@ -24,6 +24,6 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 ## 已知限制与暂缓事项
 
-- 当前 Remote 只有请求／响应方法。实时 Taskboard 事件与 Client 缓存失效会在 Web UI 层加入。
+- 浏览器 API 装配会转发 `taskboard/changed`，供当前 Workspace 缓存失效；该事件不携带 Issue 数据。
 - 附件、Session 与 Git 绑定、Patrol policy 与 Run 历史以及审查证据尚未进入本协议层。
 - Remote 是 Host 本地应用 API；它不会发布或同步 GitHub Issue。

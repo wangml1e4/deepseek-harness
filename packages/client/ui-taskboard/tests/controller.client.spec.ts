@@ -73,6 +73,7 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       createdAt: '2026-08-16T00:00:00.000Z',
     }),
     listActivities: () => ok({ items: [] }),
+    listWorkspaceRelations: () => ok({ items: [] }),
     listRelations: () => ok({ items: [] }),
     addRelation: input => ok({
       issue: issue({ version: 2 }),
@@ -91,7 +92,16 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
 
 describe('TaskboardController', () => {
   it('loads Workspace metadata and active Issues into one immutable snapshot', async () => {
-    const controller = new TaskboardController(remote())
+    const workspaceRelation: IssueRelation = {
+      id: 'relation-0' as never,
+      type: 'blocks',
+      issueId: 'issue-1' as never,
+      relatedIssueId: 'issue-2' as never,
+      createdAt: '2026-08-15T00:00:00.000Z',
+    }
+    const controller = new TaskboardController(remote({
+      listWorkspaceRelations: () => ok({ items: [workspaceRelation] }),
+    }))
     const snapshots: string[] = []
     controller.subscribe(() => { snapshots.push(controller.getSnapshot().phase) })
 
@@ -103,6 +113,7 @@ describe('TaskboardController', () => {
       workspaceId: 'ws',
       workspace: { prefix: 'WS' },
       issues: [{ identifier: 'WS-1' }],
+      workspaceRelations: [workspaceRelation],
       error: null,
     })
   })
@@ -245,6 +256,7 @@ describe('TaskboardController', () => {
     const cases: TaskboardClientRemote[] = [
       remote({ workspace: () => failure('Workspace rejected') }),
       remote({ listIssues: () => failure('Issue list rejected') }),
+      remote({ listWorkspaceRelations: () => failure('Relations rejected') }),
       remote({ workspace: () => Promise.reject(new Error('Read exploded')) }),
     ]
     for (const [index, client] of cases.entries()) {
@@ -282,7 +294,11 @@ describe('TaskboardController', () => {
 
     let throwValue = false
     const rejectedRefresh = new TaskboardController(remote({
-      workspace: workspaceId => throwValue ? Promise.reject('Refresh exploded') : ok(taskboard(workspaceId)),
+      workspace: (workspaceId) => {
+        if (!throwValue) return ok(taskboard(workspaceId))
+        // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- Exercise non-Error transport rejection normalization.
+        return Promise.reject('Refresh exploded')
+      },
     }))
     await rejectedRefresh.activate('ws' as never)
     throwValue = true
@@ -321,7 +337,10 @@ describe('TaskboardController', () => {
       listComments: vi.fn(() => ok({ items: comments })),
       listActivities: vi.fn(() => ok({ items: activities })),
       listRelations: vi.fn(() => ok({ items: relations })),
-      updateIssue: vi.fn(input => ok(issue({ title: input.title, version: 2 }))),
+      updateIssue: vi.fn((input: Parameters<TaskboardClientRemote['updateIssue']>[0]) => {
+        if (input.title === undefined) throw new Error('test expected a title mutation')
+        return ok(issue({ title: input.title, version: 2 }))
+      }),
     })
     const controller = new TaskboardController(client)
     await controller.activate('ws' as never)
@@ -467,9 +486,18 @@ describe('TaskboardController', () => {
       selectedIssue: { version: 2 },
       comments: [{ body: 'Comment' }],
       relations: [{ id: 'relation-1' }],
+      workspaceRelations: [{
+        id: 'relation-1', type: 'blocks', issueId: 'issue-2', relatedIssueId: 'issue-1',
+      }],
     })
     await expect(controller.removeRelation(relation, actor)).resolves.toEqual({ ok: true })
     expect(controller.getSnapshot().relations).toEqual([])
+    expect(controller.getSnapshot().workspaceRelations).toEqual([])
+
+    await expect(controller.addRelation('blocks', second.id, actor)).resolves.toEqual({ ok: true })
+    expect(controller.getSnapshot().workspaceRelations).toMatchObject([{
+      type: 'blocks', issueId: 'issue-1', relatedIssueId: 'issue-2',
+    }])
 
     await controller.updateIssue(second, { title: 'Updated second' }, actor)
     expect(controller.getSnapshot().selectedIssue?.id).toBe('issue-1')

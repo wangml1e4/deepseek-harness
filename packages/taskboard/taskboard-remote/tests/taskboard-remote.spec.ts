@@ -70,6 +70,7 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'listComments', invocation: { kind: 'direct' } },
       { method: 'addComment', invocation: { kind: 'direct' } },
       { method: 'listActivities', invocation: { kind: 'direct' } },
+      { method: 'listWorkspaceRelations', invocation: { kind: 'direct' } },
       { method: 'listRelations', invocation: { kind: 'direct' } },
       { method: 'addRelation', invocation: { kind: 'direct' } },
       { method: 'removeRelation', invocation: { kind: 'direct' } },
@@ -175,6 +176,15 @@ describe('Taskboard Remote Consumer', () => {
     await expect(ctx.taskboardRemote.listRelations(first.value.id)).resolves.toMatchObject({
       ok: true,
       value: { items: [{ id: related.value.relation.id, type: 'blocks' }] },
+    })
+    await expect(ctx.taskboardRemote.listWorkspaceRelations(workspaceId)).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{
+        id: related.value.relation.id,
+        type: 'blocks',
+        issueId: first.value.id,
+        relatedIssueId: second.value.id,
+      }] },
     })
     const removed = await ctx.taskboardRemote.removeRelation({
       reference: first.value.id,
