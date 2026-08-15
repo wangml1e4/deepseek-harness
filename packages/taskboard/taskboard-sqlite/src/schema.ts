@@ -109,11 +109,11 @@ export function openTaskboardDatabase(
     db.exec('PRAGMA foreign_keys = ON')
     db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`)
     db.exec('BEGIN IMMEDIATE')
-    const { user_version: onDisk } = db.prepare('PRAGMA user_version').get() as { user_version: number }
-    const { application_id: applicationId } = db.prepare('PRAGMA application_id').get() as { application_id: number }
-    const { count: userObjectCount } = db.prepare(
+    const onDisk = readPragmaInteger(db, 'user_version')
+    const applicationId = readPragmaInteger(db, 'application_id')
+    const userObjectCount = (db.prepare(
       "SELECT COUNT(*) AS count FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*'",
-    ).get() as { count: number }
+    ).get() as { count: number }).count
     if (onDisk === 0 && (applicationId !== 0 || userObjectCount > 0)) {
       throw new Error(`taskboard database at "${path}" has an unversioned schema or application identity`)
     }
@@ -258,6 +258,11 @@ export function openTaskboardDatabase(
     db.close()
     throw error
   }
+}
+
+function readPragmaInteger(db: DatabaseSync, pragma: 'user_version' | 'application_id'): number {
+  const row = db.prepare(`PRAGMA ${pragma}`).get() as Record<typeof pragma, number>
+  return row[pragma]
 }
 
 /**
