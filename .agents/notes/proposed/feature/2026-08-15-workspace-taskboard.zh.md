@@ -106,11 +106,11 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 
 ## 当前实现
 
-前五个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情，以及持久 Patrol 调度状态。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录和依赖关系。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
+前六个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情、持久 Patrol 调度与认领状态，以及本地 Git、Session 和权限执行支撑。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录和依赖关系。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
 
 浏览器 UI 从每个 Workspace 行进入，以所选 Taskboard 替换对话中间区域，并复用现有右侧详情栏。其视图、甘特图时间刻度与筛选偏好保存在浏览器存储中，权威 Issue 数据仍由 Host 持有。甘特图渲染器会在表格中保留未排期 Issue，在已排期条形之间绘制规范 `blocks` 连线，并只持久化被拖动 Issue 的日期而不产生级联变更。
 
-每个已确保的 Taskboard 现会持有默认关闭且间隔为 `1h` 的 Patrol Policy。Policy 保存会计算新的到期时间，过期定时触发只消费一个错过的节拍，定时重叠会持久化 `skipped_global_busy`，手动重叠会被拒绝，数据库唯一性规则会在整个 Host 范围内预留一个活跃 Run，终态 Run 历史永久保留。在下一执行层安装 Host timer 和 Agent 消费方之前，这些调度操作不会通过 Remote 或 UI 暴露，也不会启动 Agent 工作。附件、Git 与 Session 执行、独立 Reviewer、人工审查控件和恢复仍处于提案状态。
+每个已确保的 Taskboard 现会持有默认关闭且间隔为 `1h` 并包含执行选项的 Patrol Policy。Policy 保存会计算新的到期时间，过期定时触发只消费一个错过的节拍，定时重叠会持久化 `skipped_global_busy`，手动重叠会被拒绝，数据库唯一性规则会在整个 Host 范围内预留一个活跃 Run，终态 Run 历史永久保留。原子认领会创建按顺序永久保留的 Attempt，且只有权限阻塞的 Attempt 才允许同一 Run 再次认领。永久 Development Context 会固定每个由 Patrol 执行的 Issue 的本地分支、worktree、准确 Session、Agent Preset、模型选择和 Permission Preset。已挂载的执行消费方只使用受限本地 Git 命令，Session 启动后只允许续跑原 Session，并直接拒绝无人值守工具审批而不向后委托。它在下一层安装 Host timer、扫描、prompt 和独立 Reviewer 前不会自行产生执行副作用；人工审查控件和恢复也仍处于提案状态。
 
 ## 考虑过的替代方案
 

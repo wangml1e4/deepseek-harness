@@ -11,8 +11,9 @@
 - 数据库带固定 application id 和单调 schema 版本。存在内容但未标版本的数据库、外来 application id 或任何不支持的版本都会在服务初始化时失败。
 - Issue 变更、版本更新、活动记录以及退回时必需的评论在同一事务中提交。评论和活动记录的序列列即使在时间戳相同时也能保持追加顺序。
 - Workspace 标签记录通过有序的 Issue-label 行复用；Issue 读取仅暴露稳定的标签名称列表。
-- 每个 Taskboard 事务都会创建默认关闭且间隔为 `1h` 的 Patrol Policy。Policy 保存、固定节拍推进、全局活跃 Run 预留、定时重叠结果与终态 Run 历史都在事务中完成，并在 Host 重启后继续保留。
+- 每个 Taskboard 事务都会创建默认关闭、间隔为 `1h`、权限为 `workspace-write` 的 Patrol Policy。Policy 执行选项、固定节拍推进、全局活跃 Run 预留、定时重叠结果、按顺序排列的 Issue Attempt、Development Context 绑定与终态历史都在事务中完成，并在 Host 重启后继续保留。
 - Patrol Run 行没有删除操作。部分唯一索引保证即使多个调度调用方竞争，所有 Workspace 中仍最多只有一个活跃 Run。
+- 部分唯一索引会限制每个 Run 和每个 Issue 最多只有一个活跃 Attempt。领取、生命周期、阻塞 Comment、Activity、Session 绑定和结果 commit 写入会与其权威 Issue 变更处于同一个 SQLite 事务中。
 
 该提供方供应 `TaskboardService`；消费方依赖 [`@deepseek-ai/dsh-taskboard`](../taskboard/README.md)，绝不依赖本包。
 

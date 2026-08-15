@@ -104,6 +104,7 @@
     "@deepseek-ai/dsh-storage-json": "workspace:^",
     "@deepseek-ai/dsh-taskboard-remote": "workspace:^",
     "@deepseek-ai/dsh-taskboard-sqlite": "workspace:^",
+    "@deepseek-ai/dsh-taskboard-patrol": "workspace:^",
     "@deepseek-ai/dsh-skill-manage-taskboard": "workspace:^",
     "@deepseek-ai/dsh-workspace": "workspace:^",
     "@deepseek-ai/schemastery": "workspace:^",

@@ -21,6 +21,9 @@
       "path": "../taskboard"
     },
     {
+      "path": "../../core/session"
+    },
+    {
       "path": "../../runtime-diagnostics/invariants"
     }
   ]

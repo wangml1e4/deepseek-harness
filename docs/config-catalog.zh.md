@@ -2250,6 +2250,28 @@ export interface Config {
 
 来源：[`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-taskboard-patrol"></a>
+
+## `@deepseek-ai/dsh-taskboard-patrol`
+
+需要：`agentDefaultModel` · `agentPresets` · `agents` · `llm` · `permissionPresets` · `sessionPersistence` · `sessions` · `subprocess` · `taskboard` · `workspaceRegistry`
+
+```ts config-catalog
+/** Taskboard Patrol execution plugin configuration. */
+export interface Config {
+  /** Host-managed parent directory for permanent Issue worktrees. */
+  worktreeRoot: string
+  /** Git executable name or absolute path. */
+  gitCommand?: string
+  /** Termination grace for local Git processes. */
+  gitGraceMs?: number
+  /** Per-stream diagnostic output cap for local Git processes. */
+  gitOutputBytes?: number
+}
+```
+
+来源：[`packages/taskboard/taskboard-patrol/src/index.ts:42`](../packages/taskboard/taskboard-patrol/src/index.ts)
+
 <a id="deepseek-aidsh-taskboard-sqlite"></a>
 
 ## `@deepseek-ai/dsh-taskboard-sqlite`
@@ -2269,7 +2291,7 @@ export interface Config {
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 ```
 
-来源：[`packages/taskboard/taskboard-sqlite/src/index.ts:65`](../packages/taskboard/taskboard-sqlite/src/index.ts)
+来源：[`packages/taskboard/taskboard-sqlite/src/index.ts:88`](../packages/taskboard/taskboard-sqlite/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 

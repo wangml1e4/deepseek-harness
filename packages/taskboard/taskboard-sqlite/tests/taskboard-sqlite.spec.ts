@@ -4,8 +4,9 @@ import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { IssueId, PatrolRunId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
+import { IssueId, PatrolAttemptId, PatrolRunId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
 import type { Issue } from '@deepseek-ai/dsh-taskboard'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import SqliteTaskboard from '../src/index.ts'
 import type { Config } from '../src/index.ts'
@@ -15,6 +16,11 @@ const actor = {
   type: 'user' as const,
   id: TaskboardActorId('local-user'),
   name: 'Local User',
+}
+const patrolActor = {
+  type: 'patrol_agent' as const,
+  id: TaskboardActorId('patrol-agent'),
+  name: 'Patrol Agent',
 }
 
 afterEach(async () => {
@@ -43,14 +49,62 @@ describe('SQLite Taskboard service', () => {
       vi.setSystemTime('2026-08-16T01:00:00.000Z')
       await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Policy' })
       const initial = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
-      expect(initial).toMatchObject({ workspaceId, enabled: false, interval: '1h', nextDueAt: null, version: 1 })
+      expect(initial).toMatchObject({
+        workspaceId,
+        enabled: false,
+        interval: '1h',
+        baseBranch: null,
+        agentPreset: null,
+        provider: null,
+        model: null,
+        reasoningEffort: null,
+        permissionPreset: 'workspace-write',
+        nextDueAt: null,
+        version: 1,
+      })
+
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        expectedVersion: initial!.version,
+      })).rejects.toMatchObject({ code: 'patrol_policy_invalid' })
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        permissionPreset: ' ',
+        expectedVersion: initial!.version,
+      })).rejects.toMatchObject({ code: 'patrol_policy_invalid' })
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        provider: 'provider-only',
+        expectedVersion: initial!.version,
+      })).rejects.toMatchObject({ code: 'patrol_policy_invalid' })
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        model: 'model-only',
+        expectedVersion: initial!.version,
+      })).rejects.toMatchObject({ code: 'patrol_policy_invalid' })
 
       const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
         workspaceId,
         enabled: true,
+        baseBranch: 'main',
+        agentPreset: 'coding',
+        provider: 'provider-explicit',
+        model: 'model-explicit',
+        reasoningEffort: 'high',
+        permissionPreset: 'danger-full-access',
         expectedVersion: initial!.version,
       })
-      expect(enabled).toMatchObject({ enabled: true, interval: '1h', nextDueAt: '2026-08-16T02:00:00.000Z' })
+      expect(enabled).toMatchObject({
+        enabled: true,
+        interval: '1h',
+        agentPreset: 'coding',
+        provider: 'provider-explicit',
+        model: 'model-explicit',
+        reasoningEffort: 'high',
+        permissionPreset: 'danger-full-access',
+        nextDueAt: '2026-08-16T02:00:00.000Z',
+      })
 
       vi.setSystemTime('2026-08-16T01:10:00.000Z')
       const changed = await mounted.ctx.taskboard.updatePatrolPolicy({
@@ -97,6 +151,7 @@ describe('SQLite Taskboard service', () => {
         workspaceId,
         enabled: true,
         interval: '30m',
+        baseBranch: 'main',
         expectedVersion: initial!.version,
       })
 
@@ -136,6 +191,7 @@ describe('SQLite Taskboard service', () => {
           workspaceId,
           enabled: true,
           interval: '5m',
+          baseBranch: 'main',
           expectedVersion: policy!.version,
         })
       }
@@ -216,6 +272,7 @@ describe('SQLite Taskboard service', () => {
       await expect(mounted.ctx.taskboard.updatePatrolPolicy({
         workspaceId,
         enabled: true,
+        baseBranch: 'main',
         expectedVersion: 99,
       })).rejects.toMatchObject({ code: 'version_conflict' })
       await expect(mounted.ctx.taskboard.updatePatrolPolicy({
@@ -232,6 +289,7 @@ describe('SQLite Taskboard service', () => {
       const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
         workspaceId,
         enabled: true,
+        baseBranch: 'main',
         expectedVersion: initial!.version,
       })
       await expect(mounted.ctx.taskboard.beginPatrolRun({
@@ -255,6 +313,7 @@ describe('SQLite Taskboard service', () => {
       const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
         workspaceId,
         enabled: true,
+        baseBranch: 'main',
         expectedVersion: policy!.version,
       })
       const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
@@ -281,6 +340,431 @@ describe('SQLite Taskboard service', () => {
         runId: PatrolRunId('missing-run'),
         result: 'failed',
       })).rejects.toMatchObject({ code: 'patrol_run_not_active' })
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('atomically claims a todo Issue and persists its exact Session and Git binding through review handoff', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000049')
+    const sessionId = SessionId('session-patrol-49')
+    const mounted = await mount(path)
+    let issue!: Issue
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Execution' })
+      issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Implement claim', status: 'todo' })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      const attempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: issue.id,
+        expectedVersion: issue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      expect(attempt).toMatchObject({ issueId: issue.id, sessionId: null, state: 'active', result: null })
+      await expect(mounted.ctx.taskboard.getIssue(issue.id)).resolves.toMatchObject({
+        status: 'in_progress',
+        assignee: 'patrol_agent',
+        version: 2,
+      })
+
+      const context = await mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: attempt.id,
+        context: {
+          sessionId,
+          baseBranch: 'main',
+          branch: 'dsh-task/patrol-49',
+          worktreePath: '/tmp/dsh-patrol-49',
+          agentPreset: 'coding',
+          provider: 'deepseek-official',
+          model: 'deepseek-chat',
+          reasoningEffort: 'high',
+          permissionPreset: 'workspace-write',
+        },
+      })
+      expect(context).toMatchObject({ issueId: issue.id, sessionId, sessionStartedAt: null, resultCommit: null })
+      const startedContext = await mounted.ctx.taskboard.markPatrolSessionStarted(attempt.id)
+      expect(startedContext.sessionStartedAt).not.toBeNull()
+      await expect(mounted.ctx.taskboard.listPatrolAttempts(run.id)).resolves.toMatchObject([
+        { id: attempt.id, sessionId, state: 'active' },
+      ])
+
+      const completed = await mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: attempt.id,
+        result: 'review_handoff',
+        resultCommit: '0123456789abcdef',
+        actor: patrolActor,
+      })
+      expect(completed).toMatchObject({ state: 'completed', result: 'review_handoff', error: null })
+      await expect(mounted.ctx.taskboard.getIssue(issue.id)).resolves.toMatchObject({ status: 'in_review' })
+      await expect(mounted.ctx.taskboard.getPatrolDevelopmentContext(issue.identifier)).resolves.toMatchObject({
+        sessionId,
+        baseBranch: 'main',
+        branch: 'dsh-task/patrol-49',
+        worktreePath: '/tmp/dsh-patrol-49',
+        resultCommit: '0123456789abcdef',
+      })
+      await mounted.ctx.taskboard.completePatrolRun({ runId: run.id, result: 'review_handoff' })
+    } finally {
+      await mounted.dispose()
+    }
+
+    const reopened = await mount(path)
+    try {
+      await expect(reopened.ctx.taskboard.getPatrolDevelopmentContext(issue.id)).resolves.toMatchObject({
+        sessionId,
+        resultCommit: '0123456789abcdef',
+      })
+    } finally {
+      await reopened.dispose()
+    }
+  })
+
+  it('allows another todo claim only after a permission-blocked Attempt becomes terminal', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000050')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Approval Skip' })
+      const first = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Needs approval', status: 'todo' })
+      const second = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Can proceed', status: 'todo' })
+      const third = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Must wait for another Run', status: 'todo' })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      const firstAttempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: first.id,
+        expectedVersion: first.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: second.id,
+        expectedVersion: second.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: firstAttempt.id,
+        context: {
+          sessionId: SessionId('session-patrol-50-a'),
+          baseBranch: 'main',
+          branch: 'dsh-task/patrol-50-a',
+          worktreePath: '/tmp/dsh-patrol-50-a',
+          agentPreset: 'coding',
+          provider: 'p',
+          model: 'm',
+          reasoningEffort: null,
+          permissionPreset: 'workspace-write',
+        },
+      })
+      await mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: firstAttempt.id,
+        result: 'permission_blocked',
+        error: 'bash requested full filesystem access',
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.getIssue(first.id)).resolves.toMatchObject({ status: 'blocked' })
+      await expect(mounted.ctx.taskboard.listComments(first.id)).resolves.toMatchObject([
+        { body: 'bash requested full filesystem access', actor: patrolActor },
+      ])
+
+      const secondAttempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: second.id,
+        expectedVersion: second.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      expect(secondAttempt.issueId).toBe(second.id)
+      await expect(mounted.ctx.taskboard.listPatrolAttempts(run.id)).resolves.toMatchObject([
+        { issueId: first.id, result: 'permission_blocked' },
+        { issueId: second.id, state: 'active' },
+      ])
+      await mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: secondAttempt.id,
+        result: 'blocked',
+        error: 'the implementation cannot proceed without user input',
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: third.id,
+        expectedVersion: third.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('requires done dependency commit snapshots and refuses User-assigned todo work', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000051')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Eligibility' })
+      const userIssue = await mounted.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Human-owned',
+        status: 'todo',
+        assignee: 'user',
+      })
+      const blocker = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Foundation', status: 'todo' })
+      const dependent = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Dependent', status: 'todo' })
+      const related = await mounted.ctx.taskboard.addRelation({
+        reference: dependent.id,
+        type: 'blocked_by',
+        relatedReference: blocker.id,
+        expectedVersion: dependent.version,
+        actor,
+      })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: userIssue.id,
+        expectedVersion: userIssue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: dependent.id,
+        expectedVersion: related.issue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+
+      const blockerAttempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: blocker.id,
+        expectedVersion: blocker.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      await mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: blockerAttempt.id,
+        context: {
+          sessionId: SessionId('session-patrol-dependency'),
+          baseBranch: 'main',
+          branch: 'dsh-task/patrol-dependency',
+          worktreePath: '/tmp/dsh-patrol-dependency',
+          agentPreset: 'coding',
+          provider: 'p',
+          model: 'm',
+          reasoningEffort: null,
+          permissionPreset: 'workspace-write',
+        },
+      })
+      const resultCommit = '1234567890abcdef'
+      await mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: blockerAttempt.id,
+        result: 'review_handoff',
+        resultCommit,
+        actor: patrolActor,
+      })
+      await mounted.ctx.taskboard.completePatrolRun({ runId: run.id, result: 'review_handoff' })
+      const reviewedBlocker = await mounted.ctx.taskboard.getIssue(blocker.id)
+      await mounted.ctx.taskboard.updateIssue({
+        reference: blocker.id,
+        status: 'done',
+        expectedVersion: reviewedBlocker!.version,
+        actor,
+      })
+
+      const integratedRun = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: integratedRun.id,
+        reference: dependent.id,
+        expectedVersion: related.issue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: integratedRun.id,
+        reference: dependent.id,
+        expectedVersion: related.issue.version,
+        dependencyCommits: { [blocker.id]: resultCommit, extra: resultCommit },
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: integratedRun.id,
+        reference: dependent.id,
+        expectedVersion: related.issue.version,
+        dependencyCommits: { [blocker.id]: resultCommit },
+        actor: patrolActor,
+      })).resolves.toMatchObject({ issueId: dependent.id, state: 'active' })
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('rolls back invalid Patrol claims, bindings, Session starts, and Attempt completions', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000052')
+    const otherWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000053')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Rejections' })
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId: otherWorkspaceId, title: 'Other Patrol' })
+      const candidate = await mounted.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Patrol-owned todo',
+        status: 'todo',
+        assignee: 'patrol_agent',
+      })
+      const backlog = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Backlog', status: 'backlog' })
+      const archived = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Archived', status: 'todo' })
+      const archivedIssue = await mounted.ctx.taskboard.archiveIssue({
+        reference: archived.id,
+        expectedVersion: archived.version,
+        actor,
+      })
+      const other = await mounted.ctx.taskboard.createIssue({
+        workspaceId: otherWorkspaceId,
+        title: 'Other Workspace',
+        status: 'todo',
+      })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: PatrolRunId('missing-run'),
+        reference: candidate.id,
+        expectedVersion: candidate.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_run_not_active' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: IssueId('missing-issue'),
+        expectedVersion: 1,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'issue_not_found' })
+      await expect(mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: candidate.id,
+        expectedVersion: 99,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      for (const invalid of [
+        { issue: backlog, version: backlog.version },
+        { issue: archivedIssue, version: archivedIssue.version },
+        { issue: other, version: other.version },
+      ]) {
+        await expect(mounted.ctx.taskboard.claimPatrolIssue({
+          runId: run.id,
+          reference: invalid.issue.id,
+          expectedVersion: invalid.version,
+          dependencyCommits: {},
+          actor: patrolActor,
+        })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      }
+
+      const claimed = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: candidate.id,
+        expectedVersion: candidate.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.getPatrolDevelopmentContext(candidate.id)).resolves.toBeUndefined()
+      const missingAttempt = PatrolAttemptId('missing-attempt')
+      await expect(mounted.ctx.taskboard.markPatrolSessionStarted(missingAttempt))
+        .rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+      await expect(mounted.ctx.taskboard.markPatrolSessionStarted(claimed.id))
+        .rejects.toMatchObject({ code: 'patrol_context_missing' })
+      const validContext = {
+        sessionId: SessionId('session-patrol-rejections'),
+        baseBranch: 'main',
+        branch: 'dsh-task/patrol-rejections',
+        worktreePath: '/tmp/dsh-patrol-rejections',
+        agentPreset: 'coding',
+        provider: 'p',
+        model: 'm',
+        reasoningEffort: null,
+        permissionPreset: 'workspace-write',
+      }
+      await expect(mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: missingAttempt,
+        context: validContext,
+      })).rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+      await expect(mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: claimed.id,
+        context: { ...validContext, branch: ' ' },
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: claimed.id,
+        context: { ...validContext, agentPreset: ' ' },
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await mounted.ctx.taskboard.bindPatrolDevelopmentContext({ attemptId: claimed.id, context: validContext })
+      await expect(mounted.ctx.taskboard.bindPatrolDevelopmentContext({
+        attemptId: claimed.id,
+        context: validContext,
+      })).rejects.toMatchObject({ code: 'patrol_context_exists' })
+      const started = await mounted.ctx.taskboard.markPatrolSessionStarted(claimed.id)
+      const startedAgain = await mounted.ctx.taskboard.markPatrolSessionStarted(claimed.id)
+      expect(startedAgain.sessionStartedAt).toBe(started.sessionStartedAt)
+      await expect(mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: claimed.id,
+        result: 'review_handoff',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: claimed.id,
+        result: 'blocked',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: claimed.id,
+        result: 'blocked',
+        error: 'requires user input',
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: claimed.id,
+        result: 'blocked',
+        error: 'second completion',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+      await expect(mounted.ctx.taskboard.markPatrolSessionStarted(claimed.id))
+        .rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+      await mounted.ctx.taskboard.completePatrolRun({ runId: run.id, result: 'blocked' })
+
+      const noContextIssue = await mounted.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'No context',
+        status: 'todo',
+      })
+      const noContextRun = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      const noContextAttempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: noContextRun.id,
+        reference: noContextIssue.id,
+        expectedVersion: noContextIssue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      await expect(mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: noContextAttempt.id,
+        result: 'review_handoff',
+        resultCommit: 'abcdef',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_context_missing' })
+      const claimedIssue = await mounted.ctx.taskboard.getIssue(noContextIssue.id)
+      await mounted.ctx.taskboard.updateIssue({
+        reference: noContextIssue.id,
+        status: 'blocked',
+        expectedVersion: claimedIssue!.version,
+        actor,
+      })
+      await expect(mounted.ctx.taskboard.completePatrolAttempt({
+        attemptId: noContextAttempt.id,
+        result: 'blocked',
+        error: 'stale owner',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
     } finally {
       await mounted.dispose()
     }
@@ -450,7 +934,7 @@ describe('SQLite Taskboard service', () => {
 
     const foreignPath = await databasePath()
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec('PRAGMA user_version = 2; PRAGMA application_id = 1234')
+    foreign.exec('PRAGMA user_version = 3; PRAGMA application_id = 1234')
     foreign.close()
     await expect(mount(foreignPath)).rejects.toThrow('application id 1234')
   })

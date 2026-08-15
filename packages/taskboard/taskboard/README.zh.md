@@ -14,9 +14,11 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 活动记录和评论的操作者会区分用户、Patrol Agent、Reviewer 与系统责任来源。
 - 一项依赖是同一条有向边：从来源查看为 `blocks`，从目标查看为 `blocked_by`。自环、重复、跨 Workspace 和成环依赖都会在不写入的情况下被拒绝。
 - `listWorkspaceRelations` 会把每条 Workspace 依赖以规范 `blocks` 视图返回一次，供时间轴消费方使用；`listRelations` 为详情界面保留相对于所请求 Issue 的方向。
-- 每个 Taskboard 的 Patrol 默认关闭并选中 `1h`。Policy 更新只接受 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h`；启用或修改间隔会从保存时刻重新排期，关闭则清除 `nextDueAt`，但不终止活跃 Run。
+- 每个 Taskboard 的 Patrol 默认关闭、选中 `1h`、使用 `workspace-write` 权限，并将新 Session 选项保持为空。Policy 更新只接受 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h`；启用时必须提供本地 Base Branch，启用或修改间隔会从保存时刻重新排期，关闭则清除 `nextDueAt`，但不终止活跃 Run。
 - 定时触发会消费一个到期时刻，并从原有固定节拍推进至当前时间之后，因此 Host 停机不会形成补跑队列。即使 Policy 已关闭，仍可手动触发一次 Run。
 - 整个 Host 最多保留一个活跃 Patrol Run。定时触发重叠会形成永久的 `skipped_global_busy` 历史记录；手动触发重叠则以繁忙拒绝。Run 完成后不能覆写其终态结果。
+- 一个 Run 拥有按顺序排列的 `PatrolAttempt` claim。领取操作会原子校验 `todo`、指派、Run 归属、乐观版本、前置 Issue 的 `done` 状态及其确切 commit 快照，再把 Issue 移到 `in_progress`。只有前一个 Attempt 为 `permission_blocked` 时，同一 Run 才能继续领取。
+- 每个由 Patrol 执行的 Issue 最多拥有一份 `PatrolDevelopmentContext`。其中确切的 Session id、Base Branch、分支、worktree、Agent Preset、模型选择和 Permission Preset 会在以后每次退回 `todo` 时继续保留；首次 Session 持久化会与 id 预留分别记录，进入 review handoff 时会记录结果 commit。绑定和 Attempt 历史都没有删除操作。
 
 稳定失败使用 `TaskboardError.code`；提供方保留本包声明的错误码。[Taskboard 子系统参考](../../../docs/subsystems/taskboard.md)负责公开值与服务参考。
 
@@ -30,6 +32,6 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 
 ## 已知限制与暂缓事项
 
-- 服务尚不暴露附件、Session 或 Git 绑定、执行设置和审查证据；后续 Taskboard 层会通过同一服务增加这些记录。
-- 固定间隔 Host timer 与 Agent 执行消费方会随 Session 和开发上下文层交付；本包只持有它们的持久调度操作，不会自行启动工作。
+- 服务尚不暴露附件或独立 Reviewer 证据；后续 Taskboard 层会通过同一服务增加这些记录。
+- 固定间隔 Host timer 与编排消费方会在 Session 和 Development Context 层之后交付；本包持有持久调度、领取、绑定和生命周期操作，但不会自行启动工作。
 - Taskboard 创建是隐式的，但 Workspace 删除保护由后续 Workspace 消费方安装；本包自身无法拦截 Workspace 移除。

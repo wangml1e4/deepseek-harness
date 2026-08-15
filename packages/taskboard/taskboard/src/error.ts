@@ -19,6 +19,11 @@ export type TaskboardErrorCode =
   | 'patrol_busy'
   | 'patrol_not_due'
   | 'patrol_run_not_active'
+  | 'patrol_attempt_not_active'
+  | 'patrol_issue_ineligible'
+  | 'patrol_context_exists'
+  | 'patrol_context_missing'
+  | 'patrol_policy_invalid'
 
 /** Taskboard failure with a machine-readable code. */
 export class TaskboardError extends Error {
