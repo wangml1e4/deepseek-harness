@@ -344,12 +344,11 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
   async updatePatrol(
     patch: Omit<UpdatePatrolPolicyInput, 'workspaceId' | 'expectedVersion'>,
   ): Promise<TaskboardActionResult> {
-    const patrol = this.snapshot.patrol
-    const workspaceId = this.snapshot.workspaceId
-    if (patrol === null || workspaceId === null) {
+    const context = this.patrolMutationContext()
+    if (context === null) {
       return this.fail('workspace_not_found', 'No Workspace Patrol Policy is active')
     }
-    const generation = this.activation
+    const { patrol, workspaceId, generation } = context
     return await this.mutate(
       () => this.remote.updatePatrol({
         ...patch,
@@ -369,12 +368,11 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
    * @returns settled mutation result.
    */
   async runPatrol(issue?: IssueReference): Promise<TaskboardActionResult> {
-    const patrol = this.snapshot.patrol
-    const workspaceId = this.snapshot.workspaceId
-    if (patrol === null || workspaceId === null) {
+    const context = this.patrolMutationContext()
+    if (context === null) {
       return this.fail('workspace_not_found', 'No Workspace Patrol Policy is active')
     }
-    const generation = this.activation
+    const { workspaceId, generation } = context
     return await this.mutate(
       () => this.remote.runPatrol({ workspaceId, ...issue === undefined ? {} : { issue } }),
       () => this.isActiveWorkspace(generation, workspaceId),
@@ -666,6 +664,19 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspaceRelations,
       actionError: null,
     })
+  }
+
+  /** Capture the Patrol records required by one Workspace-scoped mutation. */
+  private patrolMutationContext(): {
+    readonly patrol: TaskboardPatrolValue
+    readonly workspaceId: WorkspaceId
+    readonly generation: number
+  } | null {
+    const patrol = this.snapshot.patrol
+    const workspaceId = this.snapshot.workspaceId
+    return patrol === null || workspaceId === null
+      ? null
+      : { patrol, workspaceId, generation: this.activation }
   }
 
   /** Whether an operation still belongs to the Workspace snapshot that started it. */
