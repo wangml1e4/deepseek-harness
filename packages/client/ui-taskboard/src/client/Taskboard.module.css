@@ -289,6 +289,17 @@
 .issueForm textarea,
 .commentForm textarea { resize: vertical; }
 .detailSection { padding: 18px 0; border-bottom: 1px solid var(--dsw-alias-border-l1); }
+.attachmentHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.attachmentHeading h2 { margin-bottom: 3px; }
+.attachmentHeading p { margin: 0; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxxs-11); }
+.hiddenFileInput { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.attachmentList { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.attachmentRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 9px; background: var(--dsw-alias-bg-layer-1); }
+.attachmentMetadata { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.attachmentMetadata strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachmentMetadata span { color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxxs-11); }
+.attachmentActions { display: flex; align-items: center; gap: 4px; }
+.attachmentPreview { grid-column: 1 / -1; width: 100%; max-height: 260px; border-radius: 6px; object-fit: contain; background: var(--dsw-alias-bg-base); }
 .patrolHero {
   display: flex;
   align-items: center;

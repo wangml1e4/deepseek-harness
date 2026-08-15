@@ -6,7 +6,7 @@ The Taskboard subsystem records durable work owned by a registered Workspace. [`
 
 ## Values and identity
 
-Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `CommentId`, `ActivityId`, `RelationId`, `PatrolRunId`, `PatrolAttemptId`, and `TaskboardActorId` are branded opaque identities.
+Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `TaskboardAttachmentId`, `CommentId`, `ActivityId`, `RelationId`, `PatrolRunId`, `PatrolAttemptId`, and `TaskboardActorId` are branded opaque identities.
 
 Every Issue has exactly one status: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, or `canceled`. Priority is `none`, `urgent`, `high`, `medium`, or `low`; it is metadata and never changes manual board order. Active lists exclude archived Issues by default.
 
@@ -17,6 +17,8 @@ Every Issue has exactly one status: `backlog`, `todo`, `in_progress`, `in_review
 Every competing Issue mutation compares `expectedVersion` and increments the committed version. Status changes prepend an Issue to the destination column unless a Consumer supplies an explicit `sortOrder`; explicit order, never priority, controls later Patrol scans. Returning `in_review`, `blocked`, or `done` to `todo` requires a non-empty reason and appends that reason as a Comment in the same transaction.
 
 Issue archiving is reversible. The service has no permanent Issue, Comment, or Activity deletion operation. Comments and Activity use independent append sequences, distinguish User, Patrol Agent, Reviewer, and System actors, and record field-level before/after values. Removing a dependency deletes the live edge but retains its prior value in Activity. Moving an Issue with a live dependency rejects because the edge must remain within one Workspace.
+
+Attachment upload accepts unrestricted file types up to 25 MB, advances the owning Issue version, and records Activity. Metadata lists omit bytes and storage paths; content reads require both the owning Issue and opaque attachment id. Attachment deletion is the only permanent Taskboard deletion in version one and rejects unless the caller explicitly confirms it with the current Issue version.
 
 `TaskboardError.code` distinguishes missing records, version conflicts, frozen prefixes, invalid archive transitions, missing return reasons, and relation validation failures. Providers reject before commit and preserve the stable code.
 
@@ -46,13 +48,13 @@ An interrupted active Attempt can recover only through its stored Development Co
 
 ## Consumers and storage
 
-Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, and Activity consistent.
+Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, attachment metadata, and Activity consistent. Attachment bytes use opaque ids as owner-only filenames in an adjacent managed directory and never enter a Workspace repository.
 
 `@deepseek-ai/dsh-taskboard-remote` exposes the Service under the Typert `taskboard` namespace and validates Workspace identities against `ctx.workspaceRegistry`. Domain failures remain typed business results while carrier validation and infrastructure failures remain distinct. The browser API assembly mounts its generated Client contribution.
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
 
 ## Post-version-one GitHub plan
 
@@ -156,6 +158,34 @@ abstract listComments(reference: IssueReference): Promise<readonly Comment[]>
  * @returns append-only field changes in chronological order.
  */
 abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+/**
+ * Store one attachment and its metadata while advancing the owning Issue version.
+ * @param input - File bytes, metadata, optimistic version, and actor.
+ * @returns the updated Issue and stored attachment metadata.
+ */
+abstract addAttachment(input: AddAttachmentInput): Promise<TaskboardAttachmentMutation>
+
+/**
+ * List one Issue's attachments in upload order.
+ * @param reference - Stable Issue lookup.
+ * @returns durable attachment metadata without file bytes.
+ */
+abstract listAttachments(reference: IssueReference): Promise<readonly TaskboardAttachment[]>
+
+/**
+ * Read one attachment through its owning Issue.
+ * @param input - Issue and attachment identities.
+ * @returns durable metadata and exact stored bytes.
+ */
+abstract readAttachment(input: ReadAttachmentInput): Promise<TaskboardAttachmentContent>
+
+/**
+ * Permanently delete one explicitly confirmed attachment while retaining Activity history.
+ * @param input - attachment identity, optimistic Issue version, confirmation, and actor.
+ * @returns the updated owning Issue.
+ */
+abstract deleteAttachment(input: DeleteAttachmentInput): Promise<Issue>
 
 /**
  * List every directed dependency in one Workspace from its blocking Issue's perspective.
@@ -310,7 +340,7 @@ abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolRe
 abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:113`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:129`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -477,6 +507,34 @@ Host Remote adapter that keeps Workspace identity authoritative.
 @Remote('addComment') addComment(input: AddCommentInput): Promise<TaskboardRemoteResult<Comment>>
 
 /**
+ * List one Issue's attachment metadata without exposing Host paths.
+ * @param reference - opaque id or human-readable identifier.
+ * @returns ordered metadata or a stable business failure.
+ */
+@Remote('listAttachments') listAttachments(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardAttachmentListValue>>
+
+/**
+ * Decode and store one browser attachment through the Taskboard Service.
+ * @param input - metadata, canonical base64 bytes, optimistic version, and actor.
+ * @returns updated Issue and attachment metadata or a stable business failure.
+ */
+@Remote('addAttachment') addAttachment(input: TaskboardAttachmentUploadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentMutation>>
+
+/**
+ * Read one Issue-scoped attachment without exposing its Host storage path.
+ * @param input - owning Issue and attachment identities.
+ * @returns metadata and canonical base64 bytes or a stable business failure.
+ */
+@Remote('readAttachment') readAttachment(input: TaskboardAttachmentReadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentContentValue>>
+
+/**
+ * Permanently remove one attachment only after explicit confirmation.
+ * @param input - attachment identity, confirmation, optimistic version, and actor.
+ * @returns updated owning Issue or a stable business failure.
+ */
+@Remote('deleteAttachment') deleteAttachment(input: DeleteAttachmentInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
  * List one Issue's append-only Activity.
  * @param reference - Opaque id or human-readable identifier.
  * @returns ordered Activity or a stable business failure.
@@ -542,7 +600,7 @@ Host Remote adapter that keeps Workspace identity authoritative.
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-remote/src/index.ts:51`](../../packages/taskboard/taskboard-remote/src/index.ts)
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:58`](../../packages/taskboard/taskboard-remote/src/index.ts)
 
 <a id="taskboard-events"></a>
 
@@ -566,5 +624,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:589`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:651`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

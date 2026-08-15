@@ -3,7 +3,11 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import type {
   AddIssueRelationInput,
+  AddAttachmentInput,
   Activity,
+  TaskboardAttachment,
+  TaskboardAttachmentContent,
+  TaskboardAttachmentMutation,
   AddCommentInput,
   BindPatrolDevelopmentContextInput,
   BeginPatrolRunInput,
@@ -12,6 +16,7 @@ import type {
   CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
+  DeleteAttachmentInput,
   EnsureWorkspaceInput,
   FailPatrolRecoveryInput,
   Issue,
@@ -27,6 +32,7 @@ import type {
   RecordPatrolReviewInput,
   PatrolRun,
   PatrolRunId,
+  ReadAttachmentInput,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   UpdateIssueInput,
@@ -37,6 +43,7 @@ import type {
 
 export {
   ActivityId,
+  TaskboardAttachmentId,
   CommentId,
   IssueId,
   IssueIdentifier,
@@ -55,8 +62,12 @@ export {
   patrolIntervalMilliseconds,
 } from './patrol.ts'
 export type {
+  AddAttachmentInput,
   AddIssueRelationInput,
   Activity,
+  TaskboardAttachment,
+  TaskboardAttachmentContent,
+  TaskboardAttachmentMutation,
   ActivityChange,
   ActivityValue,
   AddCommentInput,
@@ -67,6 +78,7 @@ export type {
   CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
+  DeleteAttachmentInput,
   EnsureWorkspaceInput,
   FailPatrolRecoveryInput,
   Issue,
@@ -90,6 +102,7 @@ export type {
   PatrolReview,
   PatrolReviewVerdict,
   RecordPatrolReviewInput,
+  ReadAttachmentInput,
   PatrolRun,
   PatrolRunId as PatrolRunIdType,
   PatrolRunResult,
@@ -102,6 +115,9 @@ export type {
   VersionedIssueInput,
   WorkspaceTaskboard,
 } from './types.ts'
+
+/** Maximum accepted attachment size inherited from Dashi Taskboard. */
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -198,6 +214,34 @@ export abstract class TaskboardService extends Service {
    * @returns append-only field changes in chronological order.
    */
   abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+  /**
+   * Store one attachment and its metadata while advancing the owning Issue version.
+   * @param input - File bytes, metadata, optimistic version, and actor.
+   * @returns the updated Issue and stored attachment metadata.
+   */
+  abstract addAttachment(input: AddAttachmentInput): Promise<TaskboardAttachmentMutation>
+
+  /**
+   * List one Issue's attachments in upload order.
+   * @param reference - Stable Issue lookup.
+   * @returns durable attachment metadata without file bytes.
+   */
+  abstract listAttachments(reference: IssueReference): Promise<readonly TaskboardAttachment[]>
+
+  /**
+   * Read one attachment through its owning Issue.
+   * @param input - Issue and attachment identities.
+   * @returns durable metadata and exact stored bytes.
+   */
+  abstract readAttachment(input: ReadAttachmentInput): Promise<TaskboardAttachmentContent>
+
+  /**
+   * Permanently delete one explicitly confirmed attachment while retaining Activity history.
+   * @param input - attachment identity, optimistic Issue version, confirmation, and actor.
+   * @returns the updated owning Issue.
+   */
+  abstract deleteAttachment(input: DeleteAttachmentInput): Promise<Issue>
 
   /**
    * List every directed dependency in one Workspace from its blocking Issue's perspective.

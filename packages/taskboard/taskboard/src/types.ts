@@ -4,6 +4,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   ActivityId,
+  TaskboardAttachmentId,
   CommentId,
   IssueId,
   IssueIdentifier,
@@ -15,6 +16,7 @@ import type {
 
 export type {
   ActivityId,
+  TaskboardAttachmentId,
   CommentId,
   IssueId,
   IssueIdentifier,
@@ -383,6 +385,66 @@ export interface Comment {
   readonly actor: TaskboardActor
   /** ISO-8601 append instant. */
   readonly createdAt: string
+}
+
+/** Metadata for one file attached to an Issue. */
+export interface TaskboardAttachment {
+  /** Stable opaque attachment identity. */
+  readonly id: TaskboardAttachmentId
+  /** Issue that owns the attachment. */
+  readonly issueId: IssueId
+  /** Original user-visible filename. */
+  readonly name: string
+  /** Browser-supplied media type, or `application/octet-stream` when absent. */
+  readonly mediaType: string
+  /** Exact byte length stored by the Host. */
+  readonly size: number
+  /** Actor that uploaded the attachment. */
+  readonly actor: TaskboardActor
+  /** ISO-8601 upload instant. */
+  readonly createdAt: string
+}
+
+/** Attachment metadata and bytes returned through an authorized Host read. */
+export interface TaskboardAttachmentContent {
+  /** Durable attachment metadata. */
+  readonly attachment: TaskboardAttachment
+  /** Exact stored file bytes. */
+  readonly data: Uint8Array
+}
+
+/** Result of storing an attachment and advancing its owning Issue. */
+export interface TaskboardAttachmentMutation {
+  /** Updated owning Issue. */
+  readonly issue: Issue
+  /** Stored attachment metadata. */
+  readonly attachment: TaskboardAttachment
+}
+
+/** Input that stores one unrestricted file on an Issue. */
+export interface AddAttachmentInput extends VersionedIssueInput {
+  /** Original user-visible filename. */
+  readonly name: string
+  /** Browser-supplied media type; blank values resolve to `application/octet-stream`. */
+  readonly mediaType: string
+  /** File bytes, limited to 25 MiB by the Service. */
+  readonly data: Uint8Array
+}
+
+/** Input that reads one attachment only through its owning Issue. */
+export interface ReadAttachmentInput {
+  /** Stable owning Issue lookup. */
+  readonly reference: IssueReference
+  /** Stable attachment identity. */
+  readonly attachmentId: TaskboardAttachmentId
+}
+
+/** Input that explicitly confirms permanent attachment deletion. */
+export interface DeleteAttachmentInput extends VersionedIssueInput {
+  /** Stable attachment identity. */
+  readonly attachmentId: TaskboardAttachmentId
+  /** Explicit user confirmation; false is rejected without mutation. */
+  readonly confirmed: boolean
 }
 
 /** JSON-compatible value captured before or after an Issue mutation. */

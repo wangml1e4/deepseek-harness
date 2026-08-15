@@ -11,7 +11,7 @@ description: Manage DeepSeek Harness Taskboard work with taskctl. Use for Taskbo
 
 # Manage Taskboard
 
-Use `taskctl` for every Workspace Taskboard, Issue, relation, Activity, and Comment operation. Consume its JSON output. Use the exact Issue identifier returned by Taskboard or supplied by the user; never derive or rewrite its prefix.
+Use `taskctl` for every Workspace Taskboard, Issue, relation, Activity, Comment, and attachment operation. Consume its JSON output. Use the exact Issue identifier returned by Taskboard or supplied by the user; never derive or rewrite its prefix.
 
 Open only the relevant section of [references/cli.md](references/cli.md) when command syntax is needed.
 
@@ -28,6 +28,7 @@ Open only the relevant section of [references/cli.md](references/cli.md) when co
 ## Safety and consistency
 
 - Never delete an Issue. Archive it when the user wants it hidden, and restore it when needed.
+- Read attachments only after a `todo` Issue is claimed or while continuing the current Session's `in_progress` Issue. Delete an attachment only when the user explicitly requests permanent deletion; pass `--confirm` exactly once.
 - Use the latest returned `version` with `--if-version` for every versioned mutation.
 - Preserve existing scope when adding requirements or acceptance details.
 - Add only relations needed by the work. Use `blocks` and `blocked_by` for dependencies.

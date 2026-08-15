@@ -11,6 +11,9 @@ export type IssueIdentifier = Branded<'IssueIdentifier'>
 /** Stable opaque identity of one append-only Comment. */
 export type CommentId = Branded<'CommentId'>
 
+/** Stable opaque identity of one Issue attachment. */
+export type TaskboardAttachmentId = Branded<'TaskboardAttachmentId'>
+
 /** Stable opaque identity of a Taskboard mutation actor. */
 export type TaskboardActorId = Branded<'TaskboardActorId'>
 
@@ -51,6 +54,15 @@ export function IssueIdentifier(value: string): IssueIdentifier {
  */
 export function CommentId(value: string): CommentId {
   return value as CommentId
+}
+
+/**
+ * Brand a string as a {@link TaskboardAttachmentId}.
+ * @param value - Raw opaque identity.
+ * @returns the same string with the attachment id brand.
+ */
+export function TaskboardAttachmentId(value: string): TaskboardAttachmentId {
+  return value as TaskboardAttachmentId
 }
 
 /**

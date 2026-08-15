@@ -2,6 +2,8 @@
 
 import type {
   Activity,
+  TaskboardAttachment,
+  TaskboardAttachmentId,
   Comment,
   Issue,
   IssueReference,
@@ -11,6 +13,7 @@ import type {
   PatrolPolicy,
   PatrolReview,
   PatrolRun,
+  VersionedIssueInput,
 } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardErrorCode } from '@deepseek-ai/dsh-taskboard'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
@@ -54,6 +57,30 @@ export interface TaskboardCommentListValue {
 /** Ordered Activity list result. */
 export interface TaskboardActivityListValue {
   readonly items: readonly Activity[]
+}
+
+/** Ordered attachment metadata without file bytes. */
+export interface TaskboardAttachmentListValue {
+  readonly items: readonly TaskboardAttachment[]
+}
+
+/** Browser-safe attachment upload using canonical base64 bytes. */
+export interface TaskboardAttachmentUploadInput extends VersionedIssueInput {
+  readonly name: string
+  readonly mediaType: string
+  readonly data: string
+}
+
+/** Issue-scoped attachment read request. */
+export interface TaskboardAttachmentReadInput {
+  readonly reference: IssueReference
+  readonly attachmentId: TaskboardAttachmentId
+}
+
+/** Browser-safe attachment content returned as canonical base64. */
+export interface TaskboardAttachmentContentValue {
+  readonly attachment: TaskboardAttachment
+  readonly data: string
 }
 
 /** Ordered relation list result. */

@@ -30,6 +30,8 @@ Dashi 的 Apache-2.0 前端组件和交互逻辑可以用于改造 Board、List�
 
 Taskboard 是由 Service Definition、本地 SQLite Provider 与 Host、UI 和 Patrol Consumer 组成的能力接缝。Harness 持久化根目录下的一份 Taskboard 数据库会按 `WorkspaceId` 保存所有 Workspace 的记录；附件字节放在相邻受管目录中，其元数据仍在 SQLite 事务内。Taskboard 不会向 Workspace 仓库写入数据库或附件数据。Provider 使用带索引的表和事务保存 Issue 版本、评论、关系、活动与 Patrol Run，而不是把这些关系数据存进 `storage-domain` 记录。
 
+附件使用随机不透明 id 作为仅所有者可访问的受管文件名；原始文件名只作为元数据保存，绝不参与 Host 路径解析。按 Issue 限定的 Remote 方法通过规范 base64 传输数据且不暴露 Host 路径；每次读取都必须同时校验 Issue 与附件身份，之后才返回字节。
+
 第一版还会提供改造后的 `taskctl` CLI 和内置 `manage-taskboard` skill，二者都是 Taskboard Consumer。用户和交互式 Agent 会通过它们，针对 UI 使用的同一 Host Service 执行 Issue、评论、关系和查询操作。Patrol 的资格判断、原子认领、Session 绑定和生命周期写回会直接调用 Host Service，而不是要求模型通过 CLI 编排关键事务。
 
 甘特图排期沿用 Dashi 的人工模型。Issue 包含可选且按天记录的 `startDate` 和 `dueDate` 字段。未排期 Issue 仍保留在表格中，但只有两个日期都存在时，时间轴才会绘制时间条。拖动或缩放时间条会修改这些日期。`blocks` 关系会在已排期 Issue 之间绘制依赖线，但绝不会自动移动日期。

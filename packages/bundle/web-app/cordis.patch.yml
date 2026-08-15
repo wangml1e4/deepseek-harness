@@ -79,6 +79,7 @@
       name: '@deepseek-ai/dsh-taskboard-sqlite'
       config:
         path: !!js dshHomePath('taskboard.sqlite')
+        attachmentsPath: !!js dshHomePath('taskboard-attachments')
 
     # Local-only Git/worktree and persistent Session execution support. This
     # layer is side-effect free until a Patrol coordinator hands it a claim.

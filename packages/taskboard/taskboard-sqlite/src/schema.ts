@@ -3,6 +3,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import {
   ActivityId,
+  TaskboardAttachmentId,
   CommentId,
   IssueId,
   IssueIdentifier,
@@ -13,6 +14,7 @@ import {
 } from '@deepseek-ai/dsh-taskboard'
 import type {
   Activity,
+  TaskboardAttachment,
   Comment,
   Issue,
   IssueAssignee,
@@ -33,7 +35,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Current pre-release Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -76,6 +78,20 @@ export interface CommentRow {
   id: string
   issue_id: string
   body: string
+  actor_type: 'user' | 'patrol_agent' | 'reviewer' | 'system'
+  actor_id: string
+  actor_name: string
+  actor_avatar_url: string | null
+  created_at: string
+}
+
+/** Stored Issue attachment metadata row. */
+export interface AttachmentRow {
+  id: string
+  issue_id: string
+  name: string
+  media_type: string
+  size: number
   actor_type: 'user' | 'patrol_agent' | 'reviewer' | 'system'
   actor_id: string
   actor_name: string
@@ -294,6 +310,23 @@ export function openTaskboardDatabase(
 
       CREATE INDEX IF NOT EXISTS comments_issue_sequence
         ON comments(issue_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS attachments (
+        sequence         INTEGER PRIMARY KEY AUTOINCREMENT,
+        id               TEXT NOT NULL UNIQUE,
+        issue_id         TEXT NOT NULL REFERENCES issues(id),
+        name             TEXT NOT NULL,
+        media_type       TEXT NOT NULL,
+        size             INTEGER NOT NULL CHECK (size >= 0),
+        actor_type       TEXT NOT NULL CHECK (actor_type IN ('user', 'patrol_agent', 'reviewer', 'system')),
+        actor_id         TEXT NOT NULL,
+        actor_name       TEXT NOT NULL,
+        actor_avatar_url TEXT,
+        created_at       TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS attachments_issue_sequence
+        ON attachments(issue_id, sequence);
 
       CREATE TABLE IF NOT EXISTS activities (
         sequence         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -519,6 +552,28 @@ export function rowToComment(row: CommentRow): Comment {
     id: CommentId(row.id),
     issueId: IssueId(row.issue_id),
     body: row.body,
+    actor: {
+      type: row.actor_type,
+      id: TaskboardActorId(row.actor_id),
+      name: row.actor_name,
+      ...(row.actor_avatar_url === null ? {} : { avatarUrl: row.actor_avatar_url }),
+    },
+    createdAt: row.created_at,
+  }
+}
+
+/**
+ * Convert stored attachment metadata to its public value.
+ * @param row - SQLite attachment metadata row.
+ * @returns public attachment metadata.
+ */
+export function rowToAttachment(row: AttachmentRow): TaskboardAttachment {
+  return {
+    id: TaskboardAttachmentId(row.id),
+    issueId: IssueId(row.issue_id),
+    name: row.name,
+    mediaType: row.media_type,
+    size: row.size,
     actor: {
       type: row.actor_type,
       id: TaskboardActorId(row.actor_id),

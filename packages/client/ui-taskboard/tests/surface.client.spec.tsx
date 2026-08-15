@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { Issue, TaskboardActor, WorkspaceTaskboard } from '@deepseek-ai/dsh-taskboard/types'
+import type { Issue, TaskboardActor, TaskboardAttachment, WorkspaceTaskboard } from '@deepseek-ai/dsh-taskboard/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TaskboardPatrolValue } from '@deepseek-ai/dsh-taskboard-remote/types'
 import { TaskboardSurface, type TaskboardSurfaceProps } from '../src/client/TaskboardSurface.tsx'
@@ -123,6 +123,7 @@ function snapshot(overrides: Partial<TaskboardSnapshot> = {}): TaskboardSnapshot
     detailPanel: null,
     detailPhase: 'idle',
     comments: [],
+    attachments: [],
     activities: [],
     workspaceRelations: [],
     relations: [],
@@ -252,6 +253,9 @@ function mountDetails(current: TaskboardSnapshot) {
     updateIssue: vi.fn(async () => ({ ok: true as const })),
     archiveIssue: vi.fn(async () => ({ ok: true as const })),
     addComment: vi.fn(async () => ({ ok: true as const })),
+    addAttachment: vi.fn(async () => ({ ok: true as const })),
+    readAttachment: vi.fn(async (attachment: TaskboardAttachment) => ({ ok: true as const, value: { attachment, data: 'iVBORw==' } })),
+    deleteAttachment: vi.fn(async () => ({ ok: true as const })),
     addRelation: vi.fn(async () => ({ ok: true as const })),
     removeRelation: vi.fn(async () => ({ ok: true as const })),
     updatePatrol: vi.fn(async () => ({ ok: true as const })),
@@ -291,6 +295,49 @@ describe('TaskboardDetails', () => {
     expect(screen.queryByText('永久删除')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '归档 Issue' }))
     await waitFor(() => { expect(view.props.archiveIssue).toHaveBeenCalledWith(selected) })
+  })
+
+  it('uploads unrestricted files, previews images, downloads through Host reads, and confirms deletion', async () => {
+    const selected = issue()
+    const image = {
+      id: 'attachment-image' as never,
+      issueId: selected.id,
+      name: 'diagram.png',
+      mediaType: 'image/png',
+      size: 6,
+      actor,
+      createdAt: '2026-08-16T00:00:00.000Z',
+    }
+    const fileAttachment = { ...image, id: 'attachment-document' as never, name: 'notes.pdf', mediaType: 'application/pdf' }
+    const view = mountDetails(snapshot({
+      selectedIssue: selected,
+      detailPanel: 'issue',
+      detailPhase: 'ready',
+      attachments: [image, fileAttachment],
+    }))
+
+    expect(screen.getByText('diagram.png')).toBeTruthy()
+    expect(screen.getByText('notes.pdf')).toBeTruthy()
+    const file = new File([Uint8Array.of(1, 2)], 'evidence.bin', { type: '' })
+    fireEvent.change(screen.getByLabelText('添加附件'), { target: { files: [file] } })
+    await waitFor(() => { expect(view.props.addAttachment).toHaveBeenCalledWith(file) })
+
+    fireEvent.click(screen.getByRole('button', { name: '预览 diagram.png' }))
+    await waitFor(() => { expect(screen.getByRole('img', { name: 'diagram.png' })).toBeTruthy() })
+    expect(view.props.readAttachment).toHaveBeenCalledWith(image)
+
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    fireEvent.click(screen.getByRole('button', { name: '下载 notes.pdf' }))
+    await waitFor(() => { expect(view.props.readAttachment).toHaveBeenCalledWith(fileAttachment) })
+    expect(download).toHaveBeenCalledOnce()
+    download.mockRestore()
+
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    fireEvent.click(screen.getByRole('button', { name: '删除 diagram.png' }))
+    expect(view.props.deleteAttachment).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '删除 diagram.png' }))
+    expect(view.props.deleteAttachment).toHaveBeenCalledWith(image, true)
+    confirm.mockRestore()
   })
 
   it('configures the disabled-by-default Patrol and can trigger one Run', async () => {

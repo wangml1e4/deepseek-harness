@@ -6,7 +6,7 @@
 
 中间界面基于同一个 `TaskboardController` 快照提供 Dashboard、Board、List 和 Gantt 视图。Dashboard 从当前 Issue 列表推导完成率、活动中、逾期、状态、优先级和最近工作摘要。Board 渲染七个生命周期列，并通过 Issue 乐观版本持久化拖拽移动。List 按生命周期状态分组展示同一批 Issue。Gantt 会在表格中保留未排期 Issue，只在开始和截止日期都存在时绘制条形，并在已排期 Issue 之间绘制 `blocks` 连线。拖动或调整一个条形只会更新该 Issue 的含首尾日期，不会移动依赖项。搜索以及状态、优先级和标签筛选会一致应用于全部视图，所选视图、甘特图时间刻度与筛选条件以 `dsh.taskboard.view.v1` 为键保存在浏览器存储中。
 
-详情界面可编辑标题、Markdown 描述、状态、优先级、负责人、标签和按天记录的日期。它会列出仅追加的评论与活动记录、管理有向依赖关系，并在不提供永久删除的前提下归档 Issue。把 `in_review`、`blocked` 或 `done` Issue 退回 `todo` 时，提交前会显示必填的原因字段。
+详情界面可编辑标题、Markdown 描述、状态、优先级、负责人、标签和按天记录的日期。它会列出仅追加的评论与活动记录、管理有向依赖关系，并在不提供永久删除的前提下归档 Issue。附件支持单个不超过 25 MB 的任意文件类型；界面会列出元数据、预览图片、通过受控 Host Remote 下载字节，并且只会在浏览器确认后调用永久附件删除。把 `in_review`、`blocked` 或 `done` Issue 退回 `todo` 时，提交前会显示必填的原因字段。
 
 Taskboard 顶栏会在现有右侧详情栏中打开 Patrol 设置。开关默认关闭；面板可保存 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h` 固定间隔，以及 Base Branch、Agent Preset、provider、model、reasoning effort 和 Permission Preset 选项。它会显示下次到期时间、活跃状态、永久 Run／Attempt 历史和手工 `Run now` 操作。合格的 `todo` Issue 也提供定向运行操作。Issue 详情会显示已绑定 Session、分支、Base Branch、结果 commit 和独立 Reviewer 结论。人工审查可把 `in_review` 移至 `done`，或在提供必填原因后退回 `todo`；它绝不合并代码。
 
@@ -26,6 +26,4 @@ Web 无密钥 fixture 会暴露与正式环境相同的生成端点名，以及�
 
 ## 已知限制与暂缓事项
 
-- **未完成 Run 的恢复尚未交付**：持久 Patrol 历史已经可见，但进程丢失后的恢复属于恢复层。
-- **附件尚无浏览器界面**：当前详情栏只覆盖 Issue 字段、评论、活动记录和关系。
 - **归档后 Issue 会被隐藏**：Host 支持恢复，但该包尚未提供归档浏览器或恢复操作。

@@ -1536,6 +1536,17 @@ interface FxTaskboardComment {
   createdAt: string
 }
 
+interface FxTaskboardAttachment {
+  id: string
+  issueId: string
+  name: string
+  mediaType: string
+  size: number
+  actor: FxTaskboardActor
+  createdAt: string
+  data: string
+}
+
 interface FxTaskboardActivity {
   id: string
   issueId: string
@@ -1735,6 +1746,16 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     id: 'fx-comment-1', issueId: 'fx-issue-1', body: 'Keep the Taskboard scoped to its Workspace.',
     actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' }, createdAt: fixtureTaskboardTime,
   }]
+  const taskboardAttachments: FxTaskboardAttachment[] = options.empty ? [] : [{
+    id: 'fx-taskboard-attachment-1',
+    issueId: 'fx-issue-1',
+    name: 'taskboard-preview.png',
+    mediaType: 'image/png',
+    size: FIXTURE_IMAGE_REF.bytes,
+    actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' },
+    createdAt: fixtureTaskboardTime,
+    data: FIXTURE_IMAGE_DATA,
+  }]
   const taskboardActivities: FxTaskboardActivity[] = []
   const taskboardRelations: FxTaskboardRelation[] = options.empty ? [] : [{
     id: 'fx-relation-1', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-2',
@@ -1742,6 +1763,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   }]
   let nextTaskboardIssue = 4
   let nextTaskboardComment = 2
+  let nextTaskboardAttachment = 2
   let nextTaskboardActivity = 1
   let nextTaskboardRelation = taskboardRelations.length + 1
   // Registry-global archive set mirroring the host: archived sessions keep
@@ -3447,6 +3469,84 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       taskboardComments.push(comment)
       return taskboardOk({ ...comment, actor: { ...comment.actor } })
     },
+    listAttachments(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      return taskboardOk({
+        items: taskboardAttachments
+          .filter(attachment => attachment.issueId === issue.id)
+          .map(({ data: _data, ...attachment }) => ({ ...attachment, actor: { ...attachment.actor } })),
+      })
+    },
+    addAttachment(input: {
+      reference: string
+      expectedVersion: number
+      name: string
+      mediaType: string
+      data: string
+      actor: FxTaskboardActor
+    }) {
+      const resolved = requireTaskboardIssue<{ issue: FxTaskboardIssue; attachment: Omit<FxTaskboardAttachment, 'data'> }>(
+        input.reference,
+        input.expectedVersion,
+      )
+      if ('result' in resolved) return resolved.result
+      const data = Uint8Array.from(atob(input.data), character => character.charCodeAt(0))
+      const attachment: FxTaskboardAttachment = {
+        id: `fx-taskboard-attachment-${nextTaskboardAttachment++}`,
+        issueId: resolved.issue.id,
+        name: input.name,
+        mediaType: input.mediaType,
+        size: data.byteLength,
+        actor: { ...input.actor },
+        createdAt: taskboardNow(),
+        data: input.data,
+      }
+      taskboardAttachments.push(attachment)
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{
+        field: 'attachments', before: null, after: { id: attachment.id, name: attachment.name },
+      }])
+      const { data: _data, ...metadata } = attachment
+      return taskboardOk({ issue: copyTaskboardIssue(resolved.issue), attachment: metadata })
+    },
+    readAttachment(input: { reference: string; attachmentId: string }) {
+      const issue = findTaskboardIssue(input.reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${input.reference}' does not exist`)
+      const found = taskboardAttachments.find(attachment => (
+        attachment.id === input.attachmentId && attachment.issueId === issue.id
+      ))
+      if (found === undefined) {
+        return taskboardReject('attachment_not_found', `Attachment '${input.attachmentId}' does not exist`)
+      }
+      const { data, ...attachment } = found
+      return taskboardOk({ attachment: { ...attachment, actor: { ...attachment.actor } }, data })
+    },
+    deleteAttachment(input: {
+      reference: string
+      attachmentId: string
+      expectedVersion: number
+      confirmed: boolean
+      actor: FxTaskboardActor
+    }) {
+      if (!input.confirmed) return taskboardReject('attachment_confirmation_required', 'Attachment deletion requires confirmation')
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      const index = taskboardAttachments.findIndex(attachment => (
+        attachment.id === input.attachmentId && attachment.issueId === resolved.issue.id
+      ))
+      if (index === -1) return taskboardReject('attachment_not_found', `Attachment '${input.attachmentId}' does not exist`)
+      const removed = taskboardAttachments[index]
+      if (removed === undefined) throw new Error('fixture attachment index disappeared')
+      taskboardAttachments.splice(index, 1)
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{
+        field: 'attachments', before: { id: removed.id, name: removed.name }, after: null,
+      }])
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
     listActivities(reference: string) {
       const issue = findTaskboardIssue(reference)
       if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
@@ -3679,6 +3779,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/restoreIssue': return Promise.resolve(taskboardRemotes.restoreIssue(args.input as never))
         case 'taskboard/listComments': return Promise.resolve(taskboardRemotes.listComments(args.reference as string))
         case 'taskboard/addComment': return Promise.resolve(taskboardRemotes.addComment(args.input as never))
+        case 'taskboard/listAttachments': return Promise.resolve(taskboardRemotes.listAttachments(args.reference as string))
+        case 'taskboard/addAttachment': return Promise.resolve(taskboardRemotes.addAttachment(args.input as never))
+        case 'taskboard/readAttachment': return Promise.resolve(taskboardRemotes.readAttachment(args.input as never))
+        case 'taskboard/deleteAttachment': return Promise.resolve(taskboardRemotes.deleteAttachment(args.input as never))
         case 'taskboard/listActivities': return Promise.resolve(taskboardRemotes.listActivities(args.reference as string))
         case 'taskboard/listWorkspaceRelations': {
           return Promise.resolve(taskboardRemotes.listWorkspaceRelations(args.workspaceId as WorkspaceId))

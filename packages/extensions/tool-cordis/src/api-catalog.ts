@@ -1814,6 +1814,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'append-only field changes in chronological order.',
       },
       {
+        signature: 'abstract addAttachment(input: AddAttachmentInput): Promise<TaskboardAttachmentMutation>',
+        description: 'Store one attachment and its metadata while advancing the owning Issue version.',
+        parameters: [{ name: 'input', description: 'File bytes, metadata, optimistic version, and actor.' }],
+        returns: 'the updated Issue and stored attachment metadata.',
+      },
+      {
+        signature: 'abstract listAttachments(reference: IssueReference): Promise<readonly TaskboardAttachment[]>',
+        description: 'List one Issue\'s attachments in upload order.',
+        parameters: [{ name: 'reference', description: 'Stable Issue lookup.' }],
+        returns: 'durable attachment metadata without file bytes.',
+      },
+      {
+        signature: 'abstract readAttachment(input: ReadAttachmentInput): Promise<TaskboardAttachmentContent>',
+        description: 'Read one attachment through its owning Issue.',
+        parameters: [{ name: 'input', description: 'Issue and attachment identities.' }],
+        returns: 'durable metadata and exact stored bytes.',
+      },
+      {
+        signature: 'abstract deleteAttachment(input: DeleteAttachmentInput): Promise<Issue>',
+        description: 'Permanently delete one explicitly confirmed attachment while retaining Activity history.',
+        parameters: [{ name: 'input', description: 'attachment identity, optimistic Issue version, confirmation, and actor.' }],
+        returns: 'the updated owning Issue.',
+      },
+      {
         signature: 'abstract listWorkspaceRelations(workspaceId: EnsureWorkspaceInput[\'workspaceId\']): Promise<readonly IssueRelation[]>',
         description: 'List every directed dependency in one Workspace from its blocking Issue\'s perspective.',
         parameters: [{ name: 'workspaceId', description: 'Workspace whose canonical dependency records are listed.' }],
@@ -2078,6 +2102,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Append one attributed Comment.',
         parameters: [{ name: 'input', description: 'Issue reference, body, and author.' }],
         returns: 'appended Comment or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listAttachments\') listAttachments(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardAttachmentListValue>>',
+        description: 'List one Issue\'s attachment metadata without exposing Host paths.',
+        parameters: [{ name: 'reference', description: 'opaque id or human-readable identifier.' }],
+        returns: 'ordered metadata or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'addAttachment\') addAttachment(input: TaskboardAttachmentUploadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentMutation>>',
+        description: 'Decode and store one browser attachment through the Taskboard Service.',
+        parameters: [{ name: 'input', description: 'metadata, canonical base64 bytes, optimistic version, and actor.' }],
+        returns: 'updated Issue and attachment metadata or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'readAttachment\') readAttachment(input: TaskboardAttachmentReadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentContentValue>>',
+        description: 'Read one Issue-scoped attachment without exposing its Host storage path.',
+        parameters: [{ name: 'input', description: 'owning Issue and attachment identities.' }],
+        returns: 'metadata and canonical base64 bytes or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'deleteAttachment\') deleteAttachment(input: DeleteAttachmentInput): Promise<TaskboardRemoteResult<Issue>>',
+        description: 'Permanently remove one attachment only after explicit confirmation.',
+        parameters: [{ name: 'input', description: 'attachment identity, confirmation, optimistic version, and actor.' }],
+        returns: 'updated owning Issue or a stable business failure.',
       },
       {
         signature: '@Remote(\'listActivities\') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>',
@@ -3037,6 +3085,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
   {
+    name: 'AddAttachmentInput',
+    declaration: 'export interface AddAttachmentInput extends VersionedIssueInput {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: Uint8Array;\n}',
+  },
+  {
     name: 'AddCommentInput',
     declaration: 'export interface AddCommentInput {\n    readonly reference: IssueReference;\n    readonly body: string;\n    readonly actor: TaskboardActor;\n}',
   },
@@ -3383,6 +3435,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CredentialRef',
     declaration: 'export type CredentialRef = Branded<\'CredentialRef\'>;',
+  },
+  {
+    name: 'DeleteAttachmentInput',
+    declaration: 'export interface DeleteAttachmentInput extends VersionedIssueInput {\n    readonly attachmentId: TaskboardAttachmentId;\n    readonly confirmed: boolean;\n}',
   },
   {
     name: 'DiffCallView',
@@ -4169,6 +4225,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PruneResult {\n    readonly pruned: readonly PrunedEntry[];\n    readonly charsRemoved: number;\n}',
   },
   {
+    name: 'ReadAttachmentInput',
+    declaration: 'export interface ReadAttachmentInput {\n    readonly reference: IssueReference;\n    readonly attachmentId: TaskboardAttachmentId;\n}',
+  },
+  {
     name: 'ReadFileLine',
     declaration: 'export interface ReadFileLine {\n    number: number;\n    text: string;\n}',
   },
@@ -4885,12 +4945,44 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type TaskboardActorId = Branded<\'TaskboardActorId\'>;',
   },
   {
+    name: 'TaskboardAttachment',
+    declaration: 'export interface TaskboardAttachment {\n    readonly id: TaskboardAttachmentId;\n    readonly issueId: IssueId;\n    readonly name: string;\n    readonly mediaType: string;\n    readonly size: number;\n    readonly actor: TaskboardActor;\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'TaskboardAttachmentContent',
+    declaration: 'export interface TaskboardAttachmentContent {\n    readonly attachment: TaskboardAttachment;\n    readonly data: Uint8Array;\n}',
+  },
+  {
+    name: 'TaskboardAttachmentContentValue',
+    declaration: 'export interface TaskboardAttachmentContentValue {\n    readonly attachment: TaskboardAttachment;\n    readonly data: string;\n}',
+  },
+  {
+    name: 'TaskboardAttachmentId',
+    declaration: 'export type TaskboardAttachmentId = Branded<\'TaskboardAttachmentId\'>;',
+  },
+  {
+    name: 'TaskboardAttachmentListValue',
+    declaration: 'export interface TaskboardAttachmentListValue {\n    readonly items: readonly TaskboardAttachment[];\n}',
+  },
+  {
+    name: 'TaskboardAttachmentMutation',
+    declaration: 'export interface TaskboardAttachmentMutation {\n    readonly issue: Issue;\n    readonly attachment: TaskboardAttachment;\n}',
+  },
+  {
+    name: 'TaskboardAttachmentReadInput',
+    declaration: 'export interface TaskboardAttachmentReadInput {\n    readonly reference: IssueReference;\n    readonly attachmentId: TaskboardAttachmentId;\n}',
+  },
+  {
+    name: 'TaskboardAttachmentUploadInput',
+    declaration: 'export interface TaskboardAttachmentUploadInput extends VersionedIssueInput {\n    readonly name: string;\n    readonly mediaType: string;\n    readonly data: string;\n}',
+  },
+  {
     name: 'TaskboardCommentListValue',
     declaration: 'export interface TaskboardCommentListValue {\n    readonly items: readonly Comment[];\n}',
   },
   {
     name: 'TaskboardErrorCode',
-    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_review_exists\' | \'patrol_policy_invalid\';',
+    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'attachment_not_found\' | \'attachment_too_large\' | \'attachment_invalid\' | \'attachment_confirmation_required\' | \'attachment_storage_unavailable\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_review_exists\' | \'patrol_policy_invalid\';',
   },
   {
     name: 'TaskboardIssueListValue',

@@ -7,6 +7,7 @@
 ## 配置与持久性
 
 - `path` 是 SQLite 文件名，测试可使用 `:memory:`。提供方以仅所有者可访问的权限创建父目录，并以 `0600` 模式创建缺失的数据库文件。
+- `attachmentsPath` 选择仅所有者可访问的受管字节目录。文件数据库默认使用 `<path>.attachments`；使用 `:memory:` 时，必须先提供该选项才能执行附件操作。不透明附件 id 是唯一的受管文件名，因此原始文件名绝不参与路径解析。
 - `journalMode` 默认为 `wal`，`busyTimeoutMs` 默认为 5000。外键保持启用。
 - 数据库带固定 application id 和单调 schema 版本。存在内容但未标版本的数据库、外来 application id 或任何不支持的版本都会在服务初始化时失败。
 - Issue 变更、版本更新、活动记录以及退回时必需的评论在同一事务中提交。评论和活动记录的序列列即使在时间戳相同时也能保持追加顺序。
@@ -15,6 +16,7 @@
 - Patrol Run 行没有删除操作。部分唯一索引保证即使多个调度调用方竞争，所有 Workspace 中仍最多只有一个活跃 Run。
 - 部分唯一索引会限制每个 Run 和每个 Issue 最多只有一个活跃 Attempt。领取、生命周期、阻塞 Comment、Activity、Session 绑定和结果 commit 写入会与其权威 Issue 变更处于同一个 SQLite 事务中。
 - 独立 Reviewer 证据仅可追加。唯一 Attempt 引用会阻止重复审查，外键则保留所属 Attempt、Issue 和 Reviewer Session 身份。
+- 附件元数据在 SQLite 中有序并以事务方式保存，字节则位于数据库相邻目录，绝不进入 Workspace。上传会先使用仅所有者可访问的独占临时文件和原子重命名，再提交元数据；确认删除会先隔离字节，再提交元数据移除。两种操作都会推进 Issue 版本并保留活动证据。
 
 该提供方供应 `TaskboardService`；消费方依赖 [`@deepseek-ai/dsh-taskboard`](../taskboard/README.md)，绝不依赖本包。
 

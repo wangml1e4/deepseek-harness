@@ -6,7 +6,9 @@ The Host Remote Consumer for the Workspace-owned Taskboard capability. It expose
 
 ## Remote methods
 
-The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, Activity, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`.
+The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, Activity, attachments, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`.
+
+Attachment metadata is listed separately from bytes. Upload and read methods carry canonical base64 through the controlled Host namespace, enforce the 25 MB limit before persistence, scope every read to its owning Issue, and never return the managed filesystem path. Deletion delegates explicit confirmation and optimistic version validation to the Taskboard Service.
 
 Workspace-scoped methods reject unknown Workspace ids before touching Taskboard state. Reads that need the implicit Taskboard ensure it from the current registered Workspace title. Moving an Issue also verifies and ensures the destination Workspace.
 
@@ -27,5 +29,4 @@ No direct effect.
 ## Known Limitations and Deferred Work
 
 - `taskboard/changed` is forwarded by the browser API assembly for active-Workspace invalidation; the event carries no Issue payload.
-- Attachments are not in this protocol layer yet.
 - The Remote is a Host-local application API; it does not publish or synchronize GitHub Issues.

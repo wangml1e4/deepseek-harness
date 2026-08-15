@@ -6,7 +6,7 @@
 
 ## 命令与输出
 
-CLI 覆盖 Workspace 元数据；Issue 列表、读取、创建、更新、移动、归档和恢复；只追加的评论与活动记录；依赖关系；以及 Patrol 策略、历史、手工 Run 和 Issue 证据操作。使用 `taskctl <resource> <action>` 调用；选项参考随 [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md) 一起提供。
+CLI 覆盖 Workspace 元数据；Issue 列表、读取、创建、更新、移动、归档和恢复；只追加的评论与活动记录；附件上传、列表、下载和确认删除；依赖关系；以及 Patrol 策略、历史、手工 Run 和 Issue 证据操作。使用 `taskctl <resource> <action>` 调用；选项参考随 [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md) 一起提供。
 
 每次调用只写出一个 JSON 对象。成功输出采用 `{ "schemaVersion": 1, "result": ... }`；失败输出采用 `{ "schemaVersion": 1, "error": { "code", "message" } }`。
 
@@ -37,5 +37,5 @@ CLI 覆盖 Workspace 元数据；Issue 列表、读取、创建、更新、移�
 ## 已知限制与暂缓事项
 
 - `taskctl` 需要已运行的 Web Host，不会自行启动 Host。
-- 附件尚未暴露。Patrol 资格、认领和生命周期回写仍是 Host 所属事务，不由模型编写 CLI 步骤。
+- Patrol 资格、认领和生命周期回写仍是 Host 所属事务，不由模型编写 CLI 步骤。
 - CLI 不会发布或同步 GitHub Issue。

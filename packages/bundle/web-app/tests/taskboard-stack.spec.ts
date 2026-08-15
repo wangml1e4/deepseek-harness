@@ -26,7 +26,10 @@ describe('Web Taskboard stack', () => {
     expect(ids.indexOf('ui-workspace')).toBeLessThan(ids.indexOf('ui-taskboard'))
     expect(rows.find(row => row.id === 'taskboard-sqlite')).toMatchObject({
       name: '@deepseek-ai/dsh-taskboard-sqlite',
-      config: { path: { __jsExpr: "dshHomePath('taskboard.sqlite')" } },
+      config: {
+        path: { __jsExpr: "dshHomePath('taskboard.sqlite')" },
+        attachmentsPath: { __jsExpr: "dshHomePath('taskboard-attachments')" },
+      },
     })
     expect(rows.find(row => row.id === 'taskboard-remote')).toMatchObject({
       name: '@deepseek-ai/dsh-taskboard-remote',

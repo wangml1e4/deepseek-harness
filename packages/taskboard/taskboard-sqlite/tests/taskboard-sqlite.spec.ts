@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { mkdtemp, rm, stat } from 'node:fs/promises'
+import { mkdtemp, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { IssueId, PatrolAttemptId, PatrolRunId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
+import { IssueId, MAX_ATTACHMENT_BYTES, PatrolAttemptId, PatrolRunId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
 import type { Issue } from '@deepseek-ai/dsh-taskboard'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import SqliteTaskboard from '../src/index.ts'
+import SqliteTaskboard, { SCHEMA_VERSION } from '../src/index.ts'
 import type { Config } from '../src/index.ts'
 
 const tempDirs: string[] = []
@@ -40,6 +40,261 @@ async function mount(path: string, config: Omit<Config, 'path'> = { journalMode:
 }
 
 describe('SQLite Taskboard service', () => {
+  it('rejects a blank managed attachment directory', () => {
+    expect(() => SqliteTaskboard.Config({
+      path: 'taskboard.db',
+      attachmentsPath: '',
+    })).toThrow()
+  })
+
+  it('persists attachment bytes outside SQLite and requires confirmation before deletion', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000040')
+    const mounted = await mount(path)
+    let attachmentId: string
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Attachment Store' })
+      const issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Keep evidence' })
+      const attachmentActor = { ...actor, avatarUrl: 'https://example.com/avatar.png' }
+      const added = await mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: '../diagram.png',
+        mediaType: 'image/png',
+        data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+        actor: attachmentActor,
+      })
+      attachmentId = added.attachment.id
+      expect(added).toMatchObject({
+        issue: { id: issue.id, version: 2 },
+        attachment: {
+          id: attachmentId,
+          issueId: issue.id,
+          name: '../diagram.png',
+          mediaType: 'image/png',
+          size: 4,
+          actor: attachmentActor,
+        },
+      })
+      await expect(mounted.ctx.taskboard.listAttachments(issue.id)).resolves.toEqual([added.attachment])
+      await expect(mounted.ctx.taskboard.readAttachment({
+        reference: issue.id,
+        attachmentId: added.attachment.id,
+      })).resolves.toEqual({ attachment: added.attachment, data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) })
+      const other = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Other Issue' })
+      await expect(mounted.ctx.taskboard.readAttachment({
+        reference: other.id,
+        attachmentId: added.attachment.id,
+      })).rejects.toMatchObject({ code: 'attachment_not_found' })
+      await expect(stat(join(`${path}.attachments`, attachmentId))).resolves.toMatchObject({ size: 4 })
+    } finally {
+      await mounted.dispose()
+    }
+
+    const reopened = await mount(path)
+    try {
+      const [attachment] = await reopened.ctx.taskboard.listAttachments('ATTACHMENTST-1' as never)
+      expect(attachment?.id).toBe(attachmentId!)
+      await expect(reopened.ctx.taskboard.readAttachment({
+        reference: 'ATTACHMENTST-1' as never,
+        attachmentId: attachment!.id,
+      })).resolves.toMatchObject({ data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) })
+      const issue = await reopened.ctx.taskboard.getIssue('ATTACHMENTST-1' as never)
+      await expect(reopened.ctx.taskboard.deleteAttachment({
+        reference: issue!.id,
+        attachmentId: attachment!.id,
+        expectedVersion: issue!.version,
+        confirmed: false,
+        actor,
+      })).rejects.toMatchObject({ code: 'attachment_confirmation_required' })
+      const deleted = await reopened.ctx.taskboard.deleteAttachment({
+        reference: issue!.id,
+        attachmentId: attachment!.id,
+        expectedVersion: issue!.version,
+        confirmed: true,
+        actor,
+      })
+      expect(deleted).toMatchObject({ id: issue!.id, version: 3 })
+      await expect(reopened.ctx.taskboard.listAttachments(issue!.id)).resolves.toEqual([])
+      await expect(reopened.ctx.taskboard.readAttachment({
+        reference: issue!.id,
+        attachmentId: attachment!.id,
+      })).rejects.toMatchObject({ code: 'attachment_not_found' })
+      await expect(stat(join(`${path}.attachments`, attachment!.id))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(reopened.ctx.taskboard.listActivities(issue!.id)).resolves.toMatchObject([
+        { changes: [{ field: 'attachments', before: null, after: { id: attachment!.id, name: '../diagram.png' } }] },
+        { changes: [{ field: 'attachments', before: { id: attachment!.id, name: '../diagram.png' }, after: null }] },
+      ])
+    } finally {
+      await reopened.dispose()
+    }
+  })
+
+  it('rejects blank names and files above the 25 MB attachment limit without storing bytes', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000039')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Attachment Limits' })
+      const issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Bound the upload' })
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: ' ',
+        mediaType: '',
+        data: new Uint8Array(),
+        actor,
+      })).rejects.toMatchObject({ code: 'attachment_invalid' })
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: 'too-large.bin',
+        mediaType: 'application/octet-stream',
+        data: new Uint8Array(MAX_ATTACHMENT_BYTES + 1),
+        actor,
+      })).rejects.toMatchObject({ code: 'attachment_too_large' })
+      await expect(mounted.ctx.taskboard.getIssue(issue.id)).resolves.toMatchObject({ version: issue.version })
+      await expect(readdir(`${path}.attachments`)).resolves.toEqual([])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('rejects invalid attachment ownership and detects stored byte corruption', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000038')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Attachment Validation' })
+      const issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Validate evidence' })
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: IssueId('00000000-0000-4000-8000-000000000037'),
+        expectedVersion: 1,
+        name: 'missing.bin',
+        mediaType: 'application/octet-stream',
+        data: new Uint8Array(),
+        actor,
+      })).rejects.toMatchObject({ code: 'issue_not_found' })
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version + 1,
+        name: 'stale.bin',
+        mediaType: 'application/octet-stream',
+        data: new Uint8Array(),
+        actor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      const added = await mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: 'evidence.bin',
+        mediaType: ' ',
+        data: Uint8Array.of(1, 2),
+        actor,
+      })
+      expect(added.attachment.mediaType).toBe('application/octet-stream')
+      await expect(mounted.ctx.taskboard.deleteAttachment({
+        reference: issue.id,
+        attachmentId: added.attachment.id,
+        expectedVersion: issue.version,
+        confirmed: true,
+        actor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      await expect(mounted.ctx.taskboard.deleteAttachment({
+        reference: issue.id,
+        attachmentId: '00000000-0000-4000-8000-000000000036' as never,
+        expectedVersion: added.issue.version,
+        confirmed: true,
+        actor,
+      })).rejects.toMatchObject({ code: 'attachment_not_found' })
+      await writeFile(join(`${path}.attachments`, added.attachment.id), Uint8Array.of(1))
+      await expect(mounted.ctx.taskboard.readAttachment({
+        reference: issue.id,
+        attachmentId: added.attachment.id,
+      })).rejects.toThrow('metadata records 2')
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('removes unpublished bytes and restores quarantined bytes after a concurrent version change', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000035')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Attachment Races' })
+      const issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Race evidence' })
+      const originalGetIssue = mounted.ctx.taskboard.getIssue.bind(mounted.ctx.taskboard)
+      const addRace = vi.spyOn(mounted.ctx.taskboard, 'getIssue').mockImplementationOnce(async (reference) => {
+        const current = await originalGetIssue(reference)
+        const competing = new DatabaseSync(path)
+        competing.prepare('UPDATE issues SET version = version + 1 WHERE id = ?').run(issue.id)
+        competing.close()
+        return current
+      })
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: 'racing.bin',
+        mediaType: 'application/octet-stream',
+        data: Uint8Array.of(1, 2, 3),
+        actor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      expect(await readdir(`${path}.attachments`)).toEqual([])
+
+      addRace.mockRestore()
+      const current = await mounted.ctx.taskboard.getIssue(issue.id)
+      if (current === undefined) throw new Error('test expected the raced Issue to remain stored')
+      const added = await mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: current.version,
+        name: 'kept.bin',
+        mediaType: 'application/octet-stream',
+        data: Uint8Array.of(4, 5, 6),
+        actor,
+      })
+      vi.spyOn(mounted.ctx.taskboard, 'getIssue').mockImplementationOnce(async (reference) => {
+        const beforeRace = await originalGetIssue(reference)
+        const competing = new DatabaseSync(path)
+        competing.prepare('UPDATE issues SET version = version + 1 WHERE id = ?').run(issue.id)
+        competing.close()
+        return beforeRace
+      })
+      await expect(mounted.ctx.taskboard.deleteAttachment({
+        reference: issue.id,
+        attachmentId: added.attachment.id,
+        expectedVersion: added.issue.version,
+        confirmed: true,
+        actor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      await expect(stat(join(`${path}.attachments`, added.attachment.id))).resolves.toMatchObject({ size: 3 })
+      await expect(mounted.ctx.taskboard.listAttachments(issue.id)).resolves.toEqual([added.attachment])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('propagates attachment storage write failures without recording metadata', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000034')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Attachment Failure' })
+      const issue = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Fail evidence' })
+      await rename(`${path}.attachments`, `${path}.attachments-away`)
+      await expect(mounted.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: 'unwritable.bin',
+        mediaType: 'application/octet-stream',
+        data: Uint8Array.of(1),
+        actor,
+      })).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(mounted.ctx.taskboard.listAttachments(issue.id)).resolves.toEqual([])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
   it('persists a default-off one-hour Patrol Policy and recalculates cadence from each save', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000041')
@@ -1091,7 +1346,7 @@ describe('SQLite Taskboard service', () => {
 
     const foreignPath = await databasePath()
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec('PRAGMA user_version = 5; PRAGMA application_id = 1234')
+    foreign.exec(`PRAGMA user_version = ${SCHEMA_VERSION}; PRAGMA application_id = 1234`)
     foreign.close()
     await expect(mount(foreignPath)).rejects.toThrow('application id 1234')
   })
@@ -1110,8 +1365,16 @@ describe('SQLite Taskboard service', () => {
     const memory = await mount(':memory:')
     try {
       await memory.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Memory Work' })
-      await expect(memory.ctx.taskboard.createIssue({ workspaceId, title: 'Ephemeral' }))
-        .resolves.toMatchObject({ identifier: 'MEMORYWORK-1' })
+      const issue = await memory.ctx.taskboard.createIssue({ workspaceId, title: 'Ephemeral' })
+      expect(issue).toMatchObject({ identifier: 'MEMORYWORK-1' })
+      await expect(memory.ctx.taskboard.addAttachment({
+        reference: issue.id,
+        expectedVersion: issue.version,
+        name: 'memory.bin',
+        mediaType: 'application/octet-stream',
+        data: new Uint8Array(),
+        actor,
+      })).rejects.toMatchObject({ code: 'attachment_storage_unavailable' })
     } finally {
       await memory.dispose()
     }

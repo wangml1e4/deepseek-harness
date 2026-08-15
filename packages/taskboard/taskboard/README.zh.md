@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久 Taskboard 元数据、Issue、评论、活动记录、依赖关系、Patrol Policy 和 Patrol Run，不暴露提供方的存储格式。
+Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久 Taskboard 元数据、Issue、评论、活动记录、附件、依赖关系、Patrol Policy 和 Patrol Run，不暴露提供方的存储格式。
 
 ## 服务语义
 
@@ -12,6 +12,7 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 可能竞争的 Issue 变更要求 `expectedVersion`。将 `in_review`、`blocked` 或 `done` 工作退回 `todo` 还必须提供原因，该原因会成为仅追加的评论。
 - 未改变任何字段的更新是无操作。归档可逆，重复归档会被拒绝，服务不提供永久删除 Issue 的操作。评论和活动记录仅可追加。
 - 活动记录和评论的操作者会区分用户、Patrol Agent、Reviewer 与系统责任来源。
+- 附件支持任意文件类型，单个文件上限为 25 MB。元数据读取绝不暴露 Provider 路径；内容读取必须同时提供所属 Issue 与不透明附件 id。上传和显式确认后的删除会推进 Issue 版本并追加活动记录，而其他 Issue、评论、活动记录与 Patrol 记录仍遵循禁止删除规则。
 - 一项依赖是同一条有向边：从来源查看为 `blocks`，从目标查看为 `blocked_by`。自环、重复、跨 Workspace 和成环依赖都会在不写入的情况下被拒绝。
 - `listWorkspaceRelations` 会把每条 Workspace 依赖以规范 `blocks` 视图返回一次，供时间轴消费方使用；`listRelations` 为详情界面保留相对于所请求 Issue 的方向。
 - 每个 Taskboard 的 Patrol 默认关闭、选中 `1h`、使用 `workspace-write` 权限，并将新 Session 选项保持为空。Policy 更新只接受 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h`；启用时必须提供本地 Base Branch，启用或修改间隔会从保存时刻重新排期，关闭则清除 `nextDueAt`，但不终止活跃 Run。
@@ -34,7 +35,6 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 
 ## 已知限制与暂缓事项
 
-- 服务尚不暴露附件。
 - 本包持有持久调度、领取、绑定、审查和生命周期操作，但不会自行启动工作；Patrol 消费方负责定时与 Agent 编排。
 - Taskboard 创建是隐式的，但 Workspace 删除保护由后续 Workspace 消费方安装；本包自身无法拦截 Workspace 移除。
 - 版本一只在本地存储 Issue，绝不会向 `deepseek-ai/deepseek-harness` GitHub Issues 发布或同步。

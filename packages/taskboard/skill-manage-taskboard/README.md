@@ -6,7 +6,7 @@ The bundled `manage-taskboard` skill Provider. It makes the Workspace Taskboard 
 
 ## Workflow
 
-The skill instructs an Agent to use `taskctl` for durable Issue, Comment, Activity, and relation operations. It requires the Agent to read an Issue and its latest Comments first, claim only `todo` work by moving it to `in_progress`, retry one optimistic conflict only after rereading current state, preserve unrelated work, and never delete an Issue.
+The skill instructs an Agent to use `taskctl` for durable Issue, Comment, Activity, attachment, and relation operations. It requires the Agent to read an Issue and its latest Comments first, claim only `todo` work by moving it to `in_progress`, retry one optimistic conflict only after rereading current state, preserve unrelated work, and never delete an Issue.
 
 The CLI reference also covers Patrol policy, Run, and Issue evidence reads. The skill permits changing Patrol settings or starting a manual Run only after an explicit user request; eligibility, claim, Session binding, approval handling, review, and lifecycle writeback remain Host-owned operations.
 
@@ -51,5 +51,4 @@ Append-only after the reusable request prefix; loading does not change earlier r
 ## Known Limitations and Deferred Work
 
 - The skill requires the bundled `taskctl` executable and a running Web Host.
-- Attachments remain unavailable.
 - Patrol startup recovery is outside this interactive workflow and is owned by the Host Patrol Consumer.

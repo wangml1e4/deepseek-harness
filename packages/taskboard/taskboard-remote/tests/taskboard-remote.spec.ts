@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { MAX_ATTACHMENT_BYTES, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
 import SqliteTaskboard from '@deepseek-ai/dsh-taskboard-sqlite'
 import { WorkspaceId, type Workspace, type WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import TaskboardRemote from '../src/index.ts'
 
 const contexts: Context[] = []
+const tempDirs: string[] = []
 const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000101')
 const secondWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000102')
 const actor = {
@@ -41,7 +45,9 @@ async function harness() {
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => registered.get(id),
   } as WorkspaceRegistry)
-  await ctx.plugin(SqliteTaskboard, { path: ':memory:', journalMode: 'delete' })
+  const attachmentsPath = await mkdtemp(join(tmpdir(), 'dsh-taskboard-remote-attachments-'))
+  tempDirs.push(attachmentsPath)
+  await ctx.plugin(SqliteTaskboard, { path: ':memory:', attachmentsPath, journalMode: 'delete' })
   ctx.provide('taskboardPatrol', {
     configuration: () => Promise.resolve({
       defaults: {
@@ -70,6 +76,7 @@ async function harness() {
 
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
+  await Promise.all(tempDirs.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
 describe('Taskboard Remote Consumer', () => {
@@ -91,6 +98,10 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'restoreIssue', invocation: { kind: 'direct' } },
       { method: 'listComments', invocation: { kind: 'direct' } },
       { method: 'addComment', invocation: { kind: 'direct' } },
+      { method: 'listAttachments', invocation: { kind: 'direct' } },
+      { method: 'addAttachment', invocation: { kind: 'direct' } },
+      { method: 'readAttachment', invocation: { kind: 'direct' } },
+      { method: 'deleteAttachment', invocation: { kind: 'direct' } },
       { method: 'listActivities', invocation: { kind: 'direct' } },
       { method: 'listWorkspaceRelations', invocation: { kind: 'direct' } },
       { method: 'listRelations', invocation: { kind: 'direct' } },
@@ -101,6 +112,76 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'runPatrol', invocation: { kind: 'direct' } },
       { method: 'patrolIssue', invocation: { kind: 'direct' } },
     ])
+  })
+
+  it('carries attachment bytes as base64 through the controlled Host namespace', async () => {
+    const ctx = await harness()
+    const created = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Remote attachment' })
+    if (!created.ok) throw new Error(created.error.message)
+    const added = await ctx.taskboardRemote.addAttachment({
+      reference: created.value.id,
+      expectedVersion: created.value.version,
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      data: Buffer.from('attachment body').toString('base64'),
+      actor,
+    })
+    expect(added).toMatchObject({ ok: true, value: { attachment: { name: 'notes.txt', size: 15 } } })
+    if (!added.ok) throw new Error(added.error.message)
+    await expect(ctx.taskboardRemote.listAttachments(created.value.id)).resolves.toEqual({
+      ok: true,
+      value: { items: [added.value.attachment] },
+    })
+    await expect(ctx.taskboardRemote.readAttachment({
+      reference: created.value.id,
+      attachmentId: added.value.attachment.id,
+    })).resolves.toEqual({
+      ok: true,
+      value: { attachment: added.value.attachment, data: Buffer.from('attachment body').toString('base64') },
+    })
+    await expect(ctx.taskboardRemote.deleteAttachment({
+      reference: created.value.id,
+      attachmentId: added.value.attachment.id,
+      expectedVersion: added.value.issue.version,
+      confirmed: false,
+      actor,
+    })).resolves.toMatchObject({ ok: false, error: { code: 'attachment_confirmation_required' } })
+  })
+
+  it('rejects malformed and oversized attachment base64 at the Remote boundary', async () => {
+    const ctx = await harness()
+    const created = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Malformed attachment' })
+    if (!created.ok) throw new Error(created.error.message)
+    for (const data of ['not base64!', 'AB==']) {
+      await expect(ctx.taskboardRemote.addAttachment({
+        reference: created.value.id,
+        expectedVersion: created.value.version,
+        name: 'bad.bin',
+        mediaType: 'application/octet-stream',
+        data,
+        actor,
+      })).resolves.toEqual({
+        ok: false,
+        error: { code: 'attachment_invalid', message: 'attachment data must be canonical base64' },
+      })
+    }
+    const maximumEncodedLength = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4
+    await expect(ctx.taskboardRemote.addAttachment({
+      reference: created.value.id,
+      expectedVersion: created.value.version,
+      name: 'oversized.bin',
+      mediaType: 'application/octet-stream',
+      data: 'A'.repeat(maximumEncodedLength + 1),
+      actor,
+    })).resolves.toMatchObject({ ok: false, error: { code: 'attachment_too_large' } })
+    await expect(ctx.taskboardRemote.addAttachment({
+      reference: created.value.id,
+      expectedVersion: created.value.version,
+      name: 'decoded-oversized.bin',
+      mediaType: 'application/octet-stream',
+      data: Buffer.alloc(MAX_ATTACHMENT_BYTES + 1).toString('base64'),
+      actor,
+    })).resolves.toMatchObject({ ok: false, error: { code: 'attachment_too_large' } })
   })
 
   it('derives Taskboard metadata from the authoritative Workspace', async () => {

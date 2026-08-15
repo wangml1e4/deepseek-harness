@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
-  Activity, Comment, Issue, IssueRelation, TaskboardActor, WorkspaceTaskboard,
+  Activity, Comment, Issue, IssueRelation, TaskboardActor, TaskboardAttachment, WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard/types'
+import { MAX_ATTACHMENT_BYTES } from '@deepseek-ai/dsh-taskboard'
 import type { TaskboardPatrolValue, TaskboardRemoteResult } from '@deepseek-ai/dsh-taskboard-remote/types'
-import { TaskboardController, type TaskboardClientRemote } from '../src/client/controller.ts'
+import {
+  MAX_TASKBOARD_ATTACHMENT_BYTES,
+  TaskboardController,
+  type TaskboardClientRemote,
+} from '../src/client/controller.ts'
 
 const actor = { type: 'user', id: 'local-user', name: 'User' } as TaskboardActor
 
@@ -101,6 +106,32 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       actor: input.actor,
       createdAt: '2026-08-16T00:00:00.000Z',
     }),
+    listAttachments: () => ok({ items: [] }),
+    addAttachment: input => ok({
+      issue: issue({ version: 2 }),
+      attachment: {
+        id: 'attachment-1' as never,
+        issueId: one.id,
+        name: input.name,
+        mediaType: input.mediaType,
+        size: 1,
+        actor: input.actor,
+        createdAt: '2026-08-16T00:00:00.000Z',
+      },
+    }),
+    readAttachment: input => ok({
+      attachment: {
+        id: input.attachmentId,
+        issueId: one.id,
+        name: 'evidence.txt',
+        mediaType: 'text/plain',
+        size: 1,
+        actor,
+        createdAt: '2026-08-16T00:00:00.000Z',
+      },
+      data: 'eA==',
+    }),
+    deleteAttachment: () => ok(issue({ version: 3 })),
     listActivities: () => ok({ items: [] }),
     listWorkspaceRelations: () => ok({ items: [] }),
     listRelations: () => ok({ items: [] }),
@@ -136,6 +167,10 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
 }
 
 describe('TaskboardController', () => {
+  it('keeps the browser preflight limit aligned with the Host protocol', () => {
+    expect(MAX_TASKBOARD_ATTACHMENT_BYTES).toBe(MAX_ATTACHMENT_BYTES)
+  })
+
   it('loads Workspace metadata and active Issues into one immutable snapshot', async () => {
     const workspaceRelation: IssueRelation = {
       id: 'relation-0' as never,
@@ -408,10 +443,122 @@ describe('TaskboardController', () => {
     expect(controller.getSnapshot().selectedIssue?.version).toBe(2)
   })
 
+  it('loads attachment metadata and applies upload, read, and confirmed deletion', async () => {
+    const stored: TaskboardAttachment = {
+      id: 'attachment-existing' as never,
+      issueId: 'issue-1' as never,
+      name: 'diagram.png',
+      mediaType: 'image/png',
+      size: 4,
+      actor,
+      createdAt: '2026-08-16T00:00:00.000Z',
+    }
+    const client = remote({
+      listAttachments: vi.fn(() => ok({ items: [stored] })),
+      addAttachment: vi.fn((input: Parameters<TaskboardClientRemote['addAttachment']>[0]) => ok({
+        issue: issue({ version: 2 }),
+        attachment: { ...stored, id: 'attachment-uploaded' as never, name: input.name, mediaType: input.mediaType },
+      })),
+      readAttachment: vi.fn(() => ok({ attachment: stored, data: 'eA==' })),
+      deleteAttachment: vi.fn(() => ok(issue({ version: 3 }))),
+    })
+    const controller = new TaskboardController(client)
+    await controller.activate('ws' as never)
+    await controller.selectIssue('issue-1' as never)
+    expect(controller.getSnapshot().attachments).toEqual([stored])
+
+    const file = new File([Uint8Array.of(1, 2)], 'evidence.bin', { type: '' })
+    await controller.addAttachment(file, actor)
+    expect(client.addAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      reference: 'issue-1',
+      expectedVersion: 1,
+      name: 'evidence.bin',
+      mediaType: 'application/octet-stream',
+      data: 'AQI=',
+      actor,
+    }))
+    expect(controller.getSnapshot()).toMatchObject({
+      selectedIssue: { version: 2 },
+      attachments: [{ id: 'attachment-existing' }, { id: 'attachment-uploaded' }],
+    })
+
+    await expect(controller.readAttachment(stored)).resolves.toMatchObject({
+      ok: true,
+      value: { attachment: stored, data: 'eA==' },
+    })
+    await controller.deleteAttachment(stored, true, actor)
+    expect(client.deleteAttachment).toHaveBeenCalledWith(expect.objectContaining({
+      reference: 'issue-1', attachmentId: stored.id, expectedVersion: 2, confirmed: true, actor,
+    }))
+    expect(controller.getSnapshot().attachments).toEqual([
+      expect.objectContaining({ id: 'attachment-uploaded' }),
+    ])
+  })
+
+  it('rejects attachment actions without the selected owning Issue and before oversized reads', async () => {
+    const attachment: TaskboardAttachment = {
+      id: 'attachment-foreign' as never,
+      issueId: 'issue-2' as never,
+      name: 'foreign.bin',
+      mediaType: 'application/octet-stream',
+      size: 1,
+      actor,
+      createdAt: '2026-08-16T00:00:00.000Z',
+    }
+    const client = remote()
+    const controller = new TaskboardController(client)
+    const unselectedFile = { name: 'unselected.bin', size: 1 } as File
+
+    await expect(controller.addAttachment(unselectedFile, actor)).resolves.toMatchObject({
+      ok: false, error: { code: 'issue_not_found' },
+    })
+    await expect(controller.readAttachment(attachment)).resolves.toMatchObject({
+      ok: false, error: { code: 'attachment_not_found' },
+    })
+    await expect(controller.deleteAttachment(attachment, true, actor)).resolves.toMatchObject({
+      ok: false, error: { code: 'attachment_not_found' },
+    })
+
+    await controller.activate('ws' as never)
+    await controller.selectIssue('issue-1' as never)
+    const oversizedFile = { name: 'large.bin', size: MAX_TASKBOARD_ATTACHMENT_BYTES + 1 } as File
+    await expect(controller.addAttachment(oversizedFile, actor)).resolves.toMatchObject({
+      ok: false, error: { code: 'attachment_too_large' },
+    })
+    await expect(controller.readAttachment(attachment)).resolves.toMatchObject({
+      ok: false, error: { code: 'attachment_not_found' },
+    })
+    await expect(controller.deleteAttachment(attachment, true, actor)).resolves.toMatchObject({
+      ok: false, error: { code: 'attachment_not_found' },
+    })
+  })
+
+  it('normalizes a browser file read failure without calling the Host', async () => {
+    const client = remote()
+    const addAttachment = vi.spyOn(client, 'addAttachment')
+    const controller = new TaskboardController(client)
+    await controller.activate('ws' as never)
+    await controller.selectIssue('issue-1' as never)
+    const unreadable = {
+      name: 'unreadable.bin',
+      size: 1,
+      type: 'application/octet-stream',
+      arrayBuffer: vi.fn(async () => { throw new Error('browser file read failed') }),
+    } as unknown as File
+
+    await expect(controller.addAttachment(unreadable, actor)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'attachment_invalid', message: 'browser file read failed' },
+    })
+    expect(addAttachment).not.toHaveBeenCalled()
+    expect(controller.getSnapshot().actionError).toBe('browser file read failed')
+  })
+
   it('reports every Issue-detail read failure and missing Issue', async () => {
     const cases: Partial<TaskboardClientRemote>[] = [
       { getIssue: () => failure('Issue rejected') },
       { listComments: () => failure('Comments rejected') },
+      { listAttachments: () => failure('Attachments rejected') },
       { listActivities: () => failure('Activities rejected') },
       { listRelations: () => failure('Relations rejected') },
       { patrolIssue: () => failure('Patrol evidence rejected') },
