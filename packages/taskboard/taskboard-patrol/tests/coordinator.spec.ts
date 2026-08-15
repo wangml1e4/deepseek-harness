@@ -133,6 +133,7 @@ interface HarnessOptions {
   readonly duePolicies?: readonly PatrolPolicy[]
   readonly completeRunError?: unknown
   readonly prepareError?: unknown
+  readonly reviews?: readonly PatrolReview[]
 }
 
 function harness(options: HarnessOptions) {
@@ -145,6 +146,8 @@ function harness(options: HarnessOptions) {
   const completedRuns: Array<{ result: string; error?: string }> = []
   const completedAttempts: Array<{ issueId: string; result: string; error?: string }> = []
   const released: string[] = []
+  const turns: string[] = []
+  const storedReviews = [...(options.reviews ?? [])]
   const taskboard = {
     getPatrolPolicy: () => Promise.resolve(options.missingPolicy ? undefined : savedPolicy),
     listIssues: () => Promise.resolve(issues.filter(value => value.status === 'todo')),
@@ -169,6 +172,8 @@ function harness(options: HarnessOptions) {
         state: 'active',
         result: null,
         error: null,
+        recoveryCount: 0,
+        lastRecoveredAt: null,
         startedAt: NOW,
         endedAt: null,
       }
@@ -212,11 +217,34 @@ function harness(options: HarnessOptions) {
       completedRuns.push({ result: input.result, ...input.error === undefined ? {} : { error: input.error } })
       return Promise.resolve(run)
     },
-    recordPatrolReview: (input: Omit<PatrolReview, 'issueId' | 'createdAt'>) => Promise.resolve({
-      ...input,
-      issueId: attempts.find(value => value.id === input.attemptId)!.issueId,
-      createdAt: NOW,
-    }),
+    getActivePatrolRun: () => Promise.resolve(runs.find(value => value.state === 'active')),
+    recordPatrolRecovery: (runId: PatrolRunId) => {
+      const run = runs.find(value => value.id === runId)!
+      Object.assign(run, { recoveryCount: run.recoveryCount + 1, lastRecoveredAt: NOW })
+      return Promise.resolve(run)
+    },
+    failPatrolRecovery: (input: { runId: PatrolRunId; attemptId: PatrolAttemptId; error: string }) => {
+      const run = runs.find(value => value.id === input.runId)!
+      const attempt = attempts.find(value => value.id === input.attemptId)!
+      const value = issues.find(candidate => candidate.id === attempt.issueId)
+      Object.assign(attempt, { state: 'completed', result: 'failed', error: input.error })
+      Object.assign(run, { state: 'completed', result: 'failed', error: input.error })
+      if (value !== undefined) Object.assign(value, { status: 'blocked' })
+      completedAttempts.push({ issueId: attempt.issueId, result: 'failed', error: input.error })
+      completedRuns.push({ result: 'failed', error: input.error })
+      return Promise.resolve(run)
+    },
+    listPatrolAttempts: (runId: PatrolRunId) => Promise.resolve(attempts.filter(value => value.runId === runId)),
+    listPatrolReviews: (reference: string) => Promise.resolve(storedReviews.filter(value => value.issueId === reference)),
+    recordPatrolReview: (input: Omit<PatrolReview, 'issueId' | 'createdAt'>) => {
+      const review = {
+        ...input,
+        issueId: attempts.find(value => value.id === input.attemptId)!.issueId,
+        createdAt: NOW,
+      }
+      storedReviews.push(review)
+      return Promise.resolve(review)
+    },
     listDuePatrolPolicies: () => Promise.resolve(options.duePolicies ?? []),
   }
   ctx.provide('taskboard', taskboard as never)
@@ -230,7 +258,7 @@ function harness(options: HarnessOptions) {
   const host = {
     defaults: () => Promise.resolve({ baseBranch: 'main' }),
     isAncestor: (_workspaceId: WorkspaceId, commit: string) => Promise.resolve(commit !== 'unintegrated'),
-    prepare: async (_attempt: PatrolAttempt, value: Issue): Promise<PatrolAgentLease> => {
+    prepare: vi.fn(async (_attempt: PatrolAttempt, value: Issue): Promise<PatrolAgentLease> => {
       if (options.prepareError !== undefined) throw options.prepareError
       const context = options.contexts?.[value.id] ?? development(value)
       const rejectedApprovals = options.permissionBlocked?.has(value.id)
@@ -241,6 +269,7 @@ function harness(options: HarnessOptions) {
         : []
       return {
         agent: agent(options.turnReasons, (turn) => {
+          turns.push(`${value.id}:${turn}`)
           if (turn === 2 && options.correctionBlocked?.has(value.id)) rejectedApprovals.push({ toolName: 'write' })
         }),
         context,
@@ -248,7 +277,7 @@ function harness(options: HarnessOptions) {
         rejectedApprovals,
         release: () => { released.push(value.id); return Promise.resolve() },
       }
-    },
+    }),
     result: vi.fn(() => {
       const resultIndex = resultCalls
       const selected = options.results?.[Math.min(resultIndex, options.results.length - 1)] ?? options.result
@@ -271,7 +300,10 @@ function harness(options: HarnessOptions) {
     risks: [],
   }))
   ;(coordinator as unknown as { reviewer: { review: typeof review } }).reviewer = { review }
-  return { ctx, coordinator, taskboard, host, review, completedRuns, completedAttempts, released, runs, attempts }
+  return {
+    ctx, coordinator, taskboard, host, review, completedRuns, completedAttempts,
+    released, runs, attempts, turns,
+  }
 }
 
 describe('PatrolCoordinator', () => {
@@ -530,9 +562,11 @@ describe('PatrolCoordinator', () => {
     const due = policy({ enabled: true, nextDueAt: '2026-08-16T00:00:01.000Z' })
     const begin = vi.fn(() => Promise.resolve({
       id: PatrolRunId('scheduled-skip'), workspaceId, trigger: 'scheduled', scheduledFor: due.nextDueAt,
-      state: 'completed', result: 'skipped_global_busy', error: null, startedAt: NOW, endedAt: NOW,
+      state: 'completed', result: 'skipped_global_busy', error: null,
+      recoveryCount: 0, lastRecoveredAt: null, startedAt: NOW, endedAt: NOW,
     } satisfies PatrolRun))
     ctx.provide('taskboard', {
+      getActivePatrolRun: () => Promise.resolve(undefined),
       getPatrolPolicy: () => Promise.resolve(due),
       listDuePatrolPolicies: () => Promise.resolve([due]),
       beginPatrolRun: begin,
@@ -578,6 +612,7 @@ describe('PatrolCoordinator', () => {
     contexts.push(scanCtx)
     const scanWarn = vi.spyOn(scanCtx.logger, 'warn').mockImplementation(() => undefined)
     scanCtx.provide('taskboard', {
+      getActivePatrolRun: () => Promise.resolve(undefined),
       getPatrolPolicy: () => Promise.reject(new Error('policy read failed')),
     } as never)
     scanCtx.provide('workspaceRegistry', { list: () => [{ id: workspaceId }] } as never)
@@ -585,6 +620,31 @@ describe('PatrolCoordinator', () => {
     const stop = scan.start()
     await vi.waitFor(() => { expect(scanWarn).toHaveBeenCalledWith(expect.stringContaining('could not schedule')) })
     stop()
+
+    const recoveryCtx = new Context()
+    contexts.push(recoveryCtx)
+    const recoveryError = vi.spyOn(recoveryCtx.logger, 'error').mockImplementation(() => undefined)
+    recoveryCtx.provide('taskboard', {
+      getActivePatrolRun: () => Promise.reject(new Error('active Run read failed')),
+    } as never)
+    const recovery = new PatrolCoordinator(recoveryCtx, {} as TaskboardPatrolService)
+    const stopRecovery = recovery.start()
+    await vi.waitFor(() => {
+      expect(recoveryError).toHaveBeenCalledWith(expect.stringContaining('startup recovery failed before scheduling'))
+    })
+    stopRecovery()
+
+    const stoppedCtx = new Context()
+    contexts.push(stoppedCtx)
+    let resolveActive!: (value: undefined) => void
+    stoppedCtx.provide('taskboard', {
+      getActivePatrolRun: () => new Promise<undefined>((resolve) => { resolveActive = resolve }),
+    } as never)
+    const stopped = new PatrolCoordinator(stoppedCtx, {} as TaskboardPatrolService)
+    const stopBeforeRecovery = stopped.start()
+    stopBeforeRecovery()
+    resolveActive(undefined)
+    await new Promise<void>((resolve) => { queueMicrotask(resolve) })
   })
 
   it('contains duplicate launches and a failure to persist the terminal Run state', async () => {
@@ -602,5 +662,240 @@ describe('PatrolCoordinator', () => {
     internals.launch({ ...run, state: 'completed' })
     internals.launch(run)
     await vi.waitFor(() => { expect(error).toHaveBeenCalledWith(expect.stringContaining('could not be completed')) })
+  })
+
+  it('recovers an active Attempt before scheduling and reuses its recorded Reviewer evidence', async () => {
+    const value = issue('recover-reviewed', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })
+    const context = development(value)
+    const attemptId = PatrolAttemptId('attempt-recover-reviewed')
+    const review: PatrolReview = {
+      attemptId,
+      issueId: value.id,
+      sessionId: SessionId('session-review-recover-reviewed'),
+      reviewedCommit: 'preliminary123',
+      verdict: 'changes_requested',
+      findings: 'Update the recovery path.',
+      verification: ['pnpm test'],
+      risks: [],
+      createdAt: NOW,
+    }
+    const test = harness({
+      issues: [value],
+      contexts: { [value.id]: context },
+      reviews: [review],
+      resultHeads: ['corrected456'],
+    })
+    const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
+    test.attempts.push({
+      id: attemptId,
+      runId: run.id,
+      issueId: value.id,
+      sessionId: context.sessionId,
+      state: 'active',
+      result: null,
+      error: null,
+      startedAt: NOW,
+      endedAt: null,
+    })
+
+    const stop = test.coordinator.start()
+    await vi.waitFor(() => { expect(test.completedRuns).toEqual([{ result: 'review_handoff' }]) })
+    stop()
+
+    expect(run).toMatchObject({ recoveryCount: 1, lastRecoveredAt: NOW })
+    expect(test.review).not.toHaveBeenCalled()
+    expect(test.turns).toEqual([`${value.id}:1`])
+    expect(test.completedAttempts).toEqual([{ issueId: value.id, result: 'review_handoff' }])
+  })
+
+  it('continues an interrupted implementation in its exact Session before creating Reviewer evidence', async () => {
+    const value = issue('recover-implementation', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })
+    const context = development(value)
+    const test = harness({
+      issues: [value],
+      contexts: { [value.id]: context },
+    })
+    const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
+    test.attempts.push({
+      id: PatrolAttemptId('attempt-recover-implementation'),
+      runId: run.id,
+      issueId: value.id,
+      sessionId: context.sessionId,
+      state: 'active',
+      result: null,
+      error: null,
+      startedAt: NOW,
+      endedAt: null,
+    })
+
+    const stop = test.coordinator.start()
+    await vi.waitFor(() => { expect(test.completedRuns).toEqual([{ result: 'review_handoff' }]) })
+    stop()
+
+    expect(test.review).toHaveBeenCalledOnce()
+    expect(test.turns).toEqual([`${value.id}:1`, `${value.id}:2`])
+  })
+
+  it('reconciles terminal Attempt checkpoints and restarts an unclaimed active Run', async () => {
+    for (const checkpoint of [
+      { result: 'review_handoff' as const, runResult: 'review_handoff', error: null },
+      { result: 'blocked' as const, runResult: 'blocked', error: 'blocked checkpoint' },
+      { result: 'failed' as const, runResult: 'failed', error: 'failed checkpoint' },
+    ]) {
+      const test = harness({ issues: [] })
+      const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
+      test.attempts.push({
+        id: PatrolAttemptId(`attempt-${checkpoint.result}`),
+        runId: run.id,
+        issueId: IssueId(`issue-${checkpoint.result}`),
+        sessionId: SessionId(`session-${checkpoint.result}`),
+        state: 'completed',
+        result: checkpoint.result,
+        error: checkpoint.error,
+        startedAt: NOW,
+        endedAt: NOW,
+      })
+      const stop = test.coordinator.start()
+      await vi.waitFor(() => { expect(test.completedRuns).toHaveLength(1) })
+      stop()
+      expect(test.completedRuns).toEqual([{
+        result: checkpoint.runResult,
+        ...checkpoint.error === null ? {} : { error: checkpoint.error },
+      }])
+    }
+
+    const unclaimed = harness({ issues: [] })
+    const run = await unclaimed.taskboard.beginPatrolRun({ trigger: 'manual' })
+    const stop = unclaimed.coordinator.start()
+    await vi.waitFor(() => { expect(unclaimed.completedRuns).toEqual([{ result: 'no_eligible_issue' }]) })
+    stop()
+    expect(run.recoveryCount).toBe(1)
+  })
+
+  it('continues a recovered Run after permission-blocked checkpoints', async () => {
+    const interrupted = issue('recover-approval', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })
+    const ready = issue('recover-after-approval', { sortOrder: 1 })
+    const context = development(interrupted)
+    const active = harness({
+      issues: [interrupted, ready],
+      contexts: { [interrupted.id]: context },
+      permissionBlocked: new Set([interrupted.id]),
+    })
+    const activeRun = await active.taskboard.beginPatrolRun({ trigger: 'manual' })
+    active.attempts.push({
+      id: PatrolAttemptId('attempt-recover-approval'),
+      runId: activeRun.id,
+      issueId: interrupted.id,
+      sessionId: context.sessionId,
+      state: 'active',
+      result: null,
+      error: null,
+      startedAt: NOW,
+      endedAt: null,
+    })
+    const stopActive = active.coordinator.start()
+    await vi.waitFor(() => { expect(active.completedRuns).toEqual([{ result: 'review_handoff' }]) })
+    stopActive()
+    expect(active.completedAttempts.map(value => value.result)).toEqual(['permission_blocked', 'review_handoff'])
+
+    const prior = issue('prior-approval', { status: 'blocked', assignee: 'patrol_agent', version: 3 })
+    const next = issue('next-after-prior', { sortOrder: 1 })
+    const completed = harness({ issues: [prior, next] })
+    const completedRun = await completed.taskboard.beginPatrolRun({ trigger: 'manual' })
+    completed.attempts.push({
+      id: PatrolAttemptId('attempt-prior-approval'),
+      runId: completedRun.id,
+      issueId: prior.id,
+      sessionId: SessionId('session-prior-approval'),
+      state: 'completed',
+      result: 'permission_blocked',
+      error: 'approval checkpoint',
+      startedAt: NOW,
+      endedAt: NOW,
+    })
+    const stopCompleted = completed.coordinator.start()
+    await vi.waitFor(() => { expect(completed.completedRuns).toEqual([{ result: 'review_handoff' }]) })
+    stopCompleted()
+    expect(completed.completedAttempts).toEqual([{ issueId: next.id, result: 'review_handoff' }])
+  })
+
+  it('durably fails every unrecoverable active-Attempt checkpoint', async () => {
+    const cases = [
+      { name: 'missing-issue', issues: [] as Issue[], contexts: {}, sessionId: SessionId('session-missing-issue') },
+      {
+        name: 'mismatched-session',
+        issues: [issue('mismatched-session', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })],
+        contexts: {} as Record<string, PatrolDevelopmentContext>,
+        sessionId: SessionId('session-wrong'),
+      },
+      {
+        name: 'missing-policy',
+        issues: [issue('missing-policy-recovery', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })],
+        contexts: {} as Record<string, PatrolDevelopmentContext>,
+        sessionId: SessionId('session-missing-policy-recovery'),
+        missingPolicy: true,
+      },
+      {
+        name: 'resume-failure',
+        issues: [issue('resume-failure', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })],
+        contexts: {} as Record<string, PatrolDevelopmentContext>,
+        sessionId: SessionId('session-resume-failure'),
+        prepareError: new Error('worktree cannot be resumed'),
+      },
+    ]
+    for (const value of cases) {
+      const claimed = value.issues[0]
+      if (claimed !== undefined && value.name !== 'mismatched-session') {
+        value.contexts[claimed.id] = { ...development(claimed), sessionId: value.sessionId }
+      } else if (claimed !== undefined) {
+        value.contexts[claimed.id] = development(claimed)
+      }
+      const test = harness({
+        issues: value.issues,
+        contexts: value.contexts,
+        ...(value.missingPolicy === undefined ? {} : { missingPolicy: value.missingPolicy }),
+        ...(value.prepareError === undefined ? {} : { prepareError: value.prepareError }),
+      })
+      const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
+      test.attempts.push({
+        id: PatrolAttemptId(`attempt-${value.name}`),
+        runId: run.id,
+        issueId: claimed?.id ?? IssueId('absent-recovery-issue'),
+        sessionId: value.sessionId,
+        state: 'active',
+        result: null,
+        error: null,
+        startedAt: NOW,
+        endedAt: null,
+      })
+      const stop = test.coordinator.start()
+      await vi.waitFor(() => { expect(test.completedRuns[0]?.result).toBe('failed') })
+      stop()
+    }
+  })
+
+  it('blocks recovery without creating a replacement when the exact Development Context is missing', async () => {
+    const value = issue('recover-missing', { status: 'in_progress', assignee: 'patrol_agent', version: 2 })
+    const test = harness({ issues: [value] })
+    const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
+    test.attempts.push({
+      id: PatrolAttemptId('attempt-recover-missing'),
+      runId: run.id,
+      issueId: value.id,
+      sessionId: SessionId('session-missing'),
+      state: 'active',
+      result: null,
+      error: null,
+      startedAt: NOW,
+      endedAt: null,
+    })
+
+    const stop = test.coordinator.start()
+    await vi.waitFor(() => { expect(test.completedRuns[0]?.result).toBe('failed') })
+    stop()
+
+    expect(test.completedRuns[0]?.error).toContain('has no persistent Development Context')
+    expect(test.host.prepare).not.toHaveBeenCalled()
+    expect(value.status).toBe('blocked')
   })
 })

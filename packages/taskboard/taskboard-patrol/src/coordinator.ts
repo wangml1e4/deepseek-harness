@@ -10,11 +10,12 @@ import {
   type IssueReference,
   type PatrolAttempt,
   type PatrolPolicy,
+  type PatrolReview,
   type PatrolRun,
 } from '@deepseek-ai/dsh-taskboard'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { TaskboardPatrolService } from './index.ts'
-import { hasExplicitWait, implementationPrompt, remediationPrompt } from './prompts.ts'
+import { hasExplicitWait, implementationPrompt, recoveryPrompt, remediationPrompt } from './prompts.ts'
 import { PatrolReviewer } from './reviewer.ts'
 
 const MAX_TIMER_MS = 2_147_483_647
@@ -43,6 +44,7 @@ export class PatrolCoordinator {
   private readonly executing = new Set<string>()
   private timer: ReturnType<typeof setTimeout> | undefined
   private scheduleGeneration = 0
+  private recovering = false
   private stopped = false
 
   constructor(
@@ -58,7 +60,14 @@ export class PatrolCoordinator {
    */
   start(): () => void {
     const stopChanged = this.ctx.on('taskboard/changed', () => { this.reschedule() })
-    this.reschedule()
+    this.recovering = true
+    void this.recover().then(() => {
+      if (this.stopped) return
+      this.recovering = false
+      this.reschedule()
+    }).catch((error: unknown) => {
+      this.ctx.logger.error(`taskboard-patrol: startup recovery failed before scheduling: ${String(error)}`)
+    })
     return () => {
       this.stopped = true
       this.scheduleGeneration += 1
@@ -84,7 +93,7 @@ export class PatrolCoordinator {
 
   /** Reschedule from durable policy instants while discarding stale async scans. */
   private reschedule(): void {
-    if (this.stopped) return
+    if (this.stopped || this.recovering) return
     const generation = ++this.scheduleGeneration
     if (this.timer !== undefined) clearTimeout(this.timer)
     this.timer = undefined
@@ -130,9 +139,21 @@ export class PatrolCoordinator {
 
   /** Launch one Run once and contain background failures in its durable history. */
   private launch(run: PatrolRun, preferred?: IssueReference): void {
+    void this.perform(run, preferred)
+  }
+
+  /** Own one background Run's deduplication, terminal containment, and rescheduling. */
+  private async perform(
+    run: PatrolRun,
+    preferred?: IssueReference,
+    recovery = false,
+  ): Promise<void> {
     if (run.state !== 'active' || this.executing.has(run.id)) return
     this.executing.add(run.id)
-    void this.execute(run, preferred).catch(async (error: unknown) => {
+    try {
+      if (recovery) await this.recoverRun(run)
+      else await this.execute(run, preferred)
+    } catch (error: unknown) {
       try {
         await this.ctx.taskboard.completePatrolRun({
           runId: run.id,
@@ -142,17 +163,107 @@ export class PatrolCoordinator {
       } catch (completionError: unknown) {
         this.ctx.logger.error(`taskboard-patrol: Run "${run.id}" failed and could not be completed: ${String(completionError)}`)
       }
-    }).finally(() => {
+    } finally {
       this.executing.delete(run.id)
       this.reschedule()
-    })
+    }
+  }
+
+  /** Recover the Host-wide unfinished Run before any new scheduled trigger. */
+  private async recover(): Promise<void> {
+    const active = await this.ctx.taskboard.getActivePatrolRun()
+    if (active === undefined) return
+    const recorded = await this.ctx.taskboard.recordPatrolRecovery(active.id)
+    await this.perform(recorded, undefined, true)
+  }
+
+  /** Reconcile a durable Run checkpoint or resume its exact active Attempt. */
+  private async recoverRun(run: PatrolRun): Promise<void> {
+    const attempts = await this.ctx.taskboard.listPatrolAttempts(run.id)
+    const latest = attempts.at(-1)
+    if (latest === undefined || latest.result === 'permission_blocked') {
+      await this.execute(run)
+      return
+    }
+    if (latest.state === 'completed') {
+      await this.ctx.taskboard.completePatrolRun({
+        runId: run.id,
+        result: latest.result === 'review_handoff'
+          ? 'review_handoff'
+          : latest.result === 'blocked' ? 'blocked' : 'failed',
+        ...latest.error === null ? {} : { error: latest.error },
+      })
+      return
+    }
+    const issue = await this.ctx.taskboard.getIssue(latest.issueId)
+    if (issue === undefined) {
+      await this.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: latest.id,
+        error: `Patrol recovery cannot find Issue "${latest.issueId}"`,
+        actor: PATROL_ACTOR,
+      })
+      return
+    }
+    const context = await this.ctx.taskboard.getPatrolDevelopmentContext(latest.issueId)
+    if (context === undefined || latest.sessionId !== context.sessionId) {
+      await this.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: latest.id,
+        error: context === undefined
+          ? `Patrol recovery Issue "${issue.identifier}" has no persistent Development Context`
+          : `Patrol recovery Attempt "${latest.id}" does not name the exact bound Session`,
+        actor: PATROL_ACTOR,
+      })
+      return
+    }
+    const policy = await this.ctx.taskboard.getPatrolPolicy(run.workspaceId)
+    if (policy === undefined) {
+      await this.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: latest.id,
+        error: `Workspace "${run.workspaceId}" has no Taskboard Patrol Policy`,
+        actor: PATROL_ACTOR,
+      })
+      return
+    }
+    const review = (await this.ctx.taskboard.listPatrolReviews(issue.id))
+      .find(value => value.attemptId === latest.id)
+    try {
+      const outcome = await this.executeAttempt(latest, issue, policy, review === undefined ? {} : { review })
+      if (outcome.kind === 'permission_blocked') {
+        await this.ctx.taskboard.completePatrolAttempt({
+          attemptId: latest.id,
+          result: 'permission_blocked',
+          error: outcome.reason,
+          actor: PATROL_ACTOR,
+        })
+        await this.execute(run)
+        return
+      }
+      await this.ctx.taskboard.completePatrolAttempt({
+        attemptId: latest.id,
+        result: 'review_handoff',
+        resultCommit: outcome.commit,
+        actor: PATROL_ACTOR,
+      })
+      await this.ctx.taskboard.completePatrolRun({ runId: run.id, result: 'review_handoff' })
+    } catch (error: unknown) {
+      await this.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: latest.id,
+        error: errorText(error),
+        actor: PATROL_ACTOR,
+      })
+    }
   }
 
   /** Execute zero or more claims, continuing only after a permission-blocked Attempt. */
   private async execute(run: PatrolRun, preferred?: IssueReference): Promise<void> {
     const policy = await this.ctx.taskboard.getPatrolPolicy(run.workspaceId)
     if (policy === undefined) throw new Error(`Workspace "${run.workspaceId}" has no Taskboard Patrol Policy`)
-    let permissionBlocks = 0
+    const attempts = await this.ctx.taskboard.listPatrolAttempts(run.id)
+    let permissionBlocks = attempts.filter(value => value.result === 'permission_blocked').length
     let requested = preferred
     for (;;) {
       const candidate = await this.claimNext(run, policy, requested)
@@ -276,36 +387,42 @@ export class PatrolCoordinator {
     attempt: PatrolAttempt,
     issue: Issue,
     policy: PatrolPolicy,
+    recovery?: { readonly review?: PatrolReview },
   ): Promise<{ kind: 'permission_blocked'; reason: string } | { kind: 'review_handoff'; commit: string }> {
     const lease = await this.host.prepare(attempt, issue, policy)
     try {
-      await runAgentTurn(lease.agent, implementationPrompt(issue))
-      const firstApproval = permissionReason(lease.rejectedApprovals)
-      if (firstApproval !== undefined) return { kind: 'permission_blocked', reason: firstApproval }
-      const preliminary = await this.host.result(lease.context)
-      requireCommittable(preliminary.clean, preliminary.changedFromBase, issue)
-      const diff = await this.host.diff(lease.context, preliminary.head)
-      const workspace = this.ctx.workspaceRegistry.get(issue.workspaceId)
-      if (workspace === undefined) throw new Error(`Workspace "${issue.workspaceId}" is not registered`)
-      const reviewed = await this.reviewer.review(
-        attempt,
-        issue,
-        lease.context,
-        lease.worktree,
-        preliminary.head,
-        diff,
-        workspace,
-      )
-      const review = await this.ctx.taskboard.recordPatrolReview({
-        attemptId: attempt.id,
-        ...reviewed,
-      })
+      let review = recovery?.review
+      if (review === undefined) {
+        await runAgentTurn(lease.agent, recovery === undefined
+          ? implementationPrompt(issue)
+          : recoveryPrompt(issue))
+        const firstApproval = permissionReason(lease.rejectedApprovals)
+        if (firstApproval !== undefined) return { kind: 'permission_blocked', reason: firstApproval }
+        const preliminary = await this.host.result(lease.context)
+        requireCommittable(preliminary.clean, preliminary.changedFromBase, issue)
+        const diff = await this.host.diff(lease.context, preliminary.head)
+        const workspace = this.ctx.workspaceRegistry.get(issue.workspaceId)
+        if (workspace === undefined) throw new Error(`Workspace "${issue.workspaceId}" is not registered`)
+        const reviewed = await this.reviewer.review(
+          attempt,
+          issue,
+          lease.context,
+          lease.worktree,
+          preliminary.head,
+          diff,
+          workspace,
+        )
+        review = await this.ctx.taskboard.recordPatrolReview({
+          attemptId: attempt.id,
+          ...reviewed,
+        })
+      }
       await runAgentTurn(lease.agent, remediationPrompt(review))
       const correctionApproval = permissionReason(lease.rejectedApprovals)
       if (correctionApproval !== undefined) return { kind: 'permission_blocked', reason: correctionApproval }
       const result = await this.host.result(lease.context)
       requireCommittable(result.clean, result.changedFromBase, issue)
-      if (review.verdict === 'changes_requested' && result.head === preliminary.head) {
+      if (review.verdict === 'changes_requested' && result.head === review.reviewedCommit) {
         throw new Error(`Patrol Agent did not commit requested corrections for Issue "${issue.identifier}"`)
       }
       return { kind: 'review_handoff', commit: result.head }

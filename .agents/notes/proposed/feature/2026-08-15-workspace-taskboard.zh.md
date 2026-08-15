@@ -106,11 +106,15 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 
 ## 当前实现
 
-前七个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情、持久 Patrol 状态、本地 Git 与准确 Session 执行、固定间隔协调、独立 Reviewer 和人工审查控件。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录、依赖、Patrol 配置与历史、手工 Run 和 Issue 证据。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
+八个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情、持久 Patrol 状态、本地 Git 与准确 Session 执行、固定间隔协调、启动恢复、独立 Reviewer 和人工审查控件。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录、依赖、Patrol 配置与历史、手工 Run 和 Issue 证据。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
 
 浏览器 UI 从每个 Workspace 行进入，以所选 Taskboard 替换对话中间区域，并复用现有右侧详情栏。其视图、甘特图时间刻度与筛选偏好保存在浏览器存储中，权威 Issue 数据仍由 Host 持有。甘特图渲染器会在表格中保留未排期 Issue，在已排期条形之间绘制规范 `blocks` 连线，并只持久化被拖动 Issue 的日期而不产生级联变更。
 
-每个已确保的 Taskboard 都持有默认关闭、间隔为 `1h` 且包含执行选项的 Patrol Policy。协调器会消费到期时间，只按手工顺序扫描 `todo`，并跳过用户指派、明确等待，以及未满足或尚未集成的依赖。永久 Development Context 会固定每个 Patrol Issue 的本地分支、worktree、准确 Session、Agent Preset、模型选择和 Permission Preset。实现 Agent 必须提交干净的 Base Branch diff。独立的持久 Reviewer 固定使用只读沙箱、`never` 审批策略和唯一结构化提交工具，并记录永久证据；原 Session 会收到该证据，执行一轮修正，再把 Issue 移至 `in_review`。一项审查交接会结束 Run，只有被拒绝的工具审批才允许阻塞当前 Issue 后继续扫描。UI 会发现 Host 所属配置选项，显示永久 Run 与 Attempt 历史，暴露 Issue Session、Git 和审查证据，并把 `done` 与代码集成都留给用户。进程丢失所中断 Run 的恢复仍处于提案状态。
+每个已确保的 Taskboard 都持有默认关闭、间隔为 `1h` 且包含执行选项的 Patrol Policy。协调器会消费到期时间，只按手工顺序扫描 `todo`，并跳过用户指派、明确等待，以及未满足或尚未集成的依赖。永久 Development Context 会固定每个 Patrol Issue 的本地分支、worktree、准确 Session、Agent Preset、模型选择和 Permission Preset。实现 Agent 必须提交干净的 Base Branch diff。独立的持久 Reviewer 固定使用只读沙箱、`never` 审批策略和唯一结构化提交工具，并记录永久证据；原 Session 会收到该证据，执行一轮修正，再把 Issue 移至 `in_review`。一项审查交接会结束 Run，只有被拒绝的工具审批才允许阻塞当前 Issue 后继续扫描。Host 启动时会先记录恢复次数与时间，再恢复唯一未完成 Run。恢复会复用准确 Development Context 和已有 Reviewer 证据；Session 或 worktree 缺失或不匹配时，Attempt 与 Run 会原子地失败，Issue 被阻塞，原因被记录，并且绝不会创建替代对象。UI 会发现 Host 所属配置选项，显示永久 Run、Attempt、恢复、Session、Git 和审查证据，并把 `done` 与代码集成都留给用户。
+
+## 版本一之后的计划
+
+版本一只在本地运行，绝不会在 `deepseek-ai/deepseek-harness` 中创建、评论、更新或同步 Issue。后续交付按以下顺序推进：先增加显式选择加入的仓库绑定与凭据检查；再增加由用户发起的发布操作，创建一条 GitHub Issue，并保存永久的本地—远程身份映射与审计记录；随后增加具备冲突处理的元数据和评论导入或同步；最后再考虑从 Patrol 结果 commit 出发、单独授权的 Draft PR 发布。Patrol 不得自动发布 Issue，人工审查通过也绝不得自动合并代码。
 
 ## 考虑过的替代方案
 
@@ -226,7 +230,7 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 - 一次 Patrol Run 最多把一个 Issue 移至 `in_review`；只有前一个已认领 Issue 因工具权限审批转为 `blocked` 后，本轮才可以继续认领另一个 Issue。
 - 整个 Host 在所有 Workspace 中最多只有一次活动 Patrol Run；重叠触发会记录 `skipped-global-busy`，且不产生排队运行。
 - 每次定时触发都有持久且可见的 Patrol Run 结果，但空触发或跳过触发不会创建 Session。
-- 宿主重启会在新触发前恢复未完成 Run，只尝试一次恢复原 Session 和 worktree；无法恢复时会把 Issue 转为 `blocked`，且不创建替代对象。
+- 宿主重启会记录恢复次数与时间，在新触发前恢复未完成 Run，只尝试一次恢复原 Session 和 worktree，复用已有 Reviewer 证据；无法恢复时会把 Issue 转为 `blocked`，且不创建替代对象。
 - 附件单文件不超过 25 MB，图片可预览，只通过受控 Host 路由下载，并且必须显式确认才能删除；评论和活动只能追加。
 - 右侧详情栏中的人工审查会展示 commit、Base Branch diff、Reviewer 意见、验证、风险及“通过”和“退回”操作；通知只存在于应用内。
 

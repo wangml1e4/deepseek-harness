@@ -210,6 +210,7 @@ describe('TaskboardPatrolService configuration', () => {
     const run = {
       id: PatrolRunId('run-configuration'), workspaceId, trigger: 'manual' as const,
       scheduledFor: null, state: 'active' as const, result: null, error: null,
+      recoveryCount: 0, lastRecoveredAt: null,
       startedAt: NOW, endedAt: null,
     }
     const coordinator = (test.service as unknown as { coordinator: PatrolCoordinator }).coordinator

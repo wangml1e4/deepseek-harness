@@ -12,10 +12,11 @@ Workspace Taskboard Patrol 的 Host 执行支持。`ctx.taskboardPatrol` 将已�
 - 每个执行 lease 会以 `rejected` 回答全部工具审批请求，记录请求工具及原因，并取消该轮。Patrol 协调器负责随后写回 Attempt 和 Issue。
 - 协调器根据持久化的 `nextDueAt` 调度已启用策略，只按手工顺序扫描 `todo` Issue，并跳过用户指派、明确等待，以及其 `done` 结果 commit 尚未集成到该 Issue 固定 Base Branch 的依赖项。
 - 一轮 Run 会在一个已审查 Issue 进入 `in_review` 后结束。只有因工具审批受阻的 Attempt 才能继续领取下一个合格 `todo`；其他任何故障都会阻塞已领取 Issue 并结束 Run。
+- 启动时，协调器会先恢复唯一的持久活跃 Run，再调度新的到期触发。活跃 Attempt 只能恢复其准确绑定 Session 和 worktree。已有 Reviewer 证据会被复用；否则恢复后的实现 Session 会先收到一轮恢复任务，再进入审查。绑定缺失或不匹配时，Run 与 Attempt 会以失败结束，Issue 移至 `blocked`，并且绝不会创建替代 Session。
 - 实现 Agent 必须留下干净且已提交的 Base Branch diff。独立的持久 Reviewer Session 会接收该已提交 diff，继承已保存的模型组合，只暴露结构化审查提交工具，并固定使用只读沙箱与 `never` 审批策略。实现 Session 随后接收持久审查结论，执行一轮修正与验证，再交给人工审查。
 - `configuration()` 会发现本地分支、可挂载 Agent Preset、在线 provider／model／reasoning 选项和现有 Permission Preset。`updatePolicy()` 在乐观版本保存前校验这些 Host 所属选项。`trigger()` 可在不启用固定调度的情况下启动手工 Run。
 
-调度器在 Host 进程内运行，Host 停止期间不能执行。Taskboard Policy 会保留固定节拍，下一次启动最多消费一次已到期触发。
+调度器在 Host 进程内运行，Host 停止期间不能执行。Taskboard Policy 会保留固定节拍；启动时会先完成活跃 Run 恢复，再最多消费一次已到期触发。
 
 ## 模型体验
 
@@ -61,7 +62,21 @@ Reviewer 会收到准确的初步 commit 及其受限 Base Branch diff，再通�
 
 仅追加到实现 Session 的可复用前缀之后。策略发现与定时检查不影响模型请求。
 
+### 恢复任务
+
+#### 模型所见
+
+进程丢失在 Reviewer 证据落库前中断 Attempt 时，准确的原实现 Session 会再次收到该 Issue，以及检查此前 transcript 和当前永久 worktree、避免重复已完成工作、验证并提交的指令。已有 Reviewer 证据时，恢复会跳过该任务，直接从修正任务继续。
+
+#### Token 影响
+
+只有不存在持久审查检查点时，一条持久用户消息才会增加恢复指令与 Issue 内容。
+
+#### KV Cache 影响
+
+仅追加到恢复后实现 Session 的现有可复用前缀之后。
+
 ## 已知限制与延后工作
 
-- 未完成 Run 的启动恢复由恢复 Consumer 层交付；进程存活期间的 Run 已持久化，但本包尚不会在进程丢失后重新进入该 Run。
 - 本包只支持本地 Git 仓库和永久本地 worktree；特意不提供远程 fetch、push、PR、merge 或清理操作。
+- 版本一绝不会把 Taskboard Issue 发布到 `deepseek-ai/deepseek-harness` GitHub Issues。

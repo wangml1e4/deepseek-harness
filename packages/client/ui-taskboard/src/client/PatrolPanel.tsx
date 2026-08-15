@@ -135,6 +135,10 @@ export function PatrolPanel({ useTaskboard, updatePatrol, runPatrol, close, t }:
                   <time>{new Date(run.startedAt).toLocaleString()}</time>
                 </summary>
                 <p>{t(`patrol.trigger.${run.trigger}`)} · {attempts.length} {t('patrol.attempts')}</p>
+                {run.lastRecoveredAt !== null && <p>{t('patrol.recovery', {
+                  count: run.recoveryCount,
+                  time: new Date(run.lastRecoveredAt).toLocaleString(),
+                })}</p>}
                 {run.error !== null && <p className={css.inlineError}>{run.error}</p>}
                 {attempts.map(attempt => (
                   <div className={css.attemptRow} key={attempt.id}>

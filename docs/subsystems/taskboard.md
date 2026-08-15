@@ -28,6 +28,8 @@ A scheduled trigger consumes its prior due instant and advances by fixed cadence
 
 Patrol Run reservation is Host-wide and durable. One active row excludes every other active row across Workspaces. Scheduled overlap persists a completed `skipped_global_busy` result and advances that Workspace's cadence without queueing; manual overlap rejects. Terminal Run results cannot be overwritten and no Run deletion operation exists.
 
+Before scheduling any new due trigger, Host startup finds the active Run without relying on Workspace enumeration and appends recovery evidence by incrementing `recoveryCount` and saving `lastRecoveredAt`. A completed Attempt checkpoint is reconciled directly; a permission-blocked checkpoint resumes scanning under the same Run.
+
 ## Patrol claims and execution identity
 
 A Run owns an ordered sequence of permanent `PatrolAttempt` records. An atomic claim verifies the active Run, exact Issue version, `todo` status, non-User assignment, and every blocking Issue's completed result commit before moving the Issue to `in_progress`. A Run may claim again only after its preceding Attempt ended as `permission_blocked`; every other terminal Attempt ends its claim allowance.
@@ -40,6 +42,8 @@ One active Attempt accepts one permanent `PatrolReview` from a distinct Reviewer
 
 The Patrol Consumer uses the managed subprocess service for a fixed local-only Git command set, never runs fetch, pull, push, PR, merge, reset, branch deletion, or worktree removal, and preserves the Workspace-relative Session directory inside the Issue worktree. It resumes the exact Session, mounts the saved Agent and Permission Presets, and rejects unattended approvals. The implementation Agent must leave a clean committed change. A separate persistent Reviewer Session receives the bounded committed diff, exposes only its structured submission tool, and uses fixed read-only sandboxing with approval policy `never`; the original Session receives its durable findings for one correction turn before human review.
 
+An interrupted active Attempt can recover only through its stored Development Context. Recovery reopens the exact Session and worktree, reuses Reviewer evidence already stored for that Attempt, and otherwise asks the implementation Session to inspect its prior transcript and current branch before continuing. A missing or mismatched Context, Session, or worktree atomically ends the Attempt and Run as failed, moves the Issue to `blocked`, appends the reason, and never creates a replacement Session.
+
 ## Consumers and storage
 
 Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, and Activity consistent.
@@ -48,7 +52,11 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column and discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host. Version one does not publish or synchronize GitHub Issues.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+
+## Post-version-one GitHub plan
+
+Later work may add an explicit, opt-in repository binding; a user-owned publish action that creates one mapped GitHub Issue with durable provenance; conflict-aware import and metadata synchronization; and separately authorized Draft pull-request publication from a Patrol result commit. Each phase requires its own credential, permission, error, and audit design. None may auto-publish from Patrol or auto-merge code.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -226,6 +234,26 @@ abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
 abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
 
 /**
+ * Read the Host-wide unfinished Patrol Run, if one exists.
+ * @returns the active Run independently of Workspace registration.
+ */
+abstract getActivePatrolRun(): Promise<PatrolRun | undefined>
+
+/**
+ * Append one startup recovery attempt to an active Run's audit fields.
+ * @param runId - active Run being resumed.
+ * @returns the active Run with its incremented recovery evidence.
+ */
+abstract recordPatrolRecovery(runId: PatrolRunId): Promise<PatrolRun>
+
+/**
+ * Atomically fail an unrecoverable Run and Attempt and move its Issue to blocked.
+ * @param input - exact active identities, durable reason, and Patrol actor.
+ * @returns the completed Run.
+ */
+abstract failPatrolRecovery(input: FailPatrolRecoveryInput): Promise<PatrolRun>
+
+/**
  * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.
  * @param input - Run, Issue version, dependency evidence, and Patrol actor.
  * @returns the durable active Attempt.
@@ -282,7 +310,7 @@ abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolRe
 abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:111`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:113`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -538,5 +566,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:573`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:589`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

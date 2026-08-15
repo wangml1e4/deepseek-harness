@@ -71,6 +71,7 @@ describe('assembled Workspace Taskboard', () => {
       `interval=${interval.value}`,
       `permissions=${[...within(patrolPanel).getByRole('combobox', { name: 'Permission preset' }).querySelectorAll('option')].map(option => option.textContent).join('|')}`,
       `run=${patrolPanel.textContent?.includes('No eligible Issue') ? 'no_eligible_issue' : '<absent>'}`,
+      `recovery=${patrolPanel.textContent?.includes('Recovered 1 time(s)') ? 'visible' : '<absent>'}`,
     ].join('\n')
     fireEvent.click(within(patrolPanel).getByRole('button', { name: 'Close Patrol settings' }))
 

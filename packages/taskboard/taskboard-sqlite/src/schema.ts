@@ -33,7 +33,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Current pre-release Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -129,6 +129,8 @@ export interface PatrolRunRow {
   state: PatrolRun['state']
   result: PatrolRunResult | null
   error: string | null
+  recovery_count: number
+  last_recovered_at: string | null
   started_at: string
   ended_at: string | null
 }
@@ -355,6 +357,8 @@ export function openTaskboardDatabase(
           'no_eligible_issue', 'review_handoff', 'blocked', 'failed', 'skipped_global_busy'
         )),
         error         TEXT,
+        recovery_count INTEGER NOT NULL DEFAULT 0 CHECK (recovery_count >= 0),
+        last_recovered_at TEXT,
         started_at    TEXT NOT NULL,
         ended_at      TEXT,
         CHECK (
@@ -599,6 +603,8 @@ export function rowToPatrolRun(row: PatrolRunRow): PatrolRun {
     state: row.state,
     result: row.result,
     error: row.error,
+    recoveryCount: row.recovery_count,
+    lastRecoveredAt: row.last_recovered_at,
     startedAt: row.started_at,
     endedAt: row.ended_at,
   }

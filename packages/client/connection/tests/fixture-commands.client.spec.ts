@@ -200,7 +200,10 @@ describe('FixtureApiClient Taskboard Remote', () => {
       ok: true
       value: { policy: { enabled: boolean; version: number }; runs: unknown[] }
     }>(rpc, 'taskboard/patrol', { workspaceId: 'fx-ws-fixture' })
-    expect(patrol.value).toMatchObject({ policy: { enabled: false, version: 1 }, runs: [] })
+    expect(patrol.value).toMatchObject({
+      policy: { enabled: false, version: 1 },
+      runs: [{ run: { id: 'fx-patrol-run-recovered', recoveryCount: 1 } }],
+    })
     const enabled = await callRemote<{ ok: true; value: { enabled: boolean; interval: string; version: number } }>(
       rpc,
       'taskboard/updatePatrol',
