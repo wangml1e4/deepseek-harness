@@ -11,16 +11,22 @@ import {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolRunId,
   RelationId,
   TaskboardError,
   TaskboardService,
+  DEFAULT_PATROL_INTERVAL,
+  nextPatrolCadence,
+  nextPatrolDueAfterSave,
 } from '@deepseek-ai/dsh-taskboard'
 import type {
   Activity,
   ActivityChange,
   AddCommentInput,
   AddIssueRelationInput,
+  BeginPatrolRunInput,
   Comment,
+  CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
   Issue,
@@ -29,9 +35,12 @@ import type {
   IssueRelationMutation,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolPolicy,
+  PatrolRun,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   UpdateIssueInput,
+  UpdatePatrolPolicyInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
   TaskboardActor,
@@ -41,12 +50,16 @@ import {
   rowToActivity,
   rowToComment,
   rowToIssue,
+  rowToPatrolPolicy,
+  rowToPatrolRun,
   rowToRelation,
   rowToWorkspace,
   type ActivityRow,
   type CommentRow,
   type IssueRow,
   type JournalMode,
+  type PatrolPolicyRow,
+  type PatrolRunRow,
   type RelationRow,
   type WorkspaceRow,
 } from './schema.ts'
@@ -88,6 +101,7 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /** Assert a row written by the current transaction can be read back. */
 function requireStored<T>(value: T | undefined, subject: string): T {
+  /* v8 ignore next -- callers invoke this only after a successful same-transaction write. */
   if (value === undefined) throw new Error(`SQLite Taskboard failed to read stored ${subject}`)
   return value
 }
@@ -195,6 +209,11 @@ export class SqliteTaskboard extends TaskboardService {
           workspace_id, title, prefix, next_issue_number, version, created_at, updated_at
         ) VALUES (?, ?, ?, 1, 1, ?, ?)
       `).run(input.workspaceId, input.title, prefix, timestamp, timestamp)
+      db.prepare(`
+        INSERT INTO patrol_policies (
+          workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+        ) VALUES (?, 0, ?, NULL, 1, ?, ?)
+      `).run(input.workspaceId, DEFAULT_PATROL_INTERVAL, timestamp, timestamp)
       db.exec('COMMIT')
       const stored = requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
       this.notifyChanged(input.workspaceId)
@@ -875,10 +894,201 @@ export class SqliteTaskboard extends TaskboardService {
     return row === undefined ? undefined : rowToIssue(row)
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async getPatrolPolicy(
+    workspaceId: EnsureWorkspaceInput['workspaceId'],
+  ): Promise<PatrolPolicy | undefined> {
+    const row = this.database().prepare(`
+      SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+      FROM patrol_policies
+      WHERE workspace_id = ?
+    `).get(workspaceId) as PatrolPolicyRow | undefined
+    return row === undefined ? undefined : rowToPatrolPolicy(row)
+  }
+
+  async updatePatrolPolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const row = db.prepare(`
+        SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+        FROM patrol_policies
+        WHERE workspace_id = ?
+      `).get(input.workspaceId) as PatrolPolicyRow | undefined
+      if (row === undefined) {
+        throw new TaskboardError(
+          'workspace_not_found',
+          `cannot update Patrol Policy: Workspace '${input.workspaceId}' has no Taskboard`,
+        )
+      }
+      if (row.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot update Patrol Policy: expected version ${input.expectedVersion}, found ${row.version}`,
+        )
+      }
+      const enabled = input.enabled ?? row.enabled === 1
+      const interval = input.interval ?? row.interval
+      if (enabled === (row.enabled === 1) && interval === row.interval) {
+        db.exec('COMMIT')
+        return rowToPatrolPolicy(row)
+      }
+      const savedAt = new Date()
+      const timestamp = savedAt.toISOString()
+      const nextDueAt = enabled ? nextPatrolDueAfterSave(savedAt, interval) : null
+      db.prepare(`
+        UPDATE patrol_policies
+        SET enabled = ?, interval = ?, next_due_at = ?, version = version + 1, updated_at = ?
+        WHERE workspace_id = ? AND version = ?
+      `).run(enabled ? 1 : 0, interval, nextDueAt, timestamp, input.workspaceId, input.expectedVersion)
+      db.exec('COMMIT')
+      const stored = requireStored(await this.getPatrolPolicy(input.workspaceId), 'Patrol Policy')
+      this.notifyChanged(input.workspaceId)
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]> {
+    const timestamp = new Date().toISOString()
+    const rows = this.database().prepare(`
+      SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+      FROM patrol_policies
+      WHERE enabled = 1 AND next_due_at <= ?
+      ORDER BY next_due_at, workspace_id
+    `).all(timestamp) as unknown as PatrolPolicyRow[]
+    return rows.map(rowToPatrolPolicy)
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async beginPatrolRun(input: BeginPatrolRunInput): Promise<PatrolRun> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const policyRow = db.prepare(`
+        SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+        FROM patrol_policies
+        WHERE workspace_id = ?
+      `).get(input.workspaceId) as PatrolPolicyRow | undefined
+      if (policyRow === undefined) {
+        throw new TaskboardError(
+          'workspace_not_found',
+          `cannot begin Patrol Run: Workspace '${input.workspaceId}' has no Taskboard`,
+        )
+      }
+      const now = new Date()
+      const timestamp = now.toISOString()
+      let scheduledFor: string | null = null
+      if (input.trigger === 'scheduled') {
+        if (policyRow.enabled !== 1 || policyRow.next_due_at === null || policyRow.next_due_at > timestamp) {
+          throw new TaskboardError('patrol_not_due', `Workspace '${input.workspaceId}' Patrol is not due`)
+        }
+        scheduledFor = policyRow.next_due_at
+        db.prepare(`
+          UPDATE patrol_policies
+          SET next_due_at = ?, version = version + 1, updated_at = ?
+          WHERE workspace_id = ? AND version = ?
+        `).run(
+          nextPatrolCadence(scheduledFor, policyRow.interval, now),
+          timestamp,
+          input.workspaceId,
+          policyRow.version,
+        )
+      }
+      const active = db.prepare("SELECT 1 FROM patrol_runs WHERE state = 'active' LIMIT 1").get()
+      if (active !== undefined && input.trigger === 'manual') {
+        throw new TaskboardError('patrol_busy', 'another Patrol Run is already active')
+      }
+      const id = PatrolRunId(randomUUID())
+      const skipped = active !== undefined
+      db.prepare(`
+        INSERT INTO patrol_runs (
+          id, workspace_id, trigger, scheduled_for, state, result,
+          error, started_at, ended_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        id,
+        input.workspaceId,
+        input.trigger,
+        scheduledFor,
+        skipped ? 'completed' : 'active',
+        skipped ? 'skipped_global_busy' : null,
+        timestamp,
+        skipped ? timestamp : null,
+      )
+      db.exec('COMMIT')
+      const stored = requireStored(this.findPatrolRun(id), 'Patrol Run')
+      this.notifyChanged(input.workspaceId)
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const row = db.prepare(`
+        SELECT id, workspace_id, trigger, scheduled_for, state, result,
+               error, started_at, ended_at
+        FROM patrol_runs
+        WHERE id = ?
+      `).get(input.runId) as PatrolRunRow | undefined
+      if (row === undefined || row.state !== 'active') {
+        throw new TaskboardError('patrol_run_not_active', `Patrol Run '${input.runId}' is not active`)
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE patrol_runs
+        SET state = 'completed', result = ?, error = ?, ended_at = ?
+        WHERE id = ? AND state = 'active'
+      `).run(input.result, input.error ?? null, timestamp, input.runId)
+      db.exec('COMMIT')
+      const stored = requireStored(this.findPatrolRun(input.runId), 'Patrol Run')
+      this.notifyChanged(row.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listPatrolRuns(
+    workspaceId: EnsureWorkspaceInput['workspaceId'],
+  ): Promise<readonly PatrolRun[]> {
+    const rows = this.database().prepare(`
+      SELECT id, workspace_id, trigger, scheduled_for, state, result,
+             error, started_at, ended_at
+      FROM patrol_runs
+      WHERE workspace_id = ?
+      ORDER BY sequence DESC
+    `).all(workspaceId) as unknown as PatrolRunRow[]
+    return rows.map(rowToPatrolRun)
+  }
+
   /** Return the initialized database or fail if the Service lifecycle was bypassed. */
   private database(): DatabaseSync {
     if (this.db === undefined) throw new Error('SQLite Taskboard is not initialized')
     return this.db
+  }
+
+  /** Read one Patrol Run from the initialized database. */
+  private findPatrolRun(runId: PatrolRunId): PatrolRun | undefined {
+    const row = this.database().prepare(`
+      SELECT id, workspace_id, trigger, scheduled_for, state, result,
+             error, started_at, ended_at
+      FROM patrol_runs
+      WHERE id = ?
+    `).get(runId) as PatrolRunRow | undefined
+    /* v8 ignore next -- callers pass an id read or inserted in the same SQLite transaction. */
+    return row === undefined ? undefined : rowToPatrolRun(row)
   }
 
   /** Resolve an Issue reference for child-record foreign keys. */

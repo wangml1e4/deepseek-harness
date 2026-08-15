@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { IssueId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
+import { IssueId, PatrolRunId, RelationId, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
 import type { Issue } from '@deepseek-ai/dsh-taskboard'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import SqliteTaskboard from '../src/index.ts'
@@ -34,6 +34,257 @@ async function mount(path: string, config: Omit<Config, 'path'> = { journalMode:
 }
 
 describe('SQLite Taskboard service', () => {
+  it('persists a default-off one-hour Patrol Policy and recalculates cadence from each save', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000041')
+    const mounted = await mount(path)
+    try {
+      vi.useFakeTimers()
+      vi.setSystemTime('2026-08-16T01:00:00.000Z')
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Policy' })
+      const initial = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
+      expect(initial).toMatchObject({ workspaceId, enabled: false, interval: '1h', nextDueAt: null, version: 1 })
+
+      const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        expectedVersion: initial!.version,
+      })
+      expect(enabled).toMatchObject({ enabled: true, interval: '1h', nextDueAt: '2026-08-16T02:00:00.000Z' })
+
+      vi.setSystemTime('2026-08-16T01:10:00.000Z')
+      const changed = await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        interval: '30m',
+        expectedVersion: enabled.version,
+      })
+      expect(changed).toMatchObject({ enabled: true, interval: '30m', nextDueAt: '2026-08-16T01:40:00.000Z' })
+
+      const disabled = await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: false,
+        expectedVersion: changed.version,
+      })
+      expect(disabled).toMatchObject({ enabled: false, interval: '30m', nextDueAt: null })
+    } finally {
+      vi.useRealTimers()
+      await mounted.dispose()
+    }
+
+    const reopened = await mount(path)
+    try {
+      await expect(reopened.ctx.taskboard.getPatrolPolicy(workspaceId)).resolves.toMatchObject({
+        enabled: false,
+        interval: '30m',
+        nextDueAt: null,
+        version: 4,
+      })
+    } finally {
+      await reopened.dispose()
+    }
+  })
+
+  it('consumes one overdue cadence point and discards missed triggers', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000042')
+    const mounted = await mount(path)
+    try {
+      vi.useFakeTimers()
+      vi.setSystemTime('2026-08-16T01:00:00.000Z')
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Overdue Patrol' })
+      const initial = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
+      await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        interval: '30m',
+        expectedVersion: initial!.version,
+      })
+
+      vi.setSystemTime('2026-08-16T03:12:00.000Z')
+      await expect(mounted.ctx.taskboard.listDuePatrolPolicies()).resolves.toHaveLength(1)
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'scheduled' })
+      expect(run).toMatchObject({
+        workspaceId,
+        trigger: 'scheduled',
+        scheduledFor: '2026-08-16T01:30:00.000Z',
+        state: 'active',
+        result: null,
+      })
+      await expect(mounted.ctx.taskboard.getPatrolPolicy(workspaceId)).resolves.toMatchObject({
+        enabled: true,
+        nextDueAt: '2026-08-16T03:30:00.000Z',
+      })
+      await expect(mounted.ctx.taskboard.listDuePatrolPolicies()).resolves.toEqual([])
+    } finally {
+      vi.useRealTimers()
+      await mounted.dispose()
+    }
+  })
+
+  it('records scheduled global-busy overlaps without queueing and rejects a busy manual Run', async () => {
+    const path = await databasePath()
+    const firstWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000043')
+    const secondWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000044')
+    const mounted = await mount(path)
+    try {
+      vi.useFakeTimers()
+      vi.setSystemTime('2026-08-16T01:00:00.000Z')
+      for (const [workspaceId, title] of [[firstWorkspaceId, 'First Patrol'], [secondWorkspaceId, 'Second Patrol']] as const) {
+        await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title })
+        const policy = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
+        await mounted.ctx.taskboard.updatePatrolPolicy({
+          workspaceId,
+          enabled: true,
+          interval: '5m',
+          expectedVersion: policy!.version,
+        })
+      }
+      vi.setSystemTime('2026-08-16T01:05:00.000Z')
+      const active = await mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId: firstWorkspaceId,
+        trigger: 'scheduled',
+      })
+      const skipped = await mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId: secondWorkspaceId,
+        trigger: 'scheduled',
+      })
+      expect(active.state).toBe('active')
+      expect(skipped).toMatchObject({ state: 'completed', result: 'skipped_global_busy' })
+      await expect(mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId: secondWorkspaceId,
+        trigger: 'manual',
+      })).rejects.toMatchObject({ code: 'patrol_busy' })
+    } finally {
+      vi.useRealTimers()
+      await mounted.dispose()
+    }
+  })
+
+  it('persists terminal Patrol history and prevents completing a Run twice', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000045')
+    const first = await mount(path)
+    let runId = PatrolRunId('')
+    try {
+      await first.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol History' })
+      const run = await first.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      runId = run.id
+      const completed = await first.ctx.taskboard.completePatrolRun({
+        runId,
+        result: 'no_eligible_issue',
+      })
+      expect(completed).toMatchObject({ state: 'completed', result: 'no_eligible_issue' })
+      expect(completed.endedAt).toBeTypeOf('string')
+      await expect(first.ctx.taskboard.completePatrolRun({
+        runId,
+        result: 'failed',
+        error: 'must not overwrite history',
+      })).rejects.toMatchObject({ code: 'patrol_run_not_active' })
+    } finally {
+      await first.dispose()
+    }
+
+    const reopened = await mount(path)
+    try {
+      await expect(reopened.ctx.taskboard.listPatrolRuns(workspaceId)).resolves.toMatchObject([
+        { id: runId, state: 'completed', result: 'no_eligible_issue' },
+      ])
+    } finally {
+      await reopened.dispose()
+    }
+  })
+
+  it('rejects invalid Patrol scheduling mutations without changing durable state', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000046')
+    const missingWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000047')
+    const mounted = await mount(path)
+    try {
+      await expect(mounted.ctx.taskboard.getPatrolPolicy(missingWorkspaceId)).resolves.toBeUndefined()
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId: missingWorkspaceId,
+        enabled: true,
+        expectedVersion: 1,
+      })).rejects.toMatchObject({ code: 'workspace_not_found' })
+      await expect(mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId: missingWorkspaceId,
+        trigger: 'manual',
+      })).rejects.toMatchObject({ code: 'workspace_not_found' })
+
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Guarded Patrol' })
+      const initial = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        expectedVersion: 99,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      await expect(mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: false,
+        interval: '1h',
+        expectedVersion: initial!.version,
+      })).resolves.toEqual(initial)
+      await expect(mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId,
+        trigger: 'scheduled',
+      })).rejects.toMatchObject({ code: 'patrol_not_due' })
+
+      const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        expectedVersion: initial!.version,
+      })
+      await expect(mounted.ctx.taskboard.beginPatrolRun({
+        workspaceId,
+        trigger: 'scheduled',
+      })).rejects.toMatchObject({ code: 'patrol_not_due' })
+      await expect(mounted.ctx.taskboard.getPatrolPolicy(workspaceId)).resolves.toEqual(enabled)
+      await expect(mounted.ctx.taskboard.listPatrolRuns(workspaceId)).resolves.toEqual([])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('keeps an active Run through disablement and records its terminal error', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000048')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Active Patrol' })
+      const policy = await mounted.ctx.taskboard.getPatrolPolicy(workspaceId)
+      const enabled = await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: true,
+        expectedVersion: policy!.version,
+      })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      await mounted.ctx.taskboard.updatePatrolPolicy({
+        workspaceId,
+        enabled: false,
+        expectedVersion: enabled.version,
+      })
+      await expect(mounted.ctx.taskboard.listPatrolRuns(workspaceId)).resolves.toMatchObject([
+        { id: run.id, state: 'active' },
+      ])
+
+      const completed = await mounted.ctx.taskboard.completePatrolRun({
+        runId: run.id,
+        result: 'failed',
+        error: 'Provider unavailable',
+      })
+      expect(completed).toMatchObject({
+        state: 'completed',
+        result: 'failed',
+        error: 'Provider unavailable',
+      })
+      await expect(mounted.ctx.taskboard.completePatrolRun({
+        runId: PatrolRunId('missing-run'),
+        result: 'failed',
+      })).rejects.toMatchObject({ code: 'patrol_run_not_active' })
+    } finally {
+      await mounted.dispose()
+    }
+  })
   it('contains synchronous and asynchronous Taskboard observers after commit', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000031')
@@ -199,7 +450,7 @@ describe('SQLite Taskboard service', () => {
 
     const foreignPath = await databasePath()
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec('PRAGMA user_version = 1; PRAGMA application_id = 1234')
+    foreign.exec('PRAGMA user_version = 2; PRAGMA application_id = 1234')
     foreign.close()
     await expect(mount(foreignPath)).rejects.toThrow('application id 1234')
   })

@@ -5,7 +5,9 @@ import type {
   AddIssueRelationInput,
   Activity,
   AddCommentInput,
+  BeginPatrolRunInput,
   Comment,
+  CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
   Issue,
@@ -14,23 +16,43 @@ import type {
   IssueRelationMutation,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolPolicy,
+  PatrolRun,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   UpdateIssueInput,
+  UpdatePatrolPolicyInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
 } from './types.ts'
 
-export { ActivityId, CommentId, IssueId, IssueIdentifier, RelationId, TaskboardActorId } from './brand.ts'
+export {
+  ActivityId,
+  CommentId,
+  IssueId,
+  IssueIdentifier,
+  PatrolRunId,
+  RelationId,
+  TaskboardActorId,
+} from './brand.ts'
 export { TaskboardError } from './error.ts'
 export type { TaskboardErrorCode } from './error.ts'
+export {
+  DEFAULT_PATROL_INTERVAL,
+  PATROL_INTERVALS,
+  nextPatrolCadence,
+  nextPatrolDueAfterSave,
+  patrolIntervalMilliseconds,
+} from './patrol.ts'
 export type {
   AddIssueRelationInput,
   Activity,
   ActivityChange,
   ActivityValue,
   AddCommentInput,
+  BeginPatrolRunInput,
   Comment,
+  CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
   Issue,
@@ -45,10 +67,17 @@ export type {
   IssueStatus,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolInterval,
+  PatrolPolicy,
+  PatrolRun,
+  PatrolRunId as PatrolRunIdType,
+  PatrolRunResult,
+  PatrolRunTrigger,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   TaskboardActor,
   UpdateIssueInput,
+  UpdatePatrolPolicyInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
 } from './types.ts'
@@ -183,6 +212,51 @@ export abstract class TaskboardService extends Service {
    * @returns the Issue, or undefined when absent.
    */
   abstract getIssue(reference: IssueReference): Promise<Issue | undefined>
+
+  /**
+   * Read one Workspace's durable Patrol Policy.
+   * @param workspaceId - Workspace whose policy is requested.
+   * @returns the policy created with the Taskboard, or undefined when the Taskboard is absent.
+   */
+  abstract getPatrolPolicy(
+    workspaceId: EnsureWorkspaceInput['workspaceId'],
+  ): Promise<PatrolPolicy | undefined>
+
+  /**
+   * Save Patrol enablement or interval and recalculate its next trigger.
+   * @param input - Workspace, replacements, and caller-observed policy version.
+   * @returns the updated durable policy.
+   */
+  abstract updatePatrolPolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>
+
+  /**
+   * List enabled Patrol Policies whose next trigger has arrived.
+   * @returns due policies ordered by due instant and Workspace id.
+   */
+  abstract listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]>
+
+  /**
+   * Persist one trigger, atomically consuming a scheduled due instant and enforcing Host-wide exclusivity.
+   * @param input - Workspace and trigger origin.
+   * @returns an active Run, or a completed scheduled overlap record.
+   */
+  abstract beginPatrolRun(input: BeginPatrolRunInput): Promise<PatrolRun>
+
+  /**
+   * Complete one active Patrol Run exactly once.
+   * @param input - Run identity and terminal result.
+   * @returns the completed durable Run.
+   */
+  abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
+
+  /**
+   * List permanent Patrol Run history for one Workspace, newest first.
+   * @param workspaceId - Workspace whose Run history is requested.
+   * @returns every active and completed Run.
+   */
+  abstract listPatrolRuns(
+    workspaceId: EnsureWorkspaceInput['workspaceId'],
+  ): Promise<readonly PatrolRun[]>
 }
 
 export default TaskboardService

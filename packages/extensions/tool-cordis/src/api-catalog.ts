@@ -1843,6 +1843,42 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'reference', description: 'Stable Issue reference.' }],
         returns: 'the Issue, or undefined when absent.',
       },
+      {
+        signature: 'abstract getPatrolPolicy( workspaceId: EnsureWorkspaceInput[\'workspaceId\'], ): Promise<PatrolPolicy | undefined>',
+        description: 'Read one Workspace\'s durable Patrol Policy.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose policy is requested.' }],
+        returns: 'the policy created with the Taskboard, or undefined when the Taskboard is absent.',
+      },
+      {
+        signature: 'abstract updatePatrolPolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>',
+        description: 'Save Patrol enablement or interval and recalculate its next trigger.',
+        parameters: [{ name: 'input', description: 'Workspace, replacements, and caller-observed policy version.' }],
+        returns: 'the updated durable policy.',
+      },
+      {
+        signature: 'abstract listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]>',
+        description: 'List enabled Patrol Policies whose next trigger has arrived.',
+        parameters: [],
+        returns: 'due policies ordered by due instant and Workspace id.',
+      },
+      {
+        signature: 'abstract beginPatrolRun(input: BeginPatrolRunInput): Promise<PatrolRun>',
+        description: 'Persist one trigger, atomically consuming a scheduled due instant and enforcing Host-wide exclusivity.',
+        parameters: [{ name: 'input', description: 'Workspace and trigger origin.' }],
+        returns: 'an active Run, or a completed scheduled overlap record.',
+      },
+      {
+        signature: 'abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>',
+        description: 'Complete one active Patrol Run exactly once.',
+        parameters: [{ name: 'input', description: 'Run identity and terminal result.' }],
+        returns: 'the completed durable Run.',
+      },
+      {
+        signature: 'abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput[\'workspaceId\'], ): Promise<readonly PatrolRun[]>',
+        description: 'List permanent Patrol Run history for one Workspace, newest first.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose Run history is requested.' }],
+        returns: 'every active and completed Run.',
+      },
     ],
   },
   {
@@ -2974,6 +3010,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface BashEnvVariableInfo extends BashEnvVariable {\n    contributor: string;\n    key: DshEnvironmentKey;\n}',
   },
   {
+    name: 'BeginPatrolRunInput',
+    declaration: 'export interface BeginPatrolRunInput {\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n}',
+  },
+  {
     name: 'Branded',
     declaration: 'export type Branded<B extends string> = string & {\n    readonly [BRAND]: B;\n};',
   },
@@ -3072,6 +3112,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CompactionTrigger',
     declaration: 'export type CompactionTrigger = \'pressure\' | \'context-overflow\';',
+  },
+  {
+    name: 'CompletePatrolRunInput',
+    declaration: 'export interface CompletePatrolRunInput {\n    readonly runId: PatrolRunId;\n    readonly result: Exclude<PatrolRunResult, \'skipped_global_busy\'>;\n    readonly error?: string;\n}',
   },
   {
     name: 'ConfinedArgv',
@@ -3780,6 +3824,30 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OneShotSubagentDescriptorData',
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
+  },
+  {
+    name: 'PatrolInterval',
+    declaration: 'export type PatrolInterval = \'5m\' | \'30m\' | \'1h\' | \'2h\' | \'6h\' | \'12h\' | \'24h\';',
+  },
+  {
+    name: 'PatrolPolicy',
+    declaration: 'export interface PatrolPolicy {\n    readonly workspaceId: WorkspaceId;\n    readonly enabled: boolean;\n    readonly interval: PatrolInterval;\n    readonly nextDueAt: string | null;\n    readonly version: number;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'PatrolRun',
+    declaration: 'export interface PatrolRun {\n    readonly id: PatrolRunId;\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n    readonly scheduledFor: string | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolRunResult | null;\n    readonly error: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
+  },
+  {
+    name: 'PatrolRunId',
+    declaration: 'export type PatrolRunId = Branded<\'PatrolRunId\'>;',
+  },
+  {
+    name: 'PatrolRunResult',
+    declaration: 'export type PatrolRunResult = \'no_eligible_issue\' | \'review_handoff\' | \'blocked\' | \'failed\' | \'skipped_global_busy\';',
+  },
+  {
+    name: 'PatrolRunTrigger',
+    declaration: 'export type PatrolRunTrigger = \'scheduled\' | \'manual\';',
   },
   {
     name: 'PermissionSelect',
@@ -4579,7 +4647,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskboardErrorCode',
-    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\';',
+    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\';',
   },
   {
     name: 'TaskboardIssueListValue',
@@ -4892,6 +4960,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'UpdateIssueInput',
     declaration: 'export interface UpdateIssueInput {\n    readonly reference: IssueReference;\n    readonly title?: string;\n    readonly description?: string;\n    readonly status?: IssueStatus;\n    readonly priority?: IssuePriority;\n    readonly labels?: readonly string[];\n    readonly assignee?: IssueAssignee;\n    readonly startDate?: string | null;\n    readonly dueDate?: string | null;\n    readonly sortOrder?: number;\n    readonly expectedVersion: number;\n    readonly reason?: string;\n    readonly actor: TaskboardActor;\n}',
+  },
+  {
+    name: 'UpdatePatrolPolicyInput',
+    declaration: 'export interface UpdatePatrolPolicyInput {\n    readonly workspaceId: WorkspaceId;\n    readonly enabled?: boolean;\n    readonly interval?: PatrolInterval;\n    readonly expectedVersion: number;\n}',
   },
   {
     name: 'UserMessage',

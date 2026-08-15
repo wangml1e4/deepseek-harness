@@ -6,7 +6,7 @@ The Taskboard subsystem records durable work owned by a registered Workspace. [`
 
 ## Values and identity
 
-Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `CommentId`, `ActivityId`, `RelationId`, and `TaskboardActorId` are branded opaque identities.
+Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `CommentId`, `ActivityId`, `RelationId`, `PatrolRunId`, and `TaskboardActorId` are branded opaque identities.
 
 Every Issue has exactly one status: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, or `canceled`. Priority is `none`, `urgent`, `high`, `medium`, or `low`; it is metadata and never changes manual board order. Active lists exclude archived Issues by default.
 
@@ -20,6 +20,14 @@ Issue archiving is reversible. The service has no permanent Issue, Comment, or A
 
 `TaskboardError.code` distinguishes missing records, version conflicts, frozen prefixes, invalid archive transitions, missing return reasons, and relation validation failures. Providers reject before commit and preserve the stable code.
 
+## Patrol scheduling state
+
+Each Taskboard creates one `PatrolPolicy` with fixed-interval scheduling disabled and `1h` selected. The supported interval vocabulary is exactly `5m`, `30m`, `1h`, `2h`, `6h`, `12h`, and `24h`. Enabling or changing the interval calculates `nextDueAt` from the save instant; disabling clears it without changing an active Run.
+
+A scheduled trigger consumes its prior due instant and advances by fixed cadence to the first point after the current time. An overdue Host restart therefore produces one trigger rather than replaying every elapsed interval. A manual trigger does not enable the saved policy and may start while it is disabled.
+
+Patrol Run reservation is Host-wide and durable. One active row excludes every other active row across Workspaces. Scheduled overlap persists a completed `skipped_global_busy` result and advances that Workspace's cadence without queueing; manual overlap rejects. Terminal Run results cannot be overwritten and no Run deletion operation exists.
+
 ## Consumers and storage
 
 Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, and Activity consistent.
@@ -28,7 +36,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The current Consumer layer exposes bilingual Web Dashboard, Board, List, Gantt, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Attachments, Patrol scheduling, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
+The current Consumer layer exposes bilingual Web Dashboard, Board, List, Gantt, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. The Service and SQLite Provider now own Patrol scheduling state and permanent trigger history; the Host timer, execution Consumer, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -163,9 +171,50 @@ abstract removeRelation(input: RemoveIssueRelationInput): Promise<Issue>
  * @returns the Issue, or undefined when absent.
  */
 abstract getIssue(reference: IssueReference): Promise<Issue | undefined>
+
+/**
+ * Read one Workspace's durable Patrol Policy.
+ * @param workspaceId - Workspace whose policy is requested.
+ * @returns the policy created with the Taskboard, or undefined when the Taskboard is absent.
+ */
+abstract getPatrolPolicy( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<PatrolPolicy | undefined>
+
+/**
+ * Save Patrol enablement or interval and recalculate its next trigger.
+ * @param input - Workspace, replacements, and caller-observed policy version.
+ * @returns the updated durable policy.
+ */
+abstract updatePatrolPolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>
+
+/**
+ * List enabled Patrol Policies whose next trigger has arrived.
+ * @returns due policies ordered by due instant and Workspace id.
+ */
+abstract listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]>
+
+/**
+ * Persist one trigger, atomically consuming a scheduled due instant and enforcing Host-wide exclusivity.
+ * @param input - Workspace and trigger origin.
+ * @returns an active Run, or a completed scheduled overlap record.
+ */
+abstract beginPatrolRun(input: BeginPatrolRunInput): Promise<PatrolRun>
+
+/**
+ * Complete one active Patrol Run exactly once.
+ * @param input - Run identity and terminal result.
+ * @returns the completed durable Run.
+ */
+abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
+
+/**
+ * List permanent Patrol Run history for one Workspace, newest first.
+ * @param workspaceId - Workspace whose Run history is requested.
+ * @returns every active and completed Run.
+ */
+abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:63`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:92`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -313,5 +362,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:303`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:403`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->
