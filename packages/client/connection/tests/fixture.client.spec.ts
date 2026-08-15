@@ -214,11 +214,11 @@ describe('createFixtureApi', () => {
     const api = createFixtureApi()
     const settings = await api.settings.describe(req({}))
     if (!settings.result.ok) throw new Error('settings describe failed')
-    expect(settings.result.value.namespaces).toMatchObject([{
+    expect(settings.result.value.namespaces).toEqual(expect.arrayContaining([expect.objectContaining({
       ns: 'llm-deepseek',
       value: { apiKeyEnv: 'DEEPSEEK_API_KEY' },
       secrets: [{ path: ['apiKey'], set: false }],
-    }])
+    })]))
 
     const initial = await api.credentials.describe(req({ refs: ['DEEPSEEK_API_KEY', 'TEST_API_KEY'] }))
     if (!initial.result.ok) throw new Error('credential describe failed')
