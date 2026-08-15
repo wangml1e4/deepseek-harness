@@ -495,6 +495,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   CompletePatrolRunInput: 'taskboard.md',
   CreateIssueInput: 'taskboard.md',
   EnsureWorkspaceInput: 'taskboard.md',
+  FailPatrolRecoveryInput: 'taskboard.md',
   Issue: 'taskboard.md',
   IssueReference: 'taskboard.md',
   IssueRelation: 'taskboard.md',

@@ -13,6 +13,7 @@ import type {
   CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
+  FailPatrolRecoveryInput,
   Issue,
   IssueReference,
   IssueRelation,
@@ -67,6 +68,7 @@ export type {
   CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
+  FailPatrolRecoveryInput,
   Issue,
   IssueAssignee,
   IssueId as IssueIdType,
@@ -276,6 +278,26 @@ export abstract class TaskboardService extends Service {
   abstract listPatrolRuns(
     workspaceId: EnsureWorkspaceInput['workspaceId'],
   ): Promise<readonly PatrolRun[]>
+
+  /**
+   * Read the Host-wide unfinished Patrol Run, if one exists.
+   * @returns the active Run independently of Workspace registration.
+   */
+  abstract getActivePatrolRun(): Promise<PatrolRun | undefined>
+
+  /**
+   * Append one startup recovery attempt to an active Run's audit fields.
+   * @param runId - active Run being resumed.
+   * @returns the active Run with its incremented recovery evidence.
+   */
+  abstract recordPatrolRecovery(runId: PatrolRunId): Promise<PatrolRun>
+
+  /**
+   * Atomically fail an unrecoverable Run and Attempt and move its Issue to blocked.
+   * @param input - exact active identities, durable reason, and Patrol actor.
+   * @returns the completed Run.
+   */
+  abstract failPatrolRecovery(input: FailPatrolRecoveryInput): Promise<PatrolRun>
 
   /**
    * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.

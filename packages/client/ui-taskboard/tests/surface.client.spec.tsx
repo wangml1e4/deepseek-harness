@@ -91,7 +91,22 @@ function patrol(): TaskboardPatrolValue {
       { id: 'workspace-write', name: 'Workspace Write' },
       { id: 'danger-full-access', name: 'Full Access' },
     ],
-    runs: [],
+    runs: [{
+      run: {
+        id: 'run-recovered' as never,
+        workspaceId: 'ws' as never,
+        trigger: 'scheduled',
+        scheduledFor: '2026-08-16T00:00:00.000Z',
+        state: 'completed',
+        result: 'review_handoff',
+        error: null,
+        recoveryCount: 1,
+        lastRecoveredAt: '2026-08-16T00:05:00.000Z',
+        startedAt: '2026-08-16T00:00:00.000Z',
+        endedAt: '2026-08-16T00:10:00.000Z',
+      },
+      attempts: [],
+    }],
   }
 }
 
@@ -280,6 +295,7 @@ describe('TaskboardDetails', () => {
 
   it('configures the disabled-by-default Patrol and can trigger one Run', async () => {
     const view = mountDetails(snapshot({ detailPanel: 'patrol', patrol: patrol() }))
+    expect(screen.getByText(/已恢复 1 次/)).toBeTruthy()
     const toggle = screen.getByRole('switch', { name: '开启或关闭自动巡检' })
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(toggle)

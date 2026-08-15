@@ -1576,6 +1576,8 @@ interface FxPatrolRun {
   state: 'active' | 'completed'
   result: 'no_eligible_issue' | 'review_handoff' | 'blocked' | 'failed' | 'skipped_global_busy' | null
   error: string | null
+  recoveryCount: number
+  lastRecoveredAt: string | null
   startedAt: string
   endedAt: string | null
 }
@@ -1691,6 +1693,19 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       version: 1,
       createdAt: fixtureTaskboardTime,
       updatedAt: fixtureTaskboardTime,
+    })
+    patrolRuns.push({
+      id: 'fx-patrol-run-recovered',
+      workspaceId: fixtureWorkspaceId,
+      trigger: 'scheduled',
+      scheduledFor: '2026-08-15T07:00:00.000Z',
+      state: 'completed',
+      result: 'review_handoff',
+      error: null,
+      recoveryCount: 1,
+      lastRecoveredAt: '2026-08-15T08:05:00.000Z',
+      startedAt: '2026-08-15T07:00:00.000Z',
+      endedAt: '2026-08-15T08:10:00.000Z',
     })
   }
   const taskboardIssues: FxTaskboardIssue[] = options.empty ? [] : [
@@ -3580,6 +3595,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         state: 'completed',
         result: 'no_eligible_issue',
         error: null,
+        recoveryCount: 0,
+        lastRecoveredAt: null,
         startedAt: now,
         endedAt: now,
       }

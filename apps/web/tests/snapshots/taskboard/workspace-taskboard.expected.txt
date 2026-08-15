@@ -12,6 +12,7 @@ patrol=enabled
 interval=30m
 permissions=Workspace Write|Full Access
 run=no_eligible_issue
+recovery=visible
 session=fx-beta
 review=Reviewer requested changes|Verification:|Remaining risks:
 human=Return to todo|Mark done

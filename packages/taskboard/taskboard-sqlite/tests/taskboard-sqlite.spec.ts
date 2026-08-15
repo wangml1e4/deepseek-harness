@@ -250,6 +250,98 @@ describe('SQLite Taskboard service', () => {
     }
   })
 
+  it('audits startup recovery and atomically blocks an unrecoverable active Attempt', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-00000000005a')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Recovery' })
+      const issue = await mounted.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Resume exact Session',
+        status: 'todo',
+      })
+      const run = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      const attempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: run.id,
+        reference: issue.id,
+        expectedVersion: issue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+
+      await expect(mounted.ctx.taskboard.getActivePatrolRun()).resolves.toMatchObject({ id: run.id })
+      const recovered = await mounted.ctx.taskboard.recordPatrolRecovery(run.id)
+      expect(recovered).toMatchObject({ recoveryCount: 1 })
+      expect(recovered.lastRecoveredAt).toBeTypeOf('string')
+
+      const failed = await mounted.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: attempt.id,
+        error: 'bound Session cannot be resumed from persistence',
+        actor: patrolActor,
+      })
+      expect(failed).toMatchObject({ state: 'completed', result: 'failed', recoveryCount: 1 })
+      await expect(mounted.ctx.taskboard.getActivePatrolRun()).resolves.toBeUndefined()
+      await expect(mounted.ctx.taskboard.listPatrolAttempts(run.id)).resolves.toMatchObject([{
+        id: attempt.id,
+        state: 'completed',
+        result: 'failed',
+        error: 'bound Session cannot be resumed from persistence',
+      }])
+      await expect(mounted.ctx.taskboard.getIssue(issue.id)).resolves.toMatchObject({ status: 'blocked' })
+      await expect(mounted.ctx.taskboard.listComments(issue.id)).resolves.toMatchObject([{
+        body: 'bound Session cannot be resumed from persistence',
+      }])
+      await expect(mounted.ctx.taskboard.listActivities(issue.id)).resolves.toEqual(expect.arrayContaining([
+        expect.objectContaining({ changes: [{ field: 'status', before: 'in_progress', after: 'blocked' }] }),
+      ]))
+      await expect(mounted.ctx.taskboard.recordPatrolRecovery(run.id))
+        .rejects.toMatchObject({ code: 'patrol_run_not_active' })
+      await expect(mounted.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: attempt.id,
+        error: ' ',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.failPatrolRecovery({
+        runId: run.id,
+        attemptId: attempt.id,
+        error: 'must not overwrite recovery history',
+        actor: patrolActor,
+      })).rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+
+      const blockedIssue = await mounted.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Already blocked while interrupted',
+        status: 'todo',
+      })
+      const blockedRun = await mounted.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      const blockedAttempt = await mounted.ctx.taskboard.claimPatrolIssue({
+        runId: blockedRun.id,
+        reference: blockedIssue.id,
+        expectedVersion: blockedIssue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      const claimedBlockedIssue = await mounted.ctx.taskboard.getIssue(blockedIssue.id)
+      await mounted.ctx.taskboard.updateIssue({
+        reference: blockedIssue.id,
+        status: 'blocked',
+        expectedVersion: claimedBlockedIssue!.version,
+        actor,
+      })
+      await expect(mounted.ctx.taskboard.failPatrolRecovery({
+        runId: blockedRun.id,
+        attemptId: blockedAttempt.id,
+        error: 'Session remained unavailable',
+        actor: patrolActor,
+      })).resolves.toMatchObject({ state: 'completed', result: 'failed' })
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
   it('rejects invalid Patrol scheduling mutations without changing durable state', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000046')
@@ -701,6 +793,24 @@ describe('SQLite Taskboard service', () => {
       })
       await expect(mounted.ctx.taskboard.getPatrolDevelopmentContext(candidate.id)).resolves.toBeUndefined()
       const missingAttempt = PatrolAttemptId('missing-attempt')
+      await expect(mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: missingAttempt,
+        sessionId: SessionId('reviewer-missing-attempt'),
+        reviewedCommit: 'commit',
+        verdict: 'approve',
+        findings: 'No findings.',
+        verification: [],
+        risks: [],
+      })).rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
+      await expect(mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: claimed.id,
+        sessionId: SessionId('reviewer-missing-context'),
+        reviewedCommit: 'commit',
+        verdict: 'approve',
+        findings: 'No findings.',
+        verification: [],
+        risks: [],
+      })).rejects.toMatchObject({ code: 'patrol_context_missing' })
       await expect(mounted.ctx.taskboard.markPatrolSessionStarted(missingAttempt))
         .rejects.toMatchObject({ code: 'patrol_attempt_not_active' })
       await expect(mounted.ctx.taskboard.markPatrolSessionStarted(claimed.id))
@@ -981,7 +1091,7 @@ describe('SQLite Taskboard service', () => {
 
     const foreignPath = await databasePath()
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec('PRAGMA user_version = 4; PRAGMA application_id = 1234')
+    foreign.exec('PRAGMA user_version = 5; PRAGMA application_id = 1234')
     foreign.close()
     await expect(mount(foreignPath)).rejects.toThrow('application id 1234')
   })

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { IssueId, IssueIdentifier, PatrolAttemptId } from '@deepseek-ai/dsh-taskboard'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
-import { hasExplicitWait, implementationPrompt, remediationPrompt, reviewerPrompt } from '../src/prompts.ts'
+import { hasExplicitWait, implementationPrompt, recoveryPrompt, remediationPrompt, reviewerPrompt } from '../src/prompts.ts'
 
 const issue = {
   id: IssueId('issue-prompts'),
@@ -36,6 +36,8 @@ describe('Patrol prompts', () => {
   it('frames Issue and diff content as untrusted while preserving local Git limits', () => {
     expect(implementationPrompt(issue)).toContain('Implement <unsafe>')
     expect(implementationPrompt(issue)).toContain('Do not fetch, pull, push')
+    expect(recoveryPrompt(issue)).toContain('exact prior Session and permanent worktree')
+    expect(recoveryPrompt(issue)).toContain('Do not repeat work already present')
     const review = reviewerPrompt(issue, 'abc123', { patch: '+change', stat: '1 file changed' })
     expect(review).toContain('preliminary commit abc123')
     expect(review).toContain('<diff>\n+change\n</diff>')

@@ -100,6 +100,10 @@ export interface PatrolRun {
   readonly result: PatrolRunResult | null
   /** Human-readable failure detail, or null when none was recorded. */
   readonly error: string | null
+  /** Number of Host startup recovery attempts recorded for this Run. */
+  readonly recoveryCount: number
+  /** ISO-8601 instant of the latest startup recovery attempt, or null before recovery. */
+  readonly lastRecoveredAt: string | null
   /** ISO-8601 trigger start instant. */
   readonly startedAt: string
   /** ISO-8601 terminal instant, or null while active. */
@@ -289,6 +293,18 @@ export interface CompletePatrolRunInput {
   readonly result: Exclude<PatrolRunResult, 'skipped_global_busy'>
   /** Human-readable failure detail, when any. */
   readonly error?: string
+}
+
+/** Atomically terminate an active Run and Attempt that cannot resume after Host startup. */
+export interface FailPatrolRecoveryInput {
+  /** Active Run being recovered. */
+  readonly runId: PatrolRunId
+  /** Active Attempt whose exact Session or worktree could not resume. */
+  readonly attemptId: PatrolAttemptId
+  /** Durable human-readable recovery failure. */
+  readonly error: string
+  /** Patrol actor recorded on the Issue lifecycle mutation and Comment. */
+  readonly actor: TaskboardActor
 }
 
 /** Workspace-owned metadata for its implicit Taskboard. */

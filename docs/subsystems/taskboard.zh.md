@@ -28,6 +28,8 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所有 Workspace 的其他活跃行。定时触发重叠会持久化已完成的 `skipped_global_busy` 结果，并推进该 Workspace 的节拍而不排队；手动触发重叠会被拒绝。Run 的终态结果不能覆写，也不存在删除 Run 的操作。
 
+Host 启动时会在调度任何新的到期触发前，不依赖 Workspace 枚举地找到活跃 Run，并通过递增 `recoveryCount` 与保存 `lastRecoveredAt` 追加恢复证据。已经完成的 Attempt 检查点会被直接对账；权限阻塞检查点则在同一 Run 下继续扫描。
+
 ## 巡检认领与执行身份
 
 一个 Run 拥有按顺序排列且永久保留的 `PatrolAttempt` 记录。原子认领会校验活跃 Run、准确 Issue 版本、`todo` 状态、非用户分配，以及所有阻塞 Issue 已完成的结果 commit，随后才把 Issue 移至 `in_progress`。只有前一个 Attempt 以 `permission_blocked` 结束时，同一 Run 才能继续认领；其他任何终态 Attempt 都会耗尽该轮的认领名额。
@@ -40,6 +42,8 @@ Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所
 
 Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。它会恢复准确 Session，挂载已保存的 Agent 与 Permission Preset，并拒绝无人值守审批。实现 Agent 必须留下干净且已提交的变更。独立的持久 Reviewer Session 会接收受限的已提交 diff，只暴露结构化提交工具，并固定使用只读沙箱和 `never` 审批策略；原 Session 随后接收其持久结论，执行一轮修正，再进入人工审查。
 
+被中断的活跃 Attempt 只能通过已存储的 Development Context 恢复。恢复会重新打开准确 Session 与 worktree，复用已为该 Attempt 落库的 Reviewer 证据；否则要求实现 Session 先检查此前 transcript 与当前分支再继续。Context、Session 或 worktree 缺失或不匹配时，Attempt 与 Run 会原子地结束为失败，Issue 移至 `blocked`，原因被追加记录，并且绝不会创建替代 Session。
+
 ## 消费方与存储
 
 消费方依赖 Service Definition，而非 SQLite 提供方。提供方启用外键，通过有序 Issue-label 行存储可复用的 Workspace 标签，使用固定 application id 和单调 schema 版本，并在初始化时拒绝存在内容但未标版本的文件、外来 application id 或不受支持的版本。其写事务使 Issue 版本、顺序、标签、必需评论、关系和活动记录保持一致。
@@ -48,7 +52,11 @@ Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git �
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，并从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset。版本一不会发布或同步 GitHub Issue。
+Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset，并显示 Run 恢复次数与时间。版本一不会发布或同步任何 GitHub Issue，包括 `deepseek-ai/deepseek-harness` 中的 Issue。
+
+## 版本一之后的 GitHub 计划
+
+后续可以依次增加显式选择加入的仓库绑定；由用户发起、创建一条带持久来源映射的 GitHub Issue 发布操作；具备冲突处理的导入与元数据同步；以及从 Patrol 结果 commit 出发、单独授权的 Draft PR 发布。每个阶段都必须独立设计凭据、权限、错误与审计。任何阶段都不得由 Patrol 自动发布 Issue 或自动合并代码。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -226,6 +234,26 @@ abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
 abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
 
 /**
+ * Read the Host-wide unfinished Patrol Run, if one exists.
+ * @returns the active Run independently of Workspace registration.
+ */
+abstract getActivePatrolRun(): Promise<PatrolRun | undefined>
+
+/**
+ * Append one startup recovery attempt to an active Run's audit fields.
+ * @param runId - active Run being resumed.
+ * @returns the active Run with its incremented recovery evidence.
+ */
+abstract recordPatrolRecovery(runId: PatrolRunId): Promise<PatrolRun>
+
+/**
+ * Atomically fail an unrecoverable Run and Attempt and move its Issue to blocked.
+ * @param input - exact active identities, durable reason, and Patrol actor.
+ * @returns the completed Run.
+ */
+abstract failPatrolRecovery(input: FailPatrolRecoveryInput): Promise<PatrolRun>
+
+/**
  * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.
  * @param input - Run, Issue version, dependency evidence, and Patrol actor.
  * @returns the durable active Attempt.
@@ -282,7 +310,7 @@ abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolRe
 abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:111`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:113`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -538,5 +566,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:573`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:589`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

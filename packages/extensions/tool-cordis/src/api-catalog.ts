@@ -1880,6 +1880,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'every active and completed Run.',
       },
       {
+        signature: 'abstract getActivePatrolRun(): Promise<PatrolRun | undefined>',
+        description: 'Read the Host-wide unfinished Patrol Run, if one exists.',
+        parameters: [],
+        returns: 'the active Run independently of Workspace registration.',
+      },
+      {
+        signature: 'abstract recordPatrolRecovery(runId: PatrolRunId): Promise<PatrolRun>',
+        description: 'Append one startup recovery attempt to an active Run\'s audit fields.',
+        parameters: [{ name: 'runId', description: 'active Run being resumed.' }],
+        returns: 'the active Run with its incremented recovery evidence.',
+      },
+      {
+        signature: 'abstract failPatrolRecovery(input: FailPatrolRecoveryInput): Promise<PatrolRun>',
+        description: 'Atomically fail an unrecoverable Run and Attempt and move its Issue to blocked.',
+        parameters: [{ name: 'input', description: 'exact active identities, durable reason, and Patrol actor.' }],
+        returns: 'the completed Run.',
+      },
+      {
         signature: 'abstract claimPatrolIssue(input: ClaimPatrolIssueInput): Promise<PatrolAttempt>',
         description: 'Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.',
         parameters: [{ name: 'input', description: 'Run, Issue version, dependency evidence, and Patrol actor.' }],
@@ -3479,6 +3497,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface EpochHeader {\n    config: LlmCallConfig;\n    adapterDefaults?: LlmCallConfigAdapterDefaults;\n    system?: string;\n    tools?: ToolSchema[];\n}',
   },
   {
+    name: 'FailPatrolRecoveryInput',
+    declaration: 'export interface FailPatrolRecoveryInput {\n    readonly runId: PatrolRunId;\n    readonly attemptId: PatrolAttemptId;\n    readonly error: string;\n    readonly actor: TaskboardActor;\n}',
+  },
+  {
     name: 'FileDiff',
     declaration: 'export interface FileDiff {\n    path: string;\n    oldText: string | null;\n    newText: string;\n}',
   },
@@ -4044,7 +4066,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PatrolRun',
-    declaration: 'export interface PatrolRun {\n    readonly id: PatrolRunId;\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n    readonly scheduledFor: string | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolRunResult | null;\n    readonly error: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
+    declaration: 'export interface PatrolRun {\n    readonly id: PatrolRunId;\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n    readonly scheduledFor: string | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolRunResult | null;\n    readonly error: string | null;\n    readonly recoveryCount: number;\n    readonly lastRecoveredAt: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
   },
   {
     name: 'PatrolRunId',
