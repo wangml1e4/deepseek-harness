@@ -16,6 +16,7 @@ import type {
   RemoveIssueRelationInput,
   TaskboardActor,
   UpdateIssueInput,
+  UpdatePatrolPolicyInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard/types'
@@ -24,6 +25,9 @@ import type {
   TaskboardCommentListValue,
   TaskboardIssueListValue,
   TaskboardIssueValue,
+  TaskboardPatrolIssueValue,
+  TaskboardPatrolTriggerInput,
+  TaskboardPatrolValue,
   TaskboardRelationListValue,
   TaskboardRemoteResult,
 } from '@deepseek-ai/dsh-taskboard-remote/types'
@@ -46,12 +50,18 @@ export interface TaskboardClientRemote {
   listRelations: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardRelationListValue>>>
   addRelation: (input: AddIssueRelationInput) => Promise<RemoteResult<TaskboardRemoteResult<IssueRelationMutation>>>
   removeRelation: (input: RemoveIssueRelationInput) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>
+  patrol: (workspaceId: WorkspaceId) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolValue>>>
+  updatePatrol: (input: UpdatePatrolPolicyInput) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolValue['policy']>>>
+  runPatrol: (input: TaskboardPatrolTriggerInput) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolValue['runs'][number]['run']>>>
+  patrolIssue: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolIssueValue>>>
 }
 
 /** Load phase for the active Taskboard. */
 export type TaskboardPhase = 'cold' | 'loading' | 'ready' | 'error'
 /** Load phase for the selected Issue's secondary records. */
 export type TaskboardDetailPhase = 'idle' | 'loading' | 'ready' | 'error'
+/** Right sidebar content selected by the user. */
+export type TaskboardDetailPanel = 'issue' | 'patrol' | null
 
 /** Immutable snapshot shared by the center and details Taskboard entries. */
 export interface TaskboardSnapshot {
@@ -60,11 +70,14 @@ export interface TaskboardSnapshot {
   readonly workspace: WorkspaceTaskboard | null
   readonly issues: readonly Issue[]
   readonly selectedIssue: Issue | null
+  readonly detailPanel: TaskboardDetailPanel
   readonly detailPhase: TaskboardDetailPhase
   readonly comments: readonly Comment[]
   readonly activities: readonly Activity[]
   readonly workspaceRelations: readonly IssueRelation[]
   readonly relations: readonly IssueRelation[]
+  readonly patrol: TaskboardPatrolValue | null
+  readonly patrolIssue: TaskboardPatrolIssueValue | null
   readonly error: string | null
   readonly detailError: string | null
   readonly actionError: string | null
@@ -86,11 +99,14 @@ const EMPTY: TaskboardSnapshot = Object.freeze({
   workspace: null,
   issues: Object.freeze([]),
   selectedIssue: null,
+  detailPanel: null,
   detailPhase: 'idle',
   comments: Object.freeze([]),
   activities: Object.freeze([]),
   workspaceRelations: Object.freeze([]),
   relations: Object.freeze([]),
+  patrol: null,
+  patrolIssue: null,
   error: null,
   detailError: null,
   actionError: null,
@@ -197,6 +213,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspace: result.value[0],
       issues: ordered(result.value[1].items),
       workspaceRelations: result.value[2].items,
+      patrol: result.value[3],
     })
     return OK
   }
@@ -209,6 +226,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
     const workspaceId = this.snapshot.workspaceId
     if (workspaceId === null) return OK
     const selectedId = this.snapshot.selectedIssue?.id
+    const detailPanel = this.snapshot.detailPanel
     const generation = ++this.activation
     ++this.detailLoad
     const result = await this.readWorkspace(workspaceId)
@@ -225,11 +243,14 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspace: result.value[0],
       issues,
       workspaceRelations: result.value[2].items,
+      patrol: result.value[3],
       selectedIssue: selected,
+      detailPanel: selected === null ? detailPanel === 'patrol' ? 'patrol' : null : 'issue',
       detailPhase: selected === null ? 'idle' : 'loading',
       comments: selected === null ? [] : this.snapshot.comments,
       activities: selected === null ? [] : this.snapshot.activities,
       relations: selected === null ? [] : this.snapshot.relations,
+      patrolIssue: selected === null ? null : this.snapshot.patrolIssue,
       error: null,
     })
     if (selected !== null) return await this.selectIssue(selected.id)
@@ -247,10 +268,12 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
     this.publish({
       ...this.snapshot,
       selectedIssue: immediate,
+      detailPanel: 'issue',
       detailPhase: 'loading',
       comments: [],
       activities: [],
       relations: [],
+      patrolIssue: null,
       detailError: null,
       actionError: null,
     })
@@ -273,6 +296,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       comments: result.value[1].items,
       activities: result.value[2].items,
       relations: result.value[3].items,
+      patrolIssue: result.value[4],
       detailError: null,
     })
     return OK
@@ -284,13 +308,87 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
     this.publish({
       ...this.snapshot,
       selectedIssue: null,
+      detailPanel: null,
       detailPhase: 'idle',
       comments: [],
       activities: [],
       relations: [],
+      patrolIssue: null,
       detailError: null,
       actionError: null,
     })
+  }
+
+  /** Select the Workspace Patrol settings/history panel without loading an Issue. */
+  openPatrol(): void {
+    ++this.detailLoad
+    this.publish({
+      ...this.snapshot,
+      selectedIssue: null,
+      detailPanel: 'patrol',
+      detailPhase: 'idle',
+      comments: [],
+      activities: [],
+      relations: [],
+      patrolIssue: null,
+      detailError: null,
+      actionError: null,
+    })
+  }
+
+  /**
+   * Save Patrol fields using the currently rendered policy version.
+   * @param patch - policy replacements excluding Workspace identity and version.
+   * @returns settled mutation result.
+   */
+  async updatePatrol(
+    patch: Omit<UpdatePatrolPolicyInput, 'workspaceId' | 'expectedVersion'>,
+  ): Promise<TaskboardActionResult> {
+    const context = this.patrolMutationContext()
+    if (context === null) {
+      return this.fail('workspace_not_found', 'No Workspace Patrol Policy is active')
+    }
+    const { patrol, workspaceId, generation } = context
+    return await this.mutate(
+      () => this.remote.updatePatrol({
+        ...patch,
+        workspaceId,
+        expectedVersion: patrol.policy.version,
+      }),
+      () => this.isActiveWorkspace(generation, workspaceId),
+      (policy) => {
+        this.publish({ ...this.snapshot, patrol: { ...patrol, policy }, actionError: null })
+      },
+    )
+  }
+
+  /**
+   * Start one manual Run and add its active record until pushed invalidation refreshes history.
+   * @param issue - optional exact todo Issue.
+   * @returns settled mutation result.
+   */
+  async runPatrol(issue?: IssueReference): Promise<TaskboardActionResult> {
+    const context = this.patrolMutationContext()
+    if (context === null) {
+      return this.fail('workspace_not_found', 'No Workspace Patrol Policy is active')
+    }
+    const { workspaceId, generation } = context
+    return await this.mutate(
+      () => this.remote.runPatrol({ workspaceId, ...issue === undefined ? {} : { issue } }),
+      () => this.isActiveWorkspace(generation, workspaceId),
+      (run) => {
+        /* v8 ignore next -- the active-Workspace guard retains the Patrol snapshot captured above. */
+        if (this.snapshot.patrol === null) return
+        this.publish({
+          ...this.snapshot,
+          patrol: {
+            ...this.snapshot.patrol,
+            runs: [{ run, attempts: [] }, ...this.snapshot.patrol.runs.filter(value => value.run.id !== run.id)],
+          },
+          actionError: null,
+        })
+      },
+    )
   }
 
   /**
@@ -356,10 +454,12 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
           ...this.snapshot,
           issues: this.snapshot.issues.filter(candidate => candidate.id !== archived.id),
           selectedIssue: closesSelection ? null : this.snapshot.selectedIssue,
+          detailPanel: closesSelection ? null : this.snapshot.detailPanel,
           detailPhase: closesSelection ? 'idle' : this.snapshot.detailPhase,
           comments: closesSelection ? [] : this.snapshot.comments,
           activities: closesSelection ? [] : this.snapshot.activities,
           relations: closesSelection ? [] : this.snapshot.relations,
+          patrolIssue: closesSelection ? null : this.snapshot.patrolIssue,
           actionError: null,
         })
       },
@@ -458,21 +558,25 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
     WorkspaceTaskboard,
     TaskboardIssueListValue,
     TaskboardRelationListValue,
+    TaskboardPatrolValue,
   ]>> {
     try {
-      const [workspaceResponse, issueResponse, relationResponse] = await Promise.all([
+      const [workspaceResponse, issueResponse, relationResponse, patrolResponse] = await Promise.all([
         this.remote.workspace(workspaceId),
         this.remote.listIssues({ workspaceId }),
         this.remote.listWorkspaceRelations(workspaceId),
+        this.remote.patrol(workspaceId),
       ])
       const workspace = unwrap(workspaceResponse)
       if (!workspace.ok) return workspace
       const issues = unwrap(issueResponse)
       if (!issues.ok) return issues
       const relations = unwrap(relationResponse)
-      return relations.ok
-        ? { ok: true, value: [workspace.value, issues.value, relations.value] }
-        : relations
+      if (!relations.ok) return relations
+      const patrol = unwrap(patrolResponse)
+      return patrol.ok
+        ? { ok: true, value: [workspace.value, issues.value, relations.value, patrol.value] }
+        : patrol
     } catch (error: unknown) {
       return rejected(error)
     }
@@ -484,6 +588,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
     TaskboardCommentListValue,
     TaskboardActivityListValue,
     TaskboardRelationListValue,
+    TaskboardPatrolIssueValue,
   ]>> {
     try {
       const responses = await Promise.all([
@@ -491,6 +596,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
         this.remote.listComments(reference),
         this.remote.listActivities(reference),
         this.remote.listRelations(reference),
+        this.remote.patrolIssue(reference),
       ])
       const selected = unwrap(responses[0])
       if (!selected.ok) return selected
@@ -499,9 +605,11 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       const activities = unwrap(responses[2])
       if (!activities.ok) return activities
       const relations = unwrap(responses[3])
-      return relations.ok
-        ? { ok: true, value: [selected.value, comments.value, activities.value, relations.value] }
-        : relations
+      if (!relations.ok) return relations
+      const patrol = unwrap(responses[4])
+      return patrol.ok
+        ? { ok: true, value: [selected.value, comments.value, activities.value, relations.value, patrol.value] }
+        : patrol
     } catch (error: unknown) {
       return rejected(error)
     }
@@ -556,6 +664,19 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspaceRelations,
       actionError: null,
     })
+  }
+
+  /** Capture the Patrol records required by one Workspace-scoped mutation. */
+  private patrolMutationContext(): {
+    readonly patrol: TaskboardPatrolValue
+    readonly workspaceId: WorkspaceId
+    readonly generation: number
+  } | null {
+    const patrol = this.snapshot.patrol
+    const workspaceId = this.snapshot.workspaceId
+    return patrol === null || workspaceId === null
+      ? null
+      : { patrol, workspaceId, generation: this.activation }
   }
 
   /** Whether an operation still belongs to the Workspace snapshot that started it. */

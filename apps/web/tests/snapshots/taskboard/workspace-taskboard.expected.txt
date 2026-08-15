@@ -8,4 +8,11 @@ issue=FIX-1
 sections=Comments,Dependencies,Activity
 dependency=FIX-2
 archive=Archive Issue
+patrol=enabled
+interval=30m
+permissions=Workspace Write|Full Access
+run=no_eligible_issue
+session=fx-beta
+review=Reviewer requested changes|Verification:|Remaining risks:
+human=Return to todo|Mark done
 gantt=week|mounted=true|styled=true|links=1

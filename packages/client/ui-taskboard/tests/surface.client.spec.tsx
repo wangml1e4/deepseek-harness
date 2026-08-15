@@ -6,6 +6,7 @@ import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { Issue, TaskboardActor, WorkspaceTaskboard } from '@deepseek-ai/dsh-taskboard/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { TaskboardPatrolValue } from '@deepseek-ai/dsh-taskboard-remote/types'
 import { TaskboardSurface, type TaskboardSurfaceProps } from '../src/client/TaskboardSurface.tsx'
 import { TaskboardDetails, type TaskboardDetailsProps } from '../src/client/TaskboardDetails.tsx'
 import { TaskboardSidebarAction, type TaskboardSidebarActionProps } from '../src/client/TaskboardSidebarAction.tsx'
@@ -60,6 +61,40 @@ const workspace: WorkspaceTaskboard = {
   updatedAt: '2026-08-15T00:00:00.000Z',
 }
 
+function patrol(): TaskboardPatrolValue {
+  return {
+    policy: {
+      workspaceId: 'ws' as never,
+      enabled: false,
+      interval: '1h',
+      baseBranch: null,
+      agentPreset: null,
+      provider: null,
+      model: null,
+      reasoningEffort: null,
+      permissionPreset: 'workspace-write',
+      nextDueAt: null,
+      version: 1,
+      createdAt: '2026-08-15T00:00:00.000Z',
+      updatedAt: '2026-08-15T00:00:00.000Z',
+    },
+    defaults: {
+      baseBranch: 'main', agentPreset: 'coding', provider: 'deepseek', model: 'deepseek-chat',
+      reasoningEffort: null, permissionPreset: 'workspace-write',
+    },
+    branches: ['main', 'release'],
+    agentPresets: [{ id: 'coding', name: 'Coding' }],
+    providers: [{ id: 'deepseek', name: 'DeepSeek', models: [{
+      id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning: [{ id: 'high', name: 'High' }],
+    }] }],
+    permissionPresets: [
+      { id: 'workspace-write', name: 'Workspace Write' },
+      { id: 'danger-full-access', name: 'Full Access' },
+    ],
+    runs: [],
+  }
+}
+
 function snapshot(overrides: Partial<TaskboardSnapshot> = {}): TaskboardSnapshot {
   return {
     phase: 'ready',
@@ -70,11 +105,14 @@ function snapshot(overrides: Partial<TaskboardSnapshot> = {}): TaskboardSnapshot
       issue({ id: 'issue-2' as never, identifier: 'DSH-2' as never, title: 'Write tests', status: 'done', priority: 'medium' }),
     ],
     selectedIssue: null,
+    detailPanel: null,
     detailPhase: 'idle',
     comments: [],
     activities: [],
     workspaceRelations: [],
     relations: [],
+    patrol: null,
+    patrolIssue: null,
     error: null,
     detailError: null,
     actionError: null,
@@ -106,6 +144,7 @@ function mountSurface(current = snapshot()) {
     refresh: vi.fn(async () => ({ ok: true as const })),
     createIssue: vi.fn(async () => ({ ok: true as const })),
     openIssue: vi.fn(),
+    openPatrol: vi.fn(),
     moveIssue: vi.fn(async () => ({ ok: true as const })),
     updateIssue: vi.fn(async () => ({ ok: true as const })),
     t,
@@ -133,6 +172,9 @@ describe('TaskboardSurface', () => {
     expect(screen.getByLabelText('Issue 甘特图')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('甘特图时间刻度'), { target: { value: 'month' } })
     expect(view.store.getSnapshot().ganttZoom).toBe('month')
+
+    fireEvent.click(screen.getByRole('button', { name: '打开巡检设置' }))
+    expect(view.props.openPatrol).toHaveBeenCalledOnce()
   })
 
   it('filters Issues and creates a new Issue without inventing placeholder data', async () => {
@@ -197,6 +239,8 @@ function mountDetails(current: TaskboardSnapshot) {
     addComment: vi.fn(async () => ({ ok: true as const })),
     addRelation: vi.fn(async () => ({ ok: true as const })),
     removeRelation: vi.fn(async () => ({ ok: true as const })),
+    updatePatrol: vi.fn(async () => ({ ok: true as const })),
+    runPatrol: vi.fn(async () => ({ ok: true as const })),
     close: vi.fn(),
     t,
   } as unknown as TaskboardDetailsProps
@@ -232,5 +276,79 @@ describe('TaskboardDetails', () => {
     expect(screen.queryByText('永久删除')).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: '归档 Issue' }))
     await waitFor(() => { expect(view.props.archiveIssue).toHaveBeenCalledWith(selected) })
+  })
+
+  it('configures the disabled-by-default Patrol and can trigger one Run', async () => {
+    const view = mountDetails(snapshot({ detailPanel: 'patrol', patrol: patrol() }))
+    const toggle = screen.getByRole('switch', { name: '开启或关闭自动巡检' })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+    await waitFor(() => {
+      expect(view.props.updatePatrol).toHaveBeenCalledWith(expect.objectContaining({
+        enabled: true,
+        interval: '1h',
+        baseBranch: 'main',
+        permissionPreset: 'workspace-write',
+      }))
+    })
+
+    fireEvent.change(screen.getByLabelText('固定间隔'), { target: { value: '30m' } })
+    fireEvent.change(screen.getByLabelText('权限预设'), { target: { value: 'danger-full-access' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => {
+      expect(view.props.updatePatrol).toHaveBeenLastCalledWith(expect.objectContaining({
+        interval: '30m', permissionPreset: 'danger-full-access',
+      }))
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '立即运行' }))
+    expect(view.props.runPatrol).toHaveBeenCalledWith()
+  })
+
+  it('shows persistent Agent and Reviewer evidence before the human marks done', async () => {
+    const selected = issue({ status: 'in_review' })
+    const view = mountDetails(snapshot({
+      selectedIssue: selected,
+      detailPanel: 'issue',
+      detailPhase: 'ready',
+      patrolIssue: {
+        context: {
+          issueId: selected.id,
+          sessionId: 'session-implementation' as never,
+          sessionStartedAt: '2026-08-16T00:00:00.000Z',
+          baseBranch: 'main',
+          branch: 'dsh-task/dsh-1',
+          worktreePath: '/worktrees/dsh-1',
+          agentPreset: 'coding',
+          provider: 'deepseek',
+          model: 'deepseek-chat',
+          reasoningEffort: null,
+          permissionPreset: 'workspace-write',
+          resultCommit: 'abc123',
+          createdAt: '2026-08-16T00:00:00.000Z',
+          updatedAt: '2026-08-16T00:00:00.000Z',
+        },
+        reviews: [{
+          attemptId: 'attempt-1' as never,
+          issueId: selected.id,
+          sessionId: 'session-reviewer' as never,
+          reviewedCommit: 'preliminary123',
+          verdict: 'changes_requested',
+          findings: 'Add the missing regression test.',
+          verification: ['Inspected diff'],
+          risks: ['Platform matrix remains in CI'],
+          createdAt: '2026-08-16T00:01:00.000Z',
+        }],
+      },
+    }))
+
+    expect(screen.getByText('session-implementation')).toBeTruthy()
+    expect(screen.getByText('Add the missing regression test.')).toBeTruthy()
+    expect(screen.getByText(/Inspected diff/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '标记 done' }))
+    expect(view.props.updateIssue).toHaveBeenCalledWith(selected, { status: 'done' })
+    fireEvent.change(screen.getByPlaceholderText('退回 Agent 的具体修改意见'), { target: { value: 'Please cover Windows.' } })
+    fireEvent.click(screen.getByRole('button', { name: '退回 todo' }))
+    expect(view.props.updateIssue).toHaveBeenCalledWith(selected, { status: 'todo', reason: 'Please cover Windows.' })
   })
 })

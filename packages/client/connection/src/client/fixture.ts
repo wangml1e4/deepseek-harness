@@ -1552,6 +1552,34 @@ interface FxTaskboardRelation {
   createdAt: string
 }
 
+interface FxPatrolPolicy {
+  workspaceId: WorkspaceId
+  enabled: boolean
+  interval: '5m' | '30m' | '1h' | '2h' | '6h' | '12h' | '24h'
+  baseBranch: string | null
+  agentPreset: string | null
+  provider: string | null
+  model: string | null
+  reasoningEffort: string | null
+  permissionPreset: string
+  nextDueAt: string | null
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface FxPatrolRun {
+  id: string
+  workspaceId: WorkspaceId
+  trigger: 'scheduled' | 'manual'
+  scheduledFor: string | null
+  state: 'active' | 'completed'
+  result: 'no_eligible_issue' | 'review_handoff' | 'blocked' | 'failed' | 'skipped_global_busy' | null
+  error: string | null
+  startedAt: string
+  endedAt: string | null
+}
+
 type FxTaskboardResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: { code: string; message: string } }
@@ -1637,11 +1665,29 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   }>()
   const fixtureTaskboardTime = '2026-08-15T08:00:00.000Z'
   const fixtureWorkspaceId = wid('fx-ws-fixture')
+  const patrolPolicies = new Map<WorkspaceId, FxPatrolPolicy>()
+  const patrolRuns: FxPatrolRun[] = []
+  let nextPatrolRun = 1
   if (!options.empty) {
     taskboards.set(fixtureWorkspaceId, {
       workspaceId: fixtureWorkspaceId,
       title: 'fixture',
       prefix: 'FIX',
+      version: 1,
+      createdAt: fixtureTaskboardTime,
+      updatedAt: fixtureTaskboardTime,
+    })
+    patrolPolicies.set(fixtureWorkspaceId, {
+      workspaceId: fixtureWorkspaceId,
+      enabled: false,
+      interval: '1h',
+      baseBranch: 'main',
+      agentPreset: null,
+      provider: null,
+      model: null,
+      reasoningEffort: null,
+      permissionPreset: 'workspace-write',
+      nextDueAt: null,
       version: 1,
       createdAt: fixtureTaskboardTime,
       updatedAt: fixtureTaskboardTime,
@@ -3174,6 +3220,21 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       const now = taskboardNow()
       taskboard = { workspaceId, title: workspace.title, prefix, version: 1, createdAt: now, updatedAt: now }
       taskboards.set(workspaceId, taskboard)
+      patrolPolicies.set(workspaceId, {
+        workspaceId,
+        enabled: false,
+        interval: '1h',
+        baseBranch: 'main',
+        agentPreset: null,
+        provider: null,
+        model: null,
+        reasoningEffort: null,
+        permissionPreset: 'workspace-write',
+        nextDueAt: null,
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      })
     }
     return taskboardOk({ ...taskboard })
   }
@@ -3441,6 +3502,124 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'relations', before: [input.relationId], after: [] }])
       return taskboardOk(copyTaskboardIssue(resolved.issue))
     },
+    patrol(workspaceId: WorkspaceId) {
+      const ensured = ensureFixtureTaskboard(workspaceId)
+      if (!ensured.ok || !ensured.value.ok) return ensured
+      const policy = patrolPolicies.get(workspaceId)
+      if (policy === undefined) throw new Error(`fixture lost Patrol Policy ${workspaceId}`)
+      return taskboardOk({
+        policy: { ...policy },
+        defaults: {
+          baseBranch: 'main',
+          agentPreset: 'standard',
+          provider: 'deepseek-official',
+          model: 'deepseek-v4-flash',
+          reasoningEffort: 'high',
+          permissionPreset: 'workspace-write',
+        },
+        branches: ['main', 'release'],
+        agentPresets: [
+          { id: 'standard', name: 'Standard' },
+          { id: 'minimal', name: 'Minimal' },
+        ],
+        providers: [{
+          id: 'deepseek-official',
+          name: 'DeepSeek',
+          models: [{
+            id: 'deepseek-v4-flash',
+            name: 'DeepSeek V4 Flash',
+            reasoning: [{ id: 'high', name: 'High' }],
+          }],
+        }],
+        permissionPresets: [
+          { id: 'workspace-write', name: 'Workspace Write', description: 'Write inside the Workspace.' },
+          { id: 'danger-full-access', name: 'Full Access' },
+        ],
+        runs: patrolRuns
+          .filter(run => run.workspaceId === workspaceId)
+          .map(run => ({ run: { ...run }, attempts: [] })),
+      })
+    },
+    updatePatrol(input: Partial<FxPatrolPolicy> & { workspaceId: WorkspaceId; expectedVersion: number }) {
+      const policy = patrolPolicies.get(input.workspaceId)
+      if (policy === undefined) return taskboardReject('workspace_not_found', `Workspace '${input.workspaceId}' does not exist`)
+      if (policy.version !== input.expectedVersion) {
+        return taskboardReject('version_conflict', `cannot update Patrol Policy '${input.workspaceId}': expected version ${input.expectedVersion}, found ${policy.version}`)
+      }
+      const fields = [
+        'enabled', 'interval', 'baseBranch', 'agentPreset', 'provider', 'model',
+        'reasoningEffort', 'permissionPreset',
+      ] as const
+      for (const field of fields) {
+        if (field in input) Object.assign(policy, { [field]: input[field] })
+      }
+      const now = taskboardNow()
+      const intervalMs = {
+        '5m': 300_000,
+        '30m': 1_800_000,
+        '1h': 3_600_000,
+        '2h': 7_200_000,
+        '6h': 21_600_000,
+        '12h': 43_200_000,
+        '24h': 86_400_000,
+      }[policy.interval]
+      policy.nextDueAt = policy.enabled ? new Date(Date.parse(now) + intervalMs).toISOString() : null
+      policy.version++
+      policy.updatedAt = now
+      return taskboardOk({ ...policy })
+    },
+    runPatrol(input: { workspaceId: WorkspaceId; issue?: string }) {
+      const ensured = ensureFixtureTaskboard(input.workspaceId)
+      if (!ensured.ok || !ensured.value.ok) return ensured
+      const now = taskboardNow()
+      const run: FxPatrolRun = {
+        id: `fx-patrol-run-${nextPatrolRun++}`,
+        workspaceId: input.workspaceId,
+        trigger: 'manual',
+        scheduledFor: null,
+        state: 'completed',
+        result: 'no_eligible_issue',
+        error: null,
+        startedAt: now,
+        endedAt: now,
+      }
+      patrolRuns.unshift(run)
+      return taskboardOk({ ...run })
+    },
+    patrolIssue(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      if (issue.id !== 'fx-issue-2') return taskboardOk({ context: null, reviews: [] })
+      return taskboardOk({
+        context: {
+          issueId: issue.id,
+          sessionId: 'fx-beta',
+          sessionStartedAt: '2026-08-15T08:30:00.000Z',
+          baseBranch: 'main',
+          branch: 'dsh-task/fix-2',
+          worktreePath: '/tmp/dsh-taskboard/fx-ws-fixture/fix-2',
+          agentPreset: 'standard',
+          provider: 'deepseek-official',
+          model: 'deepseek-v4-flash',
+          reasoningEffort: 'high',
+          permissionPreset: 'workspace-write',
+          resultCommit: '0123456789abcdef',
+          createdAt: '2026-08-15T08:20:00.000Z',
+          updatedAt: '2026-08-15T09:00:00.000Z',
+        },
+        reviews: [{
+          attemptId: 'fx-attempt-1',
+          issueId: issue.id,
+          sessionId: 'fx-gamma',
+          reviewedCommit: 'fedcba9876543210',
+          verdict: 'changes_requested',
+          findings: 'Keep the SQLite mutation and Activity write in one transaction.',
+          verification: ['Inspected the committed Base Branch diff'],
+          risks: ['Platform CI remains pending'],
+          createdAt: '2026-08-15T08:50:00.000Z',
+        }],
+      })
+    },
   }
 
   const rpc: ClientConnectionRpc = {
@@ -3490,6 +3669,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/listRelations': return Promise.resolve(taskboardRemotes.listRelations(args.reference as string))
         case 'taskboard/addRelation': return Promise.resolve(taskboardRemotes.addRelation(args.input as never))
         case 'taskboard/removeRelation': return Promise.resolve(taskboardRemotes.removeRelation(args.input as never))
+        case 'taskboard/patrol': return Promise.resolve(taskboardRemotes.patrol(args.workspaceId as WorkspaceId))
+        case 'taskboard/updatePatrol': return Promise.resolve(taskboardRemotes.updatePatrol(args.input as never))
+        case 'taskboard/runPatrol': return Promise.resolve(taskboardRemotes.runPatrol(args.input as never))
+        case 'taskboard/patrolIssue': return Promise.resolve(taskboardRemotes.patrolIssue(args.reference as string))
         default:
           return Promise.reject(new Error(`fixture connection RPC endpoint ${JSON.stringify(endpoint)} is unavailable`))
       }

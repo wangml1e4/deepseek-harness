@@ -97,6 +97,9 @@ describe('PatrolGit', () => {
       git(context.worktreePath, 'commit', '-m', 'implement issue')
       const result = await patrol.result(context)
       expect(result).toMatchObject({ clean: true, changedFromBase: true })
+      const diff = await patrol.diff(context, result.head)
+      expect(diff.patch).toContain('+changed')
+      expect(diff.stat).toContain('value.txt')
       await expect(patrol.isAncestor(fixture.workspace, result.head, context.branch)).resolves.toBe(true)
       await expect(patrol.isAncestor(fixture.workspace, result.head, 'main')).resolves.toBe(false)
     } finally {

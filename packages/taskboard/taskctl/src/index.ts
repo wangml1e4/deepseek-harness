@@ -20,6 +20,7 @@ const ISSUE_PRIORITIES = new Set(['none', 'urgent', 'high', 'medium', 'low'])
 const ISSUE_ASSIGNEES = new Set(['unassigned', 'user', 'patrol_agent'])
 const RELATION_TYPES = new Set(['blocks', 'blocked_by'])
 const ACTOR_TYPES = new Set(['user', 'patrol_agent', 'reviewer', 'system'])
+const PATROL_INTERVALS = new Set(['5m', '30m', '1h', '2h', '6h', '12h', '24h'])
 const BOOLEAN_OPTIONS = new Set(['json'])
 const ACTOR_OPTIONS = ['actor-type', 'actor-id', 'actor-name'] as const
 const COMMAND_OPTIONS = new Map<string, ReadonlySet<string>>([
@@ -38,6 +39,13 @@ const COMMAND_OPTIONS = new Map<string, ReadonlySet<string>>([
   ['relation list', new Set(['json'])],
   ['relation add', new Set(['type', 'issue', 'if-version', 'json', ...ACTOR_OPTIONS])],
   ['relation remove', new Set(['if-version', 'json', ...ACTOR_OPTIONS])],
+  ['patrol get', new Set(['json'])],
+  ['patrol update', new Set([
+    'enabled', 'interval', 'base-branch', 'agent-preset', 'provider', 'model',
+    'reasoning-effort', 'permission-preset', 'if-version', 'json',
+  ])],
+  ['patrol run', new Set(['issue', 'json'])],
+  ['patrol issue', new Set(['json'])],
 ])
 
 type OptionValue = string | true
@@ -152,7 +160,7 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
   const command = `${parsed.resource ?? ''} ${parsed.action ?? ''}`.trim()
   const allowed = COMMAND_OPTIONS.get(command)
   if (allowed === undefined) {
-    throw usageError('Expected workspace get/prefix, issue list/get/create/update/move/archive/restore, comment list/add, activity list, or relation list/add/remove')
+    throw usageError('Expected workspace, issue, comment, activity, relation, or patrol command')
   }
   validateOptions(parsed.options, allowed)
   const client = new TaskboardRpcClient(overrides)
@@ -261,6 +269,32 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
         expectedVersion: requiredVersion(parsed),
         actor: resolveActor(parsed, environment),
       } })
+    case 'patrol get':
+      expectOperands(parsed, 1)
+      return client.call('patrol', { workspaceId: parsed.operands[0] })
+    case 'patrol update':
+      expectOperands(parsed, 1)
+      return client.call('updatePatrol', { input: compact({
+        workspaceId: parsed.operands[0],
+        enabled: booleanOption(parsed, 'enabled'),
+        interval: enumOption(parsed, 'interval', PATROL_INTERVALS),
+        baseBranch: nullableStringOption(parsed, 'base-branch'),
+        agentPreset: nullableStringOption(parsed, 'agent-preset'),
+        provider: nullableStringOption(parsed, 'provider'),
+        model: nullableStringOption(parsed, 'model'),
+        reasoningEffort: nullableStringOption(parsed, 'reasoning-effort'),
+        permissionPreset: stringOption(parsed, 'permission-preset'),
+        expectedVersion: requiredVersion(parsed),
+      }) })
+    case 'patrol run':
+      expectOperands(parsed, 1)
+      return client.call('runPatrol', { input: compact({
+        workspaceId: parsed.operands[0],
+        issue: stringOption(parsed, 'issue'),
+      }) })
+    case 'patrol issue':
+      expectOperands(parsed, 1)
+      return client.call('patrolIssue', { reference: parsed.operands[0] })
     /* v8 ignore next 2 -- COMMAND_OPTIONS rejects every command absent from the exhaustive switch. */
     default:
       throw new Error(`Unhandled taskctl command ${JSON.stringify(command)}`)
@@ -394,6 +428,14 @@ function numberOption(parsed: ParsedTaskctlArgs, name: string): number | undefin
   const value = Number(raw)
   if (!Number.isSafeInteger(value)) throw usageError(`Option --${name} requires an integer`)
   return value
+}
+
+function booleanOption(parsed: ParsedTaskctlArgs, name: string): boolean | undefined {
+  const value = stringOption(parsed, name)
+  if (value === undefined) return undefined
+  if (value === 'true') return true
+  if (value === 'false') return false
+  throw usageError(`Invalid --${name} '${value}'; expected true or false`)
 }
 
 function enumOption(parsed: ParsedTaskctlArgs, name: string, values: ReadonlySet<string>): string | undefined {

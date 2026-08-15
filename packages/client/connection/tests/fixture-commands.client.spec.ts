@@ -195,5 +195,31 @@ describe('FixtureApiClient Taskboard Remote', () => {
     })
     expect(typeof added?.createdAt).toBe('string')
     expect(workspaceRelations.value.items).toHaveLength(2)
+
+    const patrol = await callRemote<{
+      ok: true
+      value: { policy: { enabled: boolean; version: number }; runs: unknown[] }
+    }>(rpc, 'taskboard/patrol', { workspaceId: 'fx-ws-fixture' })
+    expect(patrol.value).toMatchObject({ policy: { enabled: false, version: 1 }, runs: [] })
+    const enabled = await callRemote<{ ok: true; value: { enabled: boolean; interval: string; version: number } }>(
+      rpc,
+      'taskboard/updatePatrol',
+      { input: { workspaceId: 'fx-ws-fixture', enabled: true, interval: '30m', expectedVersion: 1 } },
+    )
+    expect(enabled.value).toMatchObject({ enabled: true, interval: '30m', version: 2 })
+    const run = await callRemote<{ ok: true; value: { result: string } }>(
+      rpc,
+      'taskboard/runPatrol',
+      { input: { workspaceId: 'fx-ws-fixture' } },
+    )
+    expect(run.value.result).toBe('no_eligible_issue')
+    const evidence = await callRemote<{
+      ok: true
+      value: { context: { sessionId: string }; reviews: { verdict: string }[] }
+    }>(rpc, 'taskboard/patrolIssue', { reference: 'FIX-2' })
+    expect(evidence.value).toMatchObject({
+      context: { sessionId: 'fx-beta' },
+      reviews: [{ verdict: 'changes_requested' }],
+    })
   })
 })

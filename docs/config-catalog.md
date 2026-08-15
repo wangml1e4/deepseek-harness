@@ -2252,7 +2252,7 @@ Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system
 
 ## `@deepseek-ai/dsh-taskboard-patrol`
 
-Requires: `agentDefaultModel` · `agentPresets` · `agents` · `llm` · `permissionPresets` · `sessionPersistence` · `sessions` · `subprocess` · `taskboard` · `workspaceRegistry`
+Requires: `agentDefaultModel` · `agentPresets` · `agents` · `llm` · `permissionPresets` · `sessionPersistence` · `sessions` · `subprocess` · `taskboard` · `tools` · `workspaceRegistry`
 
 ```ts config-catalog
 /** Taskboard Patrol execution plugin configuration. */
@@ -2268,7 +2268,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:42`](../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:48`](../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="deepseek-aidsh-taskboard-sqlite"></a>
 
@@ -2289,7 +2289,7 @@ export interface Config {
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 ```
 
-Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:88`](../packages/taskboard/taskboard-sqlite/src/index.ts)
+Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:92`](../packages/taskboard/taskboard-sqlite/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 
@@ -3133,7 +3133,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-storage` ([`packages/storage/storage/src/index.ts`](../packages/storage/storage/src/index.ts))
 - `@deepseek-ai/dsh-subagent` ([`packages/subagent/subagent/src/index.ts`](../packages/subagent/subagent/src/index.ts))
 - `@deepseek-ai/dsh-subprocess-local` ([`packages/subprocess/subprocess-local/src/index.ts`](../packages/subprocess/subprocess-local/src/index.ts))
-- `@deepseek-ai/dsh-taskboard-remote` — requires `taskboard` · `workspaceRegistry` ([`packages/taskboard/taskboard-remote/src/index.ts`](../packages/taskboard/taskboard-remote/src/index.ts))
+- `@deepseek-ai/dsh-taskboard-remote` — requires `taskboard` · `taskboardPatrol` · `workspaceRegistry` ([`packages/taskboard/taskboard-remote/src/index.ts`](../packages/taskboard/taskboard-remote/src/index.ts))
 - `@deepseek-ai/dsh-terminal` ([`packages/terminal/terminal/src/index.ts`](../packages/terminal/terminal/src/index.ts))
 - `@deepseek-ai/dsh-tool-ask-user` — requires `tools` · `userQuestions` ([`packages/interaction/tool-ask-user/src/index.ts`](../packages/interaction/tool-ask-user/src/index.ts))
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — requires `tools` ([`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts))

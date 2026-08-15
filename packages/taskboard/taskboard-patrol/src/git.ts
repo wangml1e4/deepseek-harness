@@ -31,6 +31,14 @@ export interface PatrolGitResult {
   readonly changedFromBase: boolean
 }
 
+/** Local patch supplied to the independent Reviewer without granting repository tools. */
+export interface PatrolGitDiff {
+  /** Base-to-commit patch text, bounded by the configured Git output retention. */
+  readonly patch: string
+  /** Base-to-commit summary retained alongside the patch. */
+  readonly stat: string
+}
+
 interface GitResult {
   readonly exitCode: number | null
   readonly stdout: string
@@ -179,6 +187,24 @@ export class PatrolGit {
       throw this.failure(['diff', '--quiet', `${context.baseBranch}...HEAD`], diff)
     }
     return { head, clean, changedFromBase: diff.exitCode === 1 }
+  }
+
+  /**
+   * Read one committed Base Branch diff for the independent Reviewer.
+   * @param context - fixed Base Branch and Issue worktree.
+   * @param commit - preliminary implementation commit to review.
+   * @returns bounded patch and stat text.
+   */
+  async diff(
+    context: Pick<PatrolDevelopmentContext, 'baseBranch' | 'worktreePath'>,
+    commit: string,
+  ): Promise<PatrolGitDiff> {
+    const range = `${context.baseBranch}...${commit}`
+    const [patch, stat] = await Promise.all([
+      this.text(context.worktreePath, ['diff', '--no-ext-diff', '--binary', range]),
+      this.text(context.worktreePath, ['diff', '--stat', '--no-ext-diff', range]),
+    ])
+    return { patch, stat }
   }
 
   /** Run one checked Git command and return its trimmed stdout. */

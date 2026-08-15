@@ -23,6 +23,7 @@ import type {
   PatrolAttempt,
   PatrolAttemptResult,
   PatrolDevelopmentContext,
+  PatrolReview,
   PatrolRun,
   PatrolRunResult,
   PatrolRunTrigger,
@@ -32,7 +33,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Current pre-release Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -161,6 +162,19 @@ export interface PatrolDevelopmentContextRow {
   result_commit: string | null
   created_at: string
   updated_at: string
+}
+
+/** Stored independent Reviewer evidence row. */
+export interface PatrolReviewRow {
+  attempt_id: string
+  issue_id: string
+  session_id: string
+  reviewed_commit: string
+  verdict: PatrolReview['verdict']
+  findings: string
+  verification: string
+  risks: string
+  created_at: string
 }
 
 /**
@@ -406,6 +420,22 @@ export function openTaskboardDatabase(
 
       CREATE INDEX IF NOT EXISTS patrol_attempts_run_sequence
         ON patrol_attempts(run_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS patrol_reviews (
+        sequence        INTEGER PRIMARY KEY AUTOINCREMENT,
+        attempt_id      TEXT NOT NULL UNIQUE REFERENCES patrol_attempts(id),
+        issue_id        TEXT NOT NULL REFERENCES issues(id),
+        session_id      TEXT NOT NULL UNIQUE,
+        reviewed_commit TEXT NOT NULL,
+        verdict         TEXT NOT NULL CHECK (verdict IN ('approve', 'changes_requested')),
+        findings        TEXT NOT NULL,
+        verification    TEXT NOT NULL CHECK (json_valid(verification)),
+        risks           TEXT NOT NULL CHECK (json_valid(risks)),
+        created_at      TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS patrol_reviews_issue_sequence
+        ON patrol_reviews(issue_id, sequence);
     `)
     if (onDisk === 0) {
       db.exec(`PRAGMA application_id = ${TASKBOARD_SQLITE_APPLICATION_ID}`)
@@ -616,5 +646,24 @@ export function rowToPatrolDevelopmentContext(
     resultCommit: row.result_commit,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+/**
+ * Convert one stored Reviewer row to public evidence.
+ * @param row - SQLite Reviewer evidence row.
+ * @returns durable structured review evidence.
+ */
+export function rowToPatrolReview(row: PatrolReviewRow): PatrolReview {
+  return {
+    attemptId: PatrolAttemptId(row.attempt_id),
+    issueId: IssueId(row.issue_id),
+    sessionId: row.session_id as SessionId,
+    reviewedCommit: row.reviewed_commit,
+    verdict: row.verdict,
+    findings: row.findings,
+    verification: JSON.parse(row.verification) as string[],
+    risks: JSON.parse(row.risks) as string[],
+    createdAt: row.created_at,
   }
 }

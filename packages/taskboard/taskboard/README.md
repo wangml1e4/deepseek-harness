@@ -19,6 +19,7 @@ The Workspace-owned Taskboard Service Definition. `ctx.taskboard` exposes durabl
 - At most one Patrol Run can remain active across the Host. A scheduled overlap becomes a permanent `skipped_global_busy` history entry; a manual overlap rejects as busy. Run completion is append-like and cannot overwrite a terminal result.
 - A Run owns ordered `PatrolAttempt` claims. Claiming atomically validates `todo`, assignment, Run ownership, optimistic version, predecessor `done` state, and exact predecessor commit snapshots before moving the Issue to `in_progress`. Only a preceding `permission_blocked` Attempt permits the same Run to claim again.
 - Each Patrol-executed Issue owns at most one `PatrolDevelopmentContext`. Its exact Session id, Base Branch, branch, worktree, Agent Preset, model selection, and Permission Preset survive every later return to `todo`; first Session persistence is recorded separately from id reservation, and a review handoff records its result commit. Neither binding nor Attempt history has a deletion operation.
+- Each active Attempt accepts one durable `PatrolReview` from a distinct Reviewer Session. The record fixes the reviewed preliminary commit, verdict, findings, verification evidence, risks, and completion time; a second review for the same Attempt rejects and review history has no deletion operation.
 
 Stable failures use `TaskboardError.code`; providers preserve the codes declared by this package. The [Taskboard subsystem reference](../../../docs/subsystems/taskboard.md) owns the public value and service reference.
 
@@ -32,6 +33,6 @@ Independent of model requests because this package never changes request content
 
 ## Known Limitations and Deferred Work
 
-- The service does not yet expose attachments or independent Reviewer evidence; later Taskboard layers add those records through the same service.
-- The fixed-interval Host timer and orchestration Consumer arrive after the Session and Development Context layer; this package owns durable scheduling, claim, binding, and lifecycle operations but never starts work by itself.
+- The service does not yet expose attachments.
+- This package owns durable scheduling, claim, binding, review, and lifecycle operations but never starts work by itself; the Patrol Consumer owns timer and Agent orchestration.
 - Taskboard creation is implicit but Workspace deletion protection is installed by the later Workspace Consumer; this package alone cannot intercept Workspace removal.

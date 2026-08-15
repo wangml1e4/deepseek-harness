@@ -57,12 +57,18 @@ export function apply(ctx: ClientContext): void {
       ctx.layout.openDetails()
       void controller.selectIssue(reference)
     },
+    openPatrol: () => {
+      ctx.layout.openDetails()
+      controller.openPatrol()
+    },
     moveIssue: (issue, patch) => controller.updateIssue(issue, patch, USER_ACTOR),
     updateIssue: (issue, patch) => controller.updateIssue(issue, patch, USER_ACTOR),
     archiveIssue: issue => controller.archiveIssue(issue, USER_ACTOR),
     addComment: body => controller.addComment(body, USER_ACTOR),
     addRelation: (type, reference) => controller.addRelation(type, reference, USER_ACTOR),
     removeRelation: relation => controller.removeRelation(relation, USER_ACTOR),
+    updatePatrol: patch => controller.updatePatrol(patch),
+    runPatrol: issue => controller.runPatrol(issue),
     close: () => {
       controller.clearSelection()
       ctx.layout.closeDetails()

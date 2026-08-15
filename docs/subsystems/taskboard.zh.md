@@ -34,7 +34,11 @@ Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所
 
 每个由 Patrol 执行的 Issue 最多拥有一个永久 `PatrolDevelopmentContext`。它会在 Issue 每次退回 `todo` 后继续固定准确 Session id、Base Branch、专属本地 `dsh-task/<issue>` 分支、持久 worktree、Agent Preset、模型选择、reasoning effort 和 Permission Preset。Provider 会区分已预留的 Session id 与已经持久化的 Session：首次持久化之前失败时可以重试同一个 id，已经启动但丢失的 Session 不能被替换。Review handoff 必须带有结果 commit 并把 Issue 移至 `in_review`；权限阻塞或其他执行失败会把 Issue 移至 `blocked` 并追加原因。
 
-`@deepseek-ai/dsh-taskboard-patrol` 会准备这些已存身份，但不会启动 timer 或 Agent turn。它通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。它会在启动后续跑准确 Session，挂载已保存的 Agent 与 Permission Preset，并安装 Agent 范围内的审批处理器：拒绝无人值守审批请求并取消该 turn，交由协调器分类。
+一个活跃 Attempt 可接受一条来自独立 Reviewer Session 的永久 `PatrolReview`。它会在实现 Session 执行修正轮次前，记录被审查的初步 commit、结论、发现、验证证据、风险和完成时间。同一 Attempt 的第二条审查会被拒绝。
+
+`@deepseek-ai/dsh-taskboard-patrol` 会根据持久到期时间调度已启用策略，并只按手工顺序扫描 `todo` Issue。它会跳过用户指派、明确等待，以及缺少已集成到该 Issue 固定 Base Branch 的 `done` 结果 commit 的依赖。一个已审查 Issue 交接到 `in_review` 后会结束 Run；只有因工具审批被拒而阻塞的 Attempt 才能继续扫描。其他故障会阻塞已领取 Issue 并结束 Run。
+
+Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。它会恢复准确 Session，挂载已保存的 Agent 与 Permission Preset，并拒绝无人值守审批。实现 Agent 必须留下干净且已提交的变更。独立的持久 Reviewer Session 会接收受限的已提交 diff，只暴露结构化提交工具，并固定使用只读沙箱和 `never` 审批策略；原 Session 随后接收其持久结论，执行一轮修正，再进入人工审查。
 
 ## 消费方与存储
 
@@ -44,7 +48,7 @@ Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Service 与 SQLite Provider 现已持有巡检调度、Attempt、执行上下文和永久历史，执行消费方则提供准确 Session 与本地 Git 准备。Host timer、Issue 扫描、prompt、独立 Reviewer 和人工审查控件仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
+Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，并从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset。版本一不会发布或同步 GitHub Issue。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -257,6 +261,20 @@ abstract markPatrolSessionStarted(attemptId: PatrolAttempt['id']): Promise<Patro
 abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt>
 
 /**
+ * Persist one independent Reviewer result for an active Attempt.
+ * @param input - Reviewer Session, preliminary commit, findings, verification, and risks.
+ * @returns durable structured review evidence.
+ */
+abstract recordPatrolReview(input: RecordPatrolReviewInput): Promise<PatrolReview>
+
+/**
+ * List every independent review retained for one Issue.
+ * @param reference - Issue whose review history is requested.
+ * @returns review evidence in completion order.
+ */
+abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolReview[]>
+
+/**
  * List every Issue claim in one Run in claim order.
  * @param runId - Run whose Attempt history is requested.
  * @returns active and terminal Attempts in claim order.
@@ -264,7 +282,7 @@ abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<Patro
 abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:106`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:111`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -279,6 +297,20 @@ Host Consumer that binds Patrol claims to local Git isolation and ordinary persi
  * @returns concrete values suitable for a Patrol Policy save.
  */
 async defaults(workspaceId: WorkspaceId): Promise<PatrolPolicyDefaults>
+
+/**
+ * Discover all choices needed by the Patrol settings sidebar.
+ * @param workspaceId - registered Workspace whose local branches are listed.
+ * @returns current defaults and selectable Host configuration.
+ */
+async configuration(workspaceId: WorkspaceId): Promise<PatrolConfiguration>
+
+/**
+ * Validate Host-owned choices before saving one version-checked policy.
+ * @param input - replacement policy fields.
+ * @returns updated durable policy.
+ */
+async updatePolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>
 
 /**
  * List branches local to one registered Workspace repository.
@@ -311,11 +343,26 @@ async prepare( attempt: PatrolAttempt, issue: Issue, policy: PatrolPolicy, ): Pr
  * @returns current local Git evidence.
  */
 result(context: PatrolDevelopmentContext): Promise<PatrolGitResult>
+
+/**
+ * Read one exact committed diff for an independent Reviewer.
+ * @param context - persistent Development Context.
+ * @param commit - exact preliminary implementation commit.
+ * @returns bounded patch and summary.
+ */
+diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff>
+
+/**
+ * Start one manual background Run under Host-wide exclusivity.
+ * @param input - Workspace and optional exact todo Issue.
+ * @returns active durable Run accepted by the Taskboard Provider.
+ */
+trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>
 ```
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:101`](../../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:169`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -435,11 +482,39 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns updated Issue or a stable business failure.
  */
 @Remote('removeRelation') removeRelation(input: RemoveIssueRelationInput): Promise<TaskboardRemoteResult<Issue>>
+
+/**
+ * Read Patrol settings choices and permanent Run history for one Workspace.
+ * @param workspaceId - authoritative Workspace identity.
+ * @returns current policy, Host choices, and Run/Attempt history.
+ */
+@Remote('patrol') patrol(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardPatrolValue>>
+
+/**
+ * Validate and save one Patrol Policy version.
+ * @param input - Workspace policy replacements and optimistic version.
+ * @returns updated durable policy.
+ */
+@Remote('updatePatrol') updatePatrol(input: UpdatePatrolPolicyInput): Promise<TaskboardRemoteResult<PatrolPolicy>>
+
+/**
+ * Start one manual background Patrol Run.
+ * @param input - Workspace and optional exact todo Issue.
+ * @returns accepted active Run.
+ */
+@Remote('runPatrol') runPatrol(input: TaskboardPatrolTriggerInput): Promise<TaskboardRemoteResult<PatrolRun>>
+
+/**
+ * Read one Issue's persistent implementation binding and Reviewer evidence.
+ * @param reference - opaque id or human-readable identifier.
+ * @returns explicit nullable binding and append-only reviews.
+ */
+@Remote('patrolIssue') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>
 ```
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-remote/src/index.ts:44`](../../packages/taskboard/taskboard-remote/src/index.ts)
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:51`](../../packages/taskboard/taskboard-remote/src/index.ts)
 
 <a id="taskboard-events"></a>
 
@@ -463,5 +538,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:530`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:573`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

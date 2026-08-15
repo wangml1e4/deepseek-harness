@@ -14,6 +14,7 @@ The local SQLite Service Provider for `ctx.taskboard`. It stores every Workspace
 - Each Taskboard transaction creates its default-off `1h` Patrol Policy with `workspace-write` permission. Policy execution choices, cadence advancement, global active-Run reservation, scheduled-overlap results, ordered Issue Attempts, Development Context bindings, and terminal history remain transactional and durable across Host restarts.
 - Patrol Run rows have no deletion operation. A partial unique index enforces one active Run across every Workspace even if multiple scheduling callers race.
 - Partial unique indexes allow one active Attempt per Run and per Issue. Claim, lifecycle, blocker Comment, Activity, Session binding, and result-commit writes share the same SQLite transaction as their authoritative Issue mutation.
+- Independent Reviewer evidence is append-only. A unique Attempt reference prevents duplicate reviews, while foreign keys retain the owning Attempt, Issue, and Reviewer Session identities.
 
 The provider supplies `TaskboardService`; Consumers depend on [`@deepseek-ai/dsh-taskboard`](../taskboard/README.md), never this package.
 

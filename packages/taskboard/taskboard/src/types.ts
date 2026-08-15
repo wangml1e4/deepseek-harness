@@ -113,6 +113,31 @@ export type PatrolAttemptResult =
   | 'review_handoff'
   | 'failed'
 
+/** Independent Reviewer conclusion before the implementation Agent's final correction turn. */
+export type PatrolReviewVerdict = 'approve' | 'changes_requested'
+
+/** Durable structured evidence from one independent Reviewer Session. */
+export interface PatrolReview {
+  /** Attempt whose preliminary commit was reviewed. */
+  readonly attemptId: PatrolAttemptId
+  /** Issue whose branch supplied the reviewed diff. */
+  readonly issueId: IssueId
+  /** Separate persistent Reviewer Session. */
+  readonly sessionId: SessionId
+  /** Preliminary implementation commit supplied to the Reviewer. */
+  readonly reviewedCommit: string
+  /** Reviewer conclusion. */
+  readonly verdict: PatrolReviewVerdict
+  /** Concrete findings, including an explicit no-findings statement when approved. */
+  readonly findings: string
+  /** Verification commands or evidence the Reviewer inspected. */
+  readonly verification: readonly string[]
+  /** Remaining risks called out for human review. */
+  readonly risks: readonly string[]
+  /** ISO-8601 completion instant. */
+  readonly createdAt: string
+}
+
 /** One durable claim of an Issue by a Patrol Run. */
 export interface PatrolAttempt {
   /** Stable opaque claim identity. */
@@ -228,6 +253,24 @@ export interface CompletePatrolAttemptInput {
   readonly resultCommit?: string
   /** Actor recorded on the lifecycle transition and optional blocker comment. */
   readonly actor: TaskboardActor
+}
+
+/** Persist one independent Reviewer result before implementation correction. */
+export interface RecordPatrolReviewInput {
+  /** Active Attempt whose preliminary commit was reviewed. */
+  readonly attemptId: PatrolAttemptId
+  /** Separate persistent Reviewer Session. */
+  readonly sessionId: SessionId
+  /** Preliminary implementation commit supplied to the Reviewer. */
+  readonly reviewedCommit: string
+  /** Reviewer conclusion. */
+  readonly verdict: PatrolReviewVerdict
+  /** Concrete review findings. */
+  readonly findings: string
+  /** Verification commands or evidence inspected. */
+  readonly verification: readonly string[]
+  /** Remaining risks for human review. */
+  readonly risks: readonly string[]
 }
 
 /** Input that persists one scheduled or manual trigger. */

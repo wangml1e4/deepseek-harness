@@ -8,6 +8,8 @@
 
 详情界面可编辑标题、Markdown 描述、状态、优先级、负责人、标签和按天记录的日期。它会列出仅追加的评论与活动记录、管理有向依赖关系，并在不提供永久删除的前提下归档 Issue。把 `in_review`、`blocked` 或 `done` Issue 退回 `todo` 时，提交前会显示必填的原因字段。
 
+Taskboard 顶栏会在现有右侧详情栏中打开 Patrol 设置。开关默认关闭；面板可保存 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h` 固定间隔，以及 Base Branch、Agent Preset、provider、model、reasoning effort 和 Permission Preset 选项。它会显示下次到期时间、活跃状态、永久 Run／Attempt 历史和手工 `Run now` 操作。合格的 `todo` Issue 也提供定向运行操作。Issue 详情会显示已绑定 Session、分支、Base Branch、结果 commit 和独立 Reviewer 结论。人工审查可把 `in_review` 移至 `done`，或在提供必填原因后退回 `todo`；它绝不合并代码。
+
 该包注册到 `sidebar.workspace.action`、`shell.center` 和 `shell.details`。`ui-layout` 持有通用替代界面选择，`ui-workspace` 提供 Workspace 行的 owner 数据。生成的 `taskboard` Remote 命名空间以 `remote.taskboard` 形式显式声明为依赖，因此该插件只会在对应描述符挂载后激活。一次 Workspace 级关系读取会提供规范方向的依赖连线，避免逐 Issue RPC 调用。Host 的 `taskboard/changed` 事件会刷新当前 Workspace；代际围栏则阻止较早的 Workspace 或 Issue 响应覆盖较新的选择。
 
 甘特图包装器使用 MIT 许可的 `dhtmlx-gantt` 10 Community Edition。其 React 生命周期与手工排期交互改造自 Dashi Taskboard 的 Apache-2.0 `GanttView`；修改后的源码带有归属声明，发布包的 `LICENSE` 同时包含 Harness 的 MIT 条款与 Dashi 的 Apache 许可证。
@@ -24,6 +26,6 @@ Web 无密钥 fixture 会暴露与正式环境相同的生成端点名，以及�
 
 ## 已知限制与暂缓事项
 
-- **尚无 Patrol 与审查控件**：调度、Development Context、Session 执行、Reviewer 证据和人工审查操作属于后续 stack 层。
+- **未完成 Run 的恢复尚未交付**：持久 Patrol 历史已经可见，但进程丢失后的恢复属于恢复层。
 - **附件尚无浏览器界面**：当前详情栏只覆盖 Issue 字段、评论、活动记录和关系。
 - **归档后 Issue 会被隐藏**：Host 支持恢复，但该包尚未提供归档浏览器或恢复操作。

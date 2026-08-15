@@ -42,6 +42,28 @@ async function harness() {
     get: (id: WorkspaceId) => registered.get(id),
   } as WorkspaceRegistry)
   await ctx.plugin(SqliteTaskboard, { path: ':memory:', journalMode: 'delete' })
+  ctx.provide('taskboardPatrol', {
+    configuration: () => Promise.resolve({
+      defaults: {
+        baseBranch: 'main',
+        agentPreset: 'coding',
+        selection: { provider: 'deepseek', model: 'deepseek-chat' },
+        permissionPreset: 'workspace-write',
+      },
+      branches: ['main'],
+      agentPresets: [{ id: 'coding', name: 'Coding' }],
+      providers: [{
+        id: 'deepseek',
+        name: 'DeepSeek',
+        models: [{ id: 'deepseek-chat', name: 'DeepSeek Chat', reasoning: [] }],
+      }],
+      permissionPresets: [{ id: 'workspace-write', name: 'Workspace Write' }],
+    }),
+    updatePolicy: (input: Parameters<typeof ctx.taskboard.updatePatrolPolicy>[0]) =>
+      ctx.taskboard.updatePatrolPolicy(input),
+    trigger: (input: { workspaceId: WorkspaceId }) =>
+      ctx.taskboard.beginPatrolRun({ workspaceId: input.workspaceId, trigger: 'manual' }),
+  } as never)
   await ctx.plugin(TaskboardRemote)
   return ctx
 }
@@ -74,6 +96,10 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'listRelations', invocation: { kind: 'direct' } },
       { method: 'addRelation', invocation: { kind: 'direct' } },
       { method: 'removeRelation', invocation: { kind: 'direct' } },
+      { method: 'patrol', invocation: { kind: 'direct' } },
+      { method: 'updatePatrol', invocation: { kind: 'direct' } },
+      { method: 'runPatrol', invocation: { kind: 'direct' } },
+      { method: 'patrolIssue', invocation: { kind: 'direct' } },
     ])
   })
 
@@ -227,5 +253,34 @@ describe('Taskboard Remote Consumer', () => {
     })
     vi.spyOn(ctx.taskboard, 'getIssue').mockRejectedValueOnce(new Error('storage unavailable'))
     await expect(ctx.taskboardRemote.getIssue('UNKNOWN-1' as never)).rejects.toThrow('storage unavailable')
+  })
+
+  it('exposes Patrol choices, policy saves, manual Runs, and Issue evidence', async () => {
+    const ctx = await harness()
+    await ctx.taskboardRemote.workspace(workspaceId)
+    const view = await ctx.taskboardRemote.patrol(workspaceId)
+    if (!view.ok) throw new Error(view.error.message)
+    expect(view.value).toMatchObject({
+      policy: { enabled: false, interval: '1h' },
+      defaults: { baseBranch: 'main', provider: 'deepseek', model: 'deepseek-chat' },
+      branches: ['main'],
+      runs: [],
+    })
+    await expect(ctx.taskboardRemote.updatePatrol({
+      workspaceId,
+      expectedVersion: view.value.policy.version,
+      interval: '30m',
+      baseBranch: 'main',
+    })).resolves.toMatchObject({ ok: true, value: { interval: '30m' } })
+    await expect(ctx.taskboardRemote.runPatrol({ workspaceId })).resolves.toMatchObject({
+      ok: true,
+      value: { workspaceId, trigger: 'manual', state: 'active' },
+    })
+    const issue = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Evidence' })
+    if (!issue.ok) throw new Error(issue.error.message)
+    await expect(ctx.taskboardRemote.patrolIssue(issue.value.id)).resolves.toEqual({
+      ok: true,
+      value: { context: null, reviews: [] },
+    })
   })
 })

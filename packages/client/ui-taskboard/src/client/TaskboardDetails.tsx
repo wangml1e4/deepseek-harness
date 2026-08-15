@@ -6,11 +6,13 @@ import {
   IconArchiveOutline20,
   IconCloseOutline16,
   IconLinkOutline16,
+  IconPlayOutline16,
   IconSendOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Issue, IssueAssignee, IssuePriority, IssueReference, IssueRelationType, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardDetailsProps as DetailsProps } from './contract.ts'
 import { ISSUE_PRIORITIES, ISSUE_STATUSES, priorityLabel, statusLabel } from './model.ts'
+import { PatrolPanel } from './PatrolPanel.tsx'
 import css from './Taskboard.module.css'
 
 export type { TaskboardDetailsProps } from './contract.ts'
@@ -50,6 +52,8 @@ export function TaskboardDetails({
   addComment,
   addRelation,
   removeRelation,
+  updatePatrol,
+  runPatrol,
   close,
   t,
 }: DetailsProps) {
@@ -59,7 +63,11 @@ export function TaskboardDetails({
   const [comment, setComment] = useState('')
   const [relationType, setRelationType] = useState<IssueRelationType>('blocked_by')
   const [relationReference, setRelationReference] = useState('')
+  const [reviewReason, setReviewReason] = useState('')
   useEffect(() => { setDraft(draftOf(issue)) }, [issue])
+  if (snapshot.detailPanel === 'patrol') {
+    return <PatrolPanel useTaskboard={useTaskboard} updatePatrol={updatePatrol} runPatrol={runPatrol} close={close} t={t} />
+  }
   if (issue === null) return <aside className={css.detailsEmpty}>{t('details.noSelection')}</aside>
   const needsReason = draft.status === 'todo' && (issue.status === 'in_review' || issue.status === 'blocked' || issue.status === 'done')
   const save = (event: FormEvent): void => {
@@ -121,6 +129,42 @@ export function TaskboardDetails({
             <button type="submit" className={css.secondaryButton} disabled={comment.trim() === ''}><IconSendOutline16 />{t('details.comment.submit')}</button>
           </form>
         </section>
+
+        {snapshot.patrolIssue?.context !== null && snapshot.patrolIssue?.context !== undefined && (
+          <section className={css.detailSection}>
+            <h2>{t('details.development')}</h2>
+            <dl className={css.evidenceGrid}>
+              <div><dt>{t('details.session')}</dt><dd><code>{snapshot.patrolIssue.context.sessionId}</code></dd></div>
+              <div><dt>{t('details.branch')}</dt><dd><code>{snapshot.patrolIssue.context.branch}</code></dd></div>
+              <div><dt>{t('details.baseBranch')}</dt><dd><code>{snapshot.patrolIssue.context.baseBranch}</code></dd></div>
+              <div><dt>{t('details.commit')}</dt><dd><code>{snapshot.patrolIssue.context.resultCommit ?? t('details.commitPending')}</code></dd></div>
+            </dl>
+            {snapshot.patrolIssue.reviews.map(review => <article className={css.reviewCard} key={review.attemptId}>
+              <header><strong>{t(`details.review.${review.verdict}`)}</strong><time>{new Date(review.createdAt).toLocaleString()}</time></header>
+              <p>{review.findings}</p>
+              {review.verification.length > 0 && <p><strong>{t('details.verification')}</strong> {review.verification.join(' · ')}</p>}
+              {review.risks.length > 0 && <p><strong>{t('details.risks')}</strong> {review.risks.join(' · ')}</p>}
+              <code>{review.reviewedCommit}</code>
+            </article>)}
+          </section>
+        )}
+
+        {issue.status === 'in_review' && (
+          <section className={css.humanReview}>
+            <span className={css.eyebrow}>{t('details.humanReview')}</span>
+            <h2>{t('details.reviewTitle')}</h2>
+            <p>{t('details.reviewBody')}</p>
+            <textarea rows={3} placeholder={t('details.reviewReason')} value={reviewReason} onChange={(event) => { setReviewReason(event.target.value) }} />
+            <div className={css.buttonRow}>
+              <button type="button" className={css.secondaryButton} disabled={reviewReason.trim() === ''} onClick={() => { void updateIssue(issue, { status: 'todo', reason: reviewReason.trim() }) }}>{t('details.requestChanges')}</button>
+              <button type="button" className={css.primaryButton} onClick={() => { void updateIssue(issue, { status: 'done' }) }}>{t('details.markDone')}</button>
+            </div>
+          </section>
+        )}
+
+        {issue.status === 'todo' && issue.assignee !== 'user' && (
+          <button type="button" className={css.secondaryButton} onClick={() => { void runPatrol(issue.id) }}><IconPlayOutline16 />{t('details.runIssue')}</button>
+        )}
 
         <section className={css.detailSection}>
           <h2>{t('details.relations')}</h2>

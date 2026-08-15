@@ -19,6 +19,7 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 整个 Host 最多保留一个活跃 Patrol Run。定时触发重叠会形成永久的 `skipped_global_busy` 历史记录；手动触发重叠则以繁忙拒绝。Run 完成后不能覆写其终态结果。
 - 一个 Run 拥有按顺序排列的 `PatrolAttempt` claim。领取操作会原子校验 `todo`、指派、Run 归属、乐观版本、前置 Issue 的 `done` 状态及其确切 commit 快照，再把 Issue 移到 `in_progress`。只有前一个 Attempt 为 `permission_blocked` 时，同一 Run 才能继续领取。
 - 每个由 Patrol 执行的 Issue 最多拥有一份 `PatrolDevelopmentContext`。其中确切的 Session id、Base Branch、分支、worktree、Agent Preset、模型选择和 Permission Preset 会在以后每次退回 `todo` 时继续保留；首次 Session 持久化会与 id 预留分别记录，进入 review handoff 时会记录结果 commit。绑定和 Attempt 历史都没有删除操作。
+- 每个活跃 Attempt 可接受一条来自独立 Reviewer Session 的持久 `PatrolReview`。该记录会固定被审查的初步 commit、结论、发现、验证证据、风险和完成时间；同一 Attempt 的第二条审查会被拒绝，审查历史也没有删除操作。
 
 稳定失败使用 `TaskboardError.code`；提供方保留本包声明的错误码。[Taskboard 子系统参考](../../../docs/subsystems/taskboard.md)负责公开值与服务参考。
 
@@ -32,6 +33,6 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 
 ## 已知限制与暂缓事项
 
-- 服务尚不暴露附件或独立 Reviewer 证据；后续 Taskboard 层会通过同一服务增加这些记录。
-- 固定间隔 Host timer 与编排消费方会在 Session 和 Development Context 层之后交付；本包持有持久调度、领取、绑定和生命周期操作，但不会自行启动工作。
+- 服务尚不暴露附件。
+- 本包持有持久调度、领取、绑定、审查和生命周期操作，但不会自行启动工作；Patrol 消费方负责定时与 Agent 编排。
 - Taskboard 创建是隐式的，但 Workspace 删除保护由后续 Workspace 消费方安装；本包自身无法拦截 Workspace 移除。

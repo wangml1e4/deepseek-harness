@@ -6,7 +6,7 @@ actor attribution, review handoff, and no-delete policy.
 -->
 ---
 name: manage-taskboard
-description: Manage DeepSeek Harness Taskboard work with taskctl. Use for Taskboard Issue identifiers, status changes, comments, relations, or durable work tracking.
+description: Manage DeepSeek Harness Taskboard work with taskctl. Use for Taskboard Issues, status changes, comments, relations, Patrol settings, or durable work tracking.
 ---
 
 # Manage Taskboard
@@ -32,4 +32,5 @@ Open only the relevant section of [references/cli.md](references/cli.md) when co
 - Preserve existing scope when adding requirements or acceptance details.
 - Add only relations needed by the work. Use `blocks` and `blocked_by` for dependencies.
 - Let `taskctl` read `CODEX_THREAD_ID` for write attribution. Do not fabricate another Session identity.
+- Read or change Patrol settings and start a manual Run only when the user explicitly asks. Do not reproduce Patrol claim or lifecycle transactions with Issue commands.
 - A Host outage, invalid response, or persistent conflict ends the operation; do not loop.

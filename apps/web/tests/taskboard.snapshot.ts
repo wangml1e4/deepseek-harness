@@ -56,6 +56,38 @@ describe('assembled Workspace Taskboard', () => {
       `archive=${within(detailPanel).getByRole('button', { name: 'Archive Issue' }).textContent}`,
     ].join('\n')
 
+    fireEvent.click(within(surface).getByRole('button', { name: 'Open Patrol settings' }))
+    const patrolStatus = await screen.findByText('Patrol disabled', undefined, { timeout: 10_000 })
+    const patrolPanel = patrolStatus.closest('aside')
+    if (patrolPanel === null) throw new Error('Patrol settings must reuse the right column')
+    const interval = within(patrolPanel).getByRole('combobox', { name: 'Fixed interval' }) as HTMLSelectElement
+    fireEvent.change(interval, { target: { value: '30m' } })
+    fireEvent.click(within(patrolPanel).getByRole('switch', { name: 'Enable or disable automatic Patrol' }))
+    await within(patrolPanel).findByText('Patrol enabled')
+    fireEvent.click(within(patrolPanel).getByRole('button', { name: 'Run now' }))
+    await within(patrolPanel).findByText('No eligible Issue')
+    const patrol = [
+      `patrol=${patrolPanel.textContent?.includes('Patrol enabled') ? 'enabled' : 'disabled'}`,
+      `interval=${interval.value}`,
+      `permissions=${[...within(patrolPanel).getByRole('combobox', { name: 'Permission preset' }).querySelectorAll('option')].map(option => option.textContent).join('|')}`,
+      `run=${patrolPanel.textContent?.includes('No eligible Issue') ? 'no_eligible_issue' : '<absent>'}`,
+    ].join('\n')
+    fireEvent.click(within(patrolPanel).getByRole('button', { name: 'Close Patrol settings' }))
+
+    fireEvent.click(within(table).getByRole('button', { name: /FIX-2/ }))
+    const reviewFinding = await screen.findByText(
+      'Keep the SQLite mutation and Activity write in one transaction.',
+      undefined,
+      { timeout: 10_000 },
+    )
+    const reviewPanel = reviewFinding.closest('aside')
+    if (reviewPanel === null) throw new Error('Reviewer evidence must render in the right column')
+    const review = [
+      `session=${within(reviewPanel).getByText('fx-beta').textContent}`,
+      `review=${['Reviewer requested changes', 'Verification:', 'Remaining risks:'].filter(label => reviewPanel.textContent?.includes(label)).join('|')}`,
+      `human=${['Return to todo', 'Mark done'].map(label => within(reviewPanel).getByRole('button', { name: label }).textContent).join('|')}`,
+    ].join('\n')
+
     fireEvent.click(within(surface).getByRole('tab', { name: 'Gantt' }))
     const gantt = await within(surface).findByLabelText('Issue Gantt chart')
     await waitFor(() => { expect(gantt.querySelector('.gantt_container')).not.toBeNull() })
@@ -65,7 +97,7 @@ describe('assembled Workspace Taskboard', () => {
     const scale = within(surface).getByLabelText('Gantt timeline scale') as HTMLSelectElement
     const timeline = `gantt=${scale.value}|mounted=${gantt.querySelector('.gantt_container') !== null}|styled=${ganttStyles !== null}|links=${gantt.querySelectorAll('.gantt_task_link').length}`
 
-    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${timeline}\n`
+    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${patrol}\n${review}\n${timeline}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(EXPECTED), { recursive: true })
       writeFileSync(EXPECTED, shape)

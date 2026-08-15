@@ -3,7 +3,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   Activity, Comment, Issue, IssueRelation, TaskboardActor, WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard/types'
-import type { TaskboardRemoteResult } from '@deepseek-ai/dsh-taskboard-remote/types'
+import type { TaskboardPatrolValue, TaskboardRemoteResult } from '@deepseek-ai/dsh-taskboard-remote/types'
 import { TaskboardController, type TaskboardClientRemote } from '../src/client/controller.ts'
 
 const actor = { type: 'user', id: 'local-user', name: 'User' } as TaskboardActor
@@ -38,6 +38,35 @@ function issue(overrides: Partial<Issue> = {}): Issue {
     createdAt: '2026-08-15T00:00:00.000Z',
     updatedAt: '2026-08-15T00:00:00.000Z',
     ...overrides,
+  }
+}
+
+function patrol(workspaceId = 'ws'): TaskboardPatrolValue {
+  return {
+    policy: {
+      workspaceId: workspaceId as never,
+      enabled: false,
+      interval: '1h',
+      baseBranch: null,
+      agentPreset: null,
+      provider: null,
+      model: null,
+      reasoningEffort: null,
+      permissionPreset: 'workspace-write',
+      nextDueAt: null,
+      version: 1,
+      createdAt: '2026-08-15T00:00:00.000Z',
+      updatedAt: '2026-08-15T00:00:00.000Z',
+    },
+    defaults: {
+      baseBranch: 'main', agentPreset: 'coding', provider: 'deepseek', model: 'deepseek-chat',
+      reasoningEffort: null, permissionPreset: 'workspace-write',
+    },
+    branches: ['main'],
+    agentPresets: [{ id: 'coding', name: 'Coding' }],
+    providers: [{ id: 'deepseek', name: 'DeepSeek', models: [{ id: 'deepseek-chat', name: 'Chat', reasoning: [] }] }],
+    permissionPresets: [{ id: 'workspace-write', name: 'Workspace Write' }],
+    runs: [],
   }
 }
 
@@ -86,6 +115,20 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       },
     }),
     removeRelation: () => ok(issue({ version: 2 })),
+    patrol: workspaceId => ok(patrol(workspaceId)),
+    updatePatrol: input => ok({ ...patrol(input.workspaceId).policy, ...input, version: 2 }),
+    runPatrol: input => ok({
+      id: 'run-1' as never,
+      workspaceId: input.workspaceId,
+      trigger: 'manual',
+      scheduledFor: null,
+      state: 'active',
+      result: null,
+      error: null,
+      startedAt: '2026-08-16T00:00:00.000Z',
+      endedAt: null,
+    }),
+    patrolIssue: () => ok({ context: null, reviews: [] }),
     ...overrides,
   }
 }
@@ -257,6 +300,7 @@ describe('TaskboardController', () => {
       remote({ workspace: () => failure('Workspace rejected') }),
       remote({ listIssues: () => failure('Issue list rejected') }),
       remote({ listWorkspaceRelations: () => failure('Relations rejected') }),
+      remote({ patrol: () => failure('Patrol rejected') }),
       remote({ workspace: () => Promise.reject(new Error('Read exploded')) }),
     ]
     for (const [index, client] of cases.entries()) {
@@ -368,6 +412,7 @@ describe('TaskboardController', () => {
       { listComments: () => failure('Comments rejected') },
       { listActivities: () => failure('Activities rejected') },
       { listRelations: () => failure('Relations rejected') },
+      { patrolIssue: () => failure('Patrol evidence rejected') },
       { getIssue: () => Promise.reject(new Error('Details exploded')) },
     ]
     for (const client of cases) {
@@ -516,6 +561,8 @@ describe('TaskboardController', () => {
     await expect(cold.addComment('No Issue', actor)).resolves.toMatchObject({ ok: false })
     await expect(cold.addRelation('blocks', 'issue-2' as never, actor)).resolves.toMatchObject({ ok: false })
     await expect(cold.removeRelation({ id: 'relation-1' } as never, actor)).resolves.toMatchObject({ ok: false })
+    await expect(cold.updatePatrol({ interval: '30m' })).resolves.toMatchObject({ ok: false })
+    await expect(cold.runPatrol()).resolves.toMatchObject({ ok: false })
 
     const rejectedMutation = new TaskboardController(remote({ createIssue: () => failure('Create rejected') }))
     await rejectedMutation.activate('ws' as never)
@@ -537,5 +584,34 @@ describe('TaskboardController', () => {
 
     const foreign = issue({ workspaceId: 'other' as never })
     await expect(staleFailure.updateIssue(foreign, { title: 'Foreign' }, actor)).resolves.toEqual({ ok: true })
+  })
+
+  it('opens Patrol, saves its exact version, and publishes a manual Run', async () => {
+    const client = remote()
+    const updatePatrol = vi.spyOn(client, 'updatePatrol')
+    const runPatrol = vi.spyOn(client, 'runPatrol')
+    const controller = new TaskboardController(client)
+    await controller.activate('ws' as never)
+
+    controller.openPatrol()
+    expect(controller.getSnapshot()).toMatchObject({ detailPanel: 'patrol', selectedIssue: null })
+    await controller.refresh()
+    expect(controller.getSnapshot().detailPanel).toBe('patrol')
+    await expect(controller.updatePatrol({
+      enabled: true,
+      interval: '30m',
+      baseBranch: 'main',
+    })).resolves.toEqual({ ok: true })
+    expect(updatePatrol).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: 'ws', expectedVersion: 1, enabled: true, interval: '30m',
+    }))
+    expect(controller.getSnapshot().patrol?.policy).toMatchObject({ enabled: true, interval: '30m', version: 2 })
+
+    await expect(controller.runPatrol('issue-1' as never)).resolves.toEqual({ ok: true })
+    expect(runPatrol).toHaveBeenCalledWith({ workspaceId: 'ws', issue: 'issue-1' })
+    expect(controller.getSnapshot().patrol?.runs[0]?.run).toMatchObject({ id: 'run-1', state: 'active' })
+    await expect(controller.runPatrol()).resolves.toEqual({ ok: true })
+    expect(runPatrol).toHaveBeenLastCalledWith({ workspaceId: 'ws' })
+    expect(controller.getSnapshot().patrol?.runs).toHaveLength(1)
   })
 })

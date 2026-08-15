@@ -8,6 +8,7 @@ import {
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSearchOutline16,
+  IconSettingsOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Issue, IssuePriority, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardStatusFilter } from './store.ts'
@@ -248,6 +249,7 @@ export function TaskboardSurface({
   refresh,
   createIssue,
   openIssue,
+  openPatrol,
   moveIssue,
   updateIssue,
   t,
@@ -293,6 +295,10 @@ export function TaskboardSurface({
           {(['dashboard', 'board', 'list', 'gantt'] as const).map(mode => <button type="button" role="tab" aria-selected={view.mode === mode} onClick={() => { actions.setMode(mode) }} key={mode}>{t(`view.${mode}`)}</button>)}
         </nav>
         <div className={css.topActions}>
+          <button type="button" className={css.secondaryButton} aria-label={t('patrol.open')} onClick={openPatrol}>
+            <span className={css.patrolStateDot} data-enabled={snapshot.patrol?.policy.enabled ?? false} />
+            <IconSettingsOutline16 />{t('patrol.title')}
+          </button>
           <button type="button" className={css.iconButton} aria-label={t('retry')} onClick={() => { void refresh() }}><IconRefreshOutline16 /></button>
           <button type="button" className={css.primaryButton} aria-label={t('create')} onClick={() => { setCreating(true) }}><IconPlusOutline16 />{t('create')}</button>
         </div>

@@ -14,12 +14,16 @@ import type {
   IssueRelationMutation,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolPolicy,
+  PatrolRun,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
+  UpdatePatrolPolicyInput,
   UpdateIssueInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard/types'
+import type {} from '@deepseek-ai/dsh-taskboard-patrol'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -29,6 +33,9 @@ import type {
   TaskboardIssueListValue,
   TaskboardIssueValue,
   TaskboardRelationListValue,
+  TaskboardPatrolIssueValue,
+  TaskboardPatrolTriggerInput,
+  TaskboardPatrolValue,
   TaskboardRemoteResult,
 } from './types.ts'
 
@@ -42,7 +49,7 @@ declare module '@deepseek-ai/cordis' {
 
 /** Host Remote adapter that keeps Workspace identity authoritative. */
 export class TaskboardRemote extends TypertRemoteService {
-  static inject = ['taskboard', 'workspaceRegistry']
+  static inject = ['taskboard', 'taskboardPatrol', 'workspaceRegistry']
 
   constructor(ctx: Context) {
     super(ctx, 'taskboardRemote', { namespace: 'taskboard' })
@@ -227,6 +234,75 @@ export class TaskboardRemote extends TypertRemoteService {
   @Remote('removeRelation')
   removeRelation(input: RemoveIssueRelationInput): Promise<TaskboardRemoteResult<Issue>> {
     return this.result(() => this.ctx.taskboard.removeRelation(input))
+  }
+
+  /**
+   * Read Patrol settings choices and permanent Run history for one Workspace.
+   * @param workspaceId - authoritative Workspace identity.
+   * @returns current policy, Host choices, and Run/Attempt history.
+   */
+  @Remote('patrol')
+  patrol(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardPatrolValue>> {
+    return this.result(async () => {
+      const workspace = this.requireWorkspace(workspaceId)
+      await this.ctx.taskboard.ensureWorkspace({ workspaceId, title: workspace.title })
+      const [policy, configuration, runs] = await Promise.all([
+        this.ctx.taskboard.getPatrolPolicy(workspaceId),
+        this.ctx.taskboardPatrol.configuration(workspaceId),
+        this.ctx.taskboard.listPatrolRuns(workspaceId),
+      ])
+      if (policy === undefined) {
+        throw new TaskboardError('workspace_not_found', `Workspace '${workspaceId}' has no Taskboard Patrol Policy`)
+      }
+      const { selection, ...defaults } = configuration.defaults
+      return {
+        policy,
+        ...configuration,
+        defaults: {
+          ...defaults,
+          provider: selection.provider,
+          model: selection.model,
+          reasoningEffort: selection.reasoningEffort ?? null,
+        },
+        runs: await Promise.all(runs.map(async run => ({
+          run,
+          attempts: await this.ctx.taskboard.listPatrolAttempts(run.id),
+        }))),
+      }
+    })
+  }
+
+  /**
+   * Validate and save one Patrol Policy version.
+   * @param input - Workspace policy replacements and optimistic version.
+   * @returns updated durable policy.
+   */
+  @Remote('updatePatrol')
+  updatePatrol(input: UpdatePatrolPolicyInput): Promise<TaskboardRemoteResult<PatrolPolicy>> {
+    return this.result(() => this.ctx.taskboardPatrol.updatePolicy(input))
+  }
+
+  /**
+   * Start one manual background Patrol Run.
+   * @param input - Workspace and optional exact todo Issue.
+   * @returns accepted active Run.
+   */
+  @Remote('runPatrol')
+  runPatrol(input: TaskboardPatrolTriggerInput): Promise<TaskboardRemoteResult<PatrolRun>> {
+    return this.result(() => this.ctx.taskboardPatrol.trigger(input))
+  }
+
+  /**
+   * Read one Issue's persistent implementation binding and Reviewer evidence.
+   * @param reference - opaque id or human-readable identifier.
+   * @returns explicit nullable binding and append-only reviews.
+   */
+  @Remote('patrolIssue')
+  patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>> {
+    return this.result(async () => ({
+      context: await this.ctx.taskboard.getPatrolDevelopmentContext(reference) ?? null,
+      reviews: await this.ctx.taskboard.listPatrolReviews(reference),
+    }))
   }
 
   /** Resolve one registered Workspace or return the shared Taskboard failure. */
