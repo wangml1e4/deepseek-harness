@@ -106,9 +106,9 @@ Implementation delivery follows independently verifiable PRs or one formal stack
 
 ## Current implementation
 
-The first two stack layers provide the Workspace-owned Taskboard Service Definition, local SQLite Provider, Host Typert Remote, JSON `taskctl` command line, and bundled `manage-taskboard` skill. The standard Web Host mounts those roles together, and the installed `dsh` package exposes both `dsh` and `taskctl` executables. The Remote and CLI cover Workspace metadata, Issue lifecycle and order, Comments, Activity, and dependency relations; they do not yet expose attachments, Client live events, Patrol state, Development Context, or review evidence.
+The first three stack layers provide the Workspace-owned Taskboard Service Definition, local SQLite Provider, Host Typert Remote, JSON `taskctl` command line, bundled `manage-taskboard` skill, and browser Dashboard, Board, List, and Issue details. The standard Web Host mounts those roles together, and the installed `dsh` package exposes both `dsh` and `taskctl` executables. The Remote and CLI cover Workspace metadata, Issue lifecycle and order, Comments, Activity, and dependency relations. Successful writes publish a contained `taskboard/changed` event so the active browser projection refreshes without polling.
 
-The browser Taskboard UI, Gantt renderer, Patrol scheduler, Git and Session execution, independent Reviewer, human review controls, and recovery layer remain proposed. Their absence does not weaken the current Service's no-delete, optimistic-version, append-only-history, and Workspace-identity rules.
+The browser UI enters from each Workspace row, replaces the conversation center with the selected Taskboard, and reuses the existing right details column. Its view and filter preferences persist in browser storage, while authoritative Issue data remains Host-owned. The Gantt renderer, attachments, Patrol scheduler, Git and Session execution, independent Reviewer, human review controls, and recovery layer remain proposed. Their absence does not weaken the current Service's no-delete, optimistic-version, append-only-history, and Workspace-identity rules.
 
 ## Alternatives considered
 

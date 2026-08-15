@@ -236,6 +236,11 @@
     - id: ui-workspace
       name: '@deepseek-ai/dsh-client-ui-workspace'
 
+    # Workspace-owned Dashboard, Board, List, and Issue details. Gantt and
+    # Patrol controls join this surface in later stack layers.
+    - id: ui-taskboard
+      name: '@deepseek-ai/dsh-client-ui-taskboard'
+
     # Input triggers: the '/' | '@' pipeline (ui-input-trigger), the command surface over
     # it (ui-commands), and the two reference sources (ui-skill / ui-subagent).
     - id: ui-input-trigger

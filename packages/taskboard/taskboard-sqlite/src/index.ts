@@ -196,7 +196,9 @@ export class SqliteTaskboard extends TaskboardService {
         ) VALUES (?, ?, ?, 1, 1, ?, ?)
       `).run(input.workspaceId, input.title, prefix, timestamp, timestamp)
       db.exec('COMMIT')
-      return requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+      const stored = requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+      this.notifyChanged(input.workspaceId)
+      return stored
     } catch (error: unknown) {
       /* v8 ignore start -- allocator output satisfies the schema; this retains rollback for storage faults. */
       rollback(db)
@@ -205,7 +207,6 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async getWorkspace(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<WorkspaceTaskboard | undefined> {
     const row = this.database().prepare(`
       SELECT workspace_id, title, prefix, version, created_at, updated_at
@@ -261,7 +262,9 @@ export class SqliteTaskboard extends TaskboardService {
         WHERE workspace_id = ? AND version = ?
       `).run(input.prefix, timestamp, input.workspaceId, input.expectedVersion)
       db.exec('COMMIT')
-      return requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+      const stored = requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+      this.notifyChanged(input.workspaceId)
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -329,14 +332,15 @@ export class SqliteTaskboard extends TaskboardService {
       )
       replaceLabels(db, input.workspaceId, id, labels)
       db.exec('COMMIT')
-      return requireStored(await this.getIssue(id), 'Issue')
+      const stored = requireStored(await this.getIssue(id), 'Issue')
+      this.notifyChanged(input.workspaceId)
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
     }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async listIssues(input: ListIssuesInput): Promise<readonly Issue[]> {
     const clauses = ['workspace_id = ?']
     const values: string[] = [input.workspaceId]
@@ -524,7 +528,9 @@ export class SqliteTaskboard extends TaskboardService {
         )
       }
       db.exec('COMMIT')
-      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      const stored = requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      this.notifyChanged(current.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -621,17 +627,20 @@ export class SqliteTaskboard extends TaskboardService {
         after: input.targetWorkspaceId,
       }], timestamp)
       db.exec('COMMIT')
-      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      const stored = requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      this.notifyChanged(current.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      this.notifyChanged(input.targetWorkspaceId)
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
     }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async addComment(input: AddCommentInput): Promise<Comment> {
     const db = this.database()
     const issueId = this.requireIssueId(input.reference)
+    const workspaceId = this.requireIssueWorkspace(issueId)
     const id = CommentId(randomUUID())
     const timestamp = new Date().toISOString()
     db.prepare(`
@@ -653,10 +662,11 @@ export class SqliteTaskboard extends TaskboardService {
       FROM comments
       WHERE id = ?
     `).get(id) as unknown as CommentRow
-    return rowToComment(row)
+    const stored = rowToComment(row)
+    this.notifyChanged(workspaceId)
+    return stored
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async listComments(reference: IssueReference): Promise<readonly Comment[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -668,7 +678,6 @@ export class SqliteTaskboard extends TaskboardService {
     return rows.map(rowToComment)
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async listActivities(reference: IssueReference): Promise<readonly Activity[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -758,7 +767,7 @@ export class SqliteTaskboard extends TaskboardService {
         after: { type: input.type, relatedIssueId: related.id },
       }], timestamp)
       db.exec('COMMIT')
-      return {
+      const mutation = {
         issue: requireStored(await this.getIssue(IssueId(anchor.id)), 'Issue'),
         relation: {
           id,
@@ -768,13 +777,14 @@ export class SqliteTaskboard extends TaskboardService {
           createdAt: timestamp,
         },
       }
+      this.notifyChanged(anchor.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return mutation
     } catch (error: unknown) {
       rollback(db)
       throw error
     }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async listRelations(reference: IssueReference): Promise<readonly IssueRelation[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -791,8 +801,8 @@ export class SqliteTaskboard extends TaskboardService {
     db.exec('BEGIN IMMEDIATE')
     try {
       const anchor = db.prepare(`
-        SELECT id, version FROM issues WHERE id = ? OR identifier = ?
-      `).get(input.reference, input.reference) as { id: string; version: number } | undefined
+        SELECT id, workspace_id, version FROM issues WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as { id: string; workspace_id: string; version: number } | undefined
       if (anchor === undefined) {
         throw new TaskboardError('issue_not_found', `Issue '${input.reference}' does not exist`)
       }
@@ -824,14 +834,15 @@ export class SqliteTaskboard extends TaskboardService {
         after: null,
       }], timestamp)
       db.exec('COMMIT')
-      return requireStored(await this.getIssue(IssueId(anchor.id)), 'Issue')
+      const stored = requireStored(await this.getIssue(IssueId(anchor.id)), 'Issue')
+      this.notifyChanged(anchor.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
     }
   }
 
-  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
   async getIssue(reference: IssueReference): Promise<Issue | undefined> {
     const row = this.database().prepare(`
       SELECT id, identifier, workspace_id, title, description, status, priority,
@@ -858,6 +869,13 @@ export class SqliteTaskboard extends TaskboardService {
       throw new TaskboardError('issue_not_found', `Issue '${reference}' does not exist`)
     }
     return IssueId(row.id)
+  }
+
+  /** Resolve the owning Workspace for an already validated Issue id. */
+  private requireIssueWorkspace(issueId: IssueId): EnsureWorkspaceInput['workspaceId'] {
+    const row = this.database().prepare('SELECT workspace_id FROM issues WHERE id = ?')
+      .get(issueId) as { workspace_id: string } | undefined
+    return requireStored(row, 'Issue Workspace').workspace_id as EnsureWorkspaceInput['workspaceId']
   }
 
   /** Append one Activity entry inside the caller's mutation transaction. */
@@ -889,11 +907,12 @@ export class SqliteTaskboard extends TaskboardService {
     db.exec('BEGIN IMMEDIATE')
     try {
       const current = db.prepare(`
-        SELECT id, version, archived_at
+        SELECT id, workspace_id, version, archived_at
         FROM issues
         WHERE id = ? OR identifier = ?
       `).get(input.reference, input.reference) as {
         id: string
+        workspace_id: string
         version: number
         archived_at: string | null
       } | undefined
@@ -924,7 +943,9 @@ export class SqliteTaskboard extends TaskboardService {
         after: restore ? null : timestamp,
       }], timestamp)
       db.exec('COMMIT')
-      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      const stored = requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      this.notifyChanged(current.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -940,6 +961,20 @@ export class SqliteTaskboard extends TaskboardService {
       const suffix = String(number)
       const candidate = `${base.slice(0, MAX_ISSUE_PREFIX_LENGTH - suffix.length)}${suffix}`
       if (exists.get(candidate) === undefined) return candidate
+    }
+  }
+
+  /** Notify every observer after a successful commit without letting UI refresh veto persistence. */
+  private notifyChanged(workspaceId: EnsureWorkspaceInput['workspaceId']): void {
+    for (const callback of this.ctx.events.dispatch('emit', ['taskboard/changed', workspaceId])) {
+      try {
+        const returned: unknown = callback(workspaceId)
+        void Promise.resolve(returned).catch((error: unknown) => {
+          this.ctx.logger.warn(`taskboard/changed listener rejected: ${String(error)}`)
+        })
+      } catch (error: unknown) {
+        this.ctx.logger.warn(`taskboard/changed listener threw: ${String(error)}`)
+      }
     }
   }
 }

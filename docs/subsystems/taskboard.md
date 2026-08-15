@@ -28,7 +28,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The current Consumer layer does not expose a Web Taskboard view, live update events, attachments, Patrol scheduling, development-context bindings, or review evidence. Those remain later layers of the ordered Taskboard PR stack, and version one does not publish or synchronize GitHub Issues.
+The current Consumer layer exposes bilingual Web Dashboard, Board, List, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt, attachments, Patrol scheduling, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -276,4 +276,28 @@ Host Remote adapter that keeps Workspace identity authoritative.
 Types: [WorkspaceId](workspace.md)
 
 Source: [`packages/taskboard/taskboard-remote/src/index.ts:44`](../../packages/taskboard/taskboard-remote/src/index.ts)
+
+<a id="taskboard-events"></a>
+
+### `taskboard/*` events
+
+<a id="taskboardchanged--emit"></a>
+
+#### `taskboard/changed` — emit
+
+A durable Taskboard mutation committed for one Workspace. Observer failures are contained and cannot veto the committed mutation.
+
+```ts cordis-catalog
+/**
+ * A durable Taskboard mutation committed for one Workspace. Observer
+ * failures are contained and cannot veto the committed mutation.
+ * @mode emit
+ * @param workspaceId - Workspace whose Taskboard projection changed.
+ */
+'taskboard/changed'(workspaceId: WorkspaceId): void
+```
+
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard/src/types.ts:303`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

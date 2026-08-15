@@ -5,7 +5,7 @@
  * except workspace Rename/Delete and session Rename/Fork/Archive; the session
  * and workspace hover cards are suppressed while a menu is open.
  */
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard, IconArchiveOutline20, IconBranchOutline16, IconEditOutline16,
@@ -107,7 +107,7 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: {
+export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, extraActions, t }: {
   group: GroupNode
   onToggle: () => void
   onCreate: () => void
@@ -115,6 +115,8 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: 
   actions?: { rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
+  /** Plugin-contributed controls for a real Workspace row. */
+  extraActions?: ReactNode
   t: RowTranslate
 }) {
   const row = group
@@ -152,6 +154,11 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, t }: 
         <span className={css.title}>{label}</span>
       </span>
       <span className={css.rowActions}>
+        {extraActions !== undefined && (
+          <span className={css.pluginActions} onClick={(e) => { e.stopPropagation() }}>
+            {extraActions}
+          </span>
+        )}
         {actions !== undefined && (
           <Menu
             open={menuOpen}

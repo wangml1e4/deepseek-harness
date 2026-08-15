@@ -64,6 +64,12 @@ function mountFrame() {
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
+  const surface = { current: null as { id: string; context: string } | null }
+  const renderSlotChain = vi.fn((key: string, _owner: object, options?: { fallback?: React.ReactNode }) => {
+    if (key === 'shell.center' && surface.current !== null) return <div data-testid="surface-content" />
+    if (key === 'shell.details' && surface.current !== null) return <div data-testid="surface-details" />
+    return options?.fallback ?? null
+  }) as AppFrameProps['renderSlotChain']
   const useSessions = ((sel: (s: SessionListState) => unknown) => {
     const current = selectedSession.current
     const sessionState = {
@@ -85,6 +91,8 @@ function mountFrame() {
       useStore={hookOf(instance)}
       actions={instance.actions}
       renderSlot={renderSlot}
+      renderSlotChain={renderSlotChain}
+      useSurface={((selector: (value: typeof surface.current) => unknown) => selector(surface.current)) as never}
       useSessions={useSessions}
       useWorkspaces={((sel: (s: WorkspaceListState) => unknown) => sel(workspaceState)) as never}
       SessionProvider={SessionProviderStub}
@@ -92,7 +100,7 @@ function mountFrame() {
   )
   const utils = render(element())
   const frame = utils.container.firstElementChild as HTMLElement
-  return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
+  return { instance, frame, slotCalls, renderSlotChain, surface, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
 function tracks(frame: HTMLElement): number[] {
@@ -161,6 +169,37 @@ describe('AppFrame', () => {
     const { slotCalls, getByTestId } = mountFrame()
     expect(getByTestId('center-content')).toBeTruthy()
     expect(slotCalls.map(c => c.key)).toContain('conversation')
+  })
+
+  it('routes alternate center and details surfaces while retaining the conversation fallback', () => {
+    const view = mountFrame()
+    view.surface.current = { id: 'taskboard', context: 'workspace-1' }
+    act(() => { view.rerenderFrame() })
+
+    expect(view.getByTestId('surface-content')).toBeTruthy()
+    expect(view.getByTestId('surface-details')).toBeTruthy()
+    expect(view.renderSlotChain).toHaveBeenCalledWith(
+      'shell.center',
+      { surface: { id: 'taskboard', context: 'workspace-1' } },
+      expect.objectContaining({ overlay: true }),
+    )
+    expect(view.renderSlotChain).toHaveBeenCalledWith(
+      'shell.details',
+      { surface: { id: 'taskboard', context: 'workspace-1' } },
+      expect.objectContaining({ overlay: true }),
+    )
+  })
+
+  it('allows a root surface to open details without a nonblank Session', () => {
+    selectedSession.current = undefined
+    const view = mountFrame()
+    view.surface.current = { id: 'taskboard', context: 'workspace-1' }
+    act(() => {
+      view.rerenderFrame()
+      view.instance.actions.openDetails()
+    })
+
+    expect(tracks(view.frame)).toEqual([280, 360])
   })
 
   it('renders both column occupants before baselines settle (no loading gate)', () => {

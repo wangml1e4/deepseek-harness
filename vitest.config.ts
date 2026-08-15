@@ -186,6 +186,11 @@ export default defineConfig({
         'packages/client/ui-primitives/src/RiskConfirmation.tsx',
         'packages/client/ui-workspace/src/client/WorkspaceBrowser.tsx',
         'packages/client/ui-workspace/src/client/WorkspacePicker.tsx',
+        // Taskboard's controller, filters, and persisted store stay under the
+        // per-file gate; browser snapshots cover its React rendering layer.
+        // TODO(gui): remove with the browser-grade client coverage lane.
+        'packages/client/ui-taskboard/src/client/*.tsx',
+        'packages/client/ui-taskboard/src/client/index.ts',
         'packages/client/web-react/src/*',
         // This isolated settings-scope lifecycle has complete unit coverage;
         // keep it out of the broader client-runtime GUI debt exemption.

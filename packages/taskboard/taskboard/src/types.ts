@@ -291,3 +291,15 @@ export interface MoveIssueInput extends VersionedIssueInput {
 
 /** Opaque or human-readable lookup accepted by the Taskboard Service. */
 export type IssueReference = IssueId | IssueIdentifier
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * A durable Taskboard mutation committed for one Workspace. Observer
+     * failures are contained and cannot veto the committed mutation.
+     * @mode emit
+     * @param workspaceId - Workspace whose Taskboard projection changed.
+     */
+    'taskboard/changed'(workspaceId: WorkspaceId): void
+  }
+}

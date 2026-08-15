@@ -5,8 +5,8 @@ import { describe, expect, it } from 'vitest'
 import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
-describe('Web Taskboard Host stack', () => {
-  it('mounts durable storage, Remote Consumer, and bundled skill in dependency order', () => {
+describe('Web Taskboard stack', () => {
+  it('mounts durable storage, Remote, browser UI, and bundled skill in dependency order', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -22,6 +22,7 @@ describe('Web Taskboard Host stack', () => {
     const ids = rows.map(row => row.id)
     expect(ids.indexOf('workspace')).toBeLessThan(ids.indexOf('taskboard-sqlite'))
     expect(ids.indexOf('taskboard-sqlite')).toBeLessThan(ids.indexOf('taskboard-remote'))
+    expect(ids.indexOf('ui-workspace')).toBeLessThan(ids.indexOf('ui-taskboard'))
     expect(rows.find(row => row.id === 'taskboard-sqlite')).toMatchObject({
       name: '@deepseek-ai/dsh-taskboard-sqlite',
       config: { path: { __jsExpr: "dshHomePath('taskboard.sqlite')" } },
@@ -29,12 +30,16 @@ describe('Web Taskboard Host stack', () => {
     expect(rows.find(row => row.id === 'taskboard-remote')).toMatchObject({
       name: '@deepseek-ai/dsh-taskboard-remote',
     })
+    expect(rows.find(row => row.id === 'ui-taskboard')).toMatchObject({
+      name: '@deepseek-ai/dsh-client-ui-taskboard',
+    })
     expect(rows.find(row => row.id === 'skill-manage-taskboard')).toMatchObject({
       name: '@deepseek-ai/dsh-skill-manage-taskboard',
     })
     expect(manifest.dependencies).toMatchObject({
       '@deepseek-ai/dsh-taskboard-sqlite': 'workspace:^',
       '@deepseek-ai/dsh-taskboard-remote': 'workspace:^',
+      '@deepseek-ai/dsh-client-ui-taskboard': 'workspace:^',
       '@deepseek-ai/dsh-skill-manage-taskboard': 'workspace:^',
     })
   })

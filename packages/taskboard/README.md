@@ -11,5 +11,6 @@ This family owns durable Workspace Issues, their manual board order, append-only
 | [`taskboard-remote/`](taskboard-remote/README.md) | Exposes Taskboard operations through the Host Typert API | `ctx.taskboardRemote` |
 | [`taskctl/`](taskctl/README.md) | Provides the machine-readable Taskboard command line | binary Consumer |
 | [`skill-manage-taskboard/`](skill-manage-taskboard/README.md) | Registers the bundled interactive Taskboard workflow | `ctx.skills` Provider |
+| [`../client/ui-taskboard/`](../client/ui-taskboard/README.md) | Presents Dashboard, Board, List, and Issue details in the browser | UI Consumer |
 
-The standard Web Host mounts the SQLite Provider, Remote Consumer, and bundled skill. The [Workspace Taskboard Agent Note](../../.agents/notes/proposed/feature/2026-08-15-workspace-taskboard.md) owns product behavior, Patrol policy, and the staged delivery decision.
+The standard Web Host mounts the SQLite Provider, Remote and UI Consumers, and bundled skill. The [Workspace Taskboard Agent Note](../../.agents/notes/proposed/feature/2026-08-15-workspace-taskboard.md) owns product behavior, Patrol policy, and the staged delivery decision.

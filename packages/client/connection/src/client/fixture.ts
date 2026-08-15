@@ -1499,6 +1499,63 @@ export interface FixtureWorld {
   readonly rpc: ClientConnectionRpc
 }
 
+type FxTaskboardStatus = 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'canceled'
+type FxTaskboardPriority = 'none' | 'urgent' | 'high' | 'medium' | 'low'
+type FxTaskboardAssignee = 'unassigned' | 'user' | 'patrol_agent'
+
+interface FxTaskboardActor {
+  type: 'user' | 'patrol_agent' | 'reviewer' | 'system'
+  id: string
+  name: string
+}
+
+interface FxTaskboardIssue {
+  id: string
+  identifier: string
+  workspaceId: WorkspaceId
+  title: string
+  description: string
+  status: FxTaskboardStatus
+  priority: FxTaskboardPriority
+  labels: string[]
+  assignee: FxTaskboardAssignee
+  startDate: string | null
+  dueDate: string | null
+  sortOrder: number
+  version: number
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface FxTaskboardComment {
+  id: string
+  issueId: string
+  body: string
+  actor: FxTaskboardActor
+  createdAt: string
+}
+
+interface FxTaskboardActivity {
+  id: string
+  issueId: string
+  actor: FxTaskboardActor
+  changes: { field: string; before: unknown; after: unknown }[]
+  createdAt: string
+}
+
+interface FxTaskboardRelation {
+  id: string
+  type: 'blocks' | 'blocked_by'
+  issueId: string
+  relatedIssueId: string
+  createdAt: string
+}
+
+type FxTaskboardResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { code: string; message: string } }
+
 /**
  * Build both fixture faces so a caller can drive the Remote endpoints and the
  * legacy API against one in-memory state graph.
@@ -1543,6 +1600,16 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     ['my-agent', { trust: 'user', content: "- id: tool-read\n  name: '@deepseek-ai/dsh-tool-read'\n" }],
   ])
   let fixtureDefaultPreset = 'standard'
+  let fixtureWelcomeVersion: unknown
+  let fixtureWelcomeRevision = 0
+  const fixtureWelcomeView = () => ({
+    ns: 'ui-onboarding',
+    schema: {},
+    value: fixtureWelcomeVersion === undefined ? {} : { welcomeNoticeVersion: fixtureWelcomeVersion },
+    applies: 'live' as const,
+    secrets: [],
+    revision: fixtureWelcomeRevision,
+  })
   const nextTurn = new Map<SessionId, number>([[sid('fx-alpha'), 75]])
   let nextSession = 1
   let nextRpc = 1
@@ -1560,6 +1627,59 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     updatedAt: fixtureEpoch,
   }]
   let nextWorkspace = 1
+  const taskboards = new Map<WorkspaceId, {
+    workspaceId: WorkspaceId
+    title: string
+    prefix: string
+    version: number
+    createdAt: string
+    updatedAt: string
+  }>()
+  const fixtureTaskboardTime = '2026-08-15T08:00:00.000Z'
+  const fixtureWorkspaceId = wid('fx-ws-fixture')
+  if (!options.empty) {
+    taskboards.set(fixtureWorkspaceId, {
+      workspaceId: fixtureWorkspaceId,
+      title: 'fixture',
+      prefix: 'FIX',
+      version: 1,
+      createdAt: fixtureTaskboardTime,
+      updatedAt: fixtureTaskboardTime,
+    })
+  }
+  const taskboardIssues: FxTaskboardIssue[] = options.empty ? [] : [
+    {
+      id: 'fx-issue-1', identifier: 'FIX-1', workspaceId: fixtureWorkspaceId,
+      title: 'Ship Taskboard dashboard', description: 'Assemble the Workspace-owned product surface.',
+      status: 'todo', priority: 'high', labels: ['client', 'taskboard'], assignee: 'unassigned',
+      startDate: '2026-08-15', dueDate: '2026-08-20', sortOrder: 1000, version: 1,
+      archivedAt: null, createdAt: fixtureTaskboardTime, updatedAt: fixtureTaskboardTime,
+    },
+    {
+      id: 'fx-issue-2', identifier: 'FIX-2', workspaceId: fixtureWorkspaceId,
+      title: 'Review persistence model', description: 'Confirm durable Issue history and optimistic versions.',
+      status: 'in_review', priority: 'medium', labels: ['sqlite'], assignee: 'user',
+      startDate: '2020-01-01', dueDate: '2020-01-02', sortOrder: 1000, version: 1,
+      archivedAt: null, createdAt: fixtureTaskboardTime, updatedAt: '2026-08-15T09:00:00.000Z',
+    },
+    {
+      id: 'fx-issue-3', identifier: 'FIX-3', workspaceId: fixtureWorkspaceId,
+      title: 'Document patrol handoff', description: 'Record the review handoff policy.',
+      status: 'done', priority: 'low', labels: ['docs'], assignee: 'patrol_agent',
+      startDate: null, dueDate: null, sortOrder: 1000, version: 1,
+      archivedAt: null, createdAt: fixtureTaskboardTime, updatedAt: '2026-08-15T10:00:00.000Z',
+    },
+  ]
+  const taskboardComments: FxTaskboardComment[] = [{
+    id: 'fx-comment-1', issueId: 'fx-issue-1', body: 'Keep the Taskboard scoped to its Workspace.',
+    actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' }, createdAt: fixtureTaskboardTime,
+  }]
+  const taskboardActivities: FxTaskboardActivity[] = []
+  const taskboardRelations: FxTaskboardRelation[] = []
+  let nextTaskboardIssue = 4
+  let nextTaskboardComment = 2
+  let nextTaskboardActivity = 1
+  let nextTaskboardRelation = 1
   // Registry-global archive set mirroring the host: archived sessions keep
   // their workspace accounting slot and only grouping surfaces hide them.
   const archivedSessionIds: SessionId[] = []
@@ -2893,20 +3013,24 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       },
     },
     settings: {
-      // Only the resolved DeepSeek address needed by first-run readiness is
-      // represented here. Fixture-backed journeys do not open its Models
-      // editor; real schema-driven forms ride the HTTP transport.
+      // Only the resolved DeepSeek address and the welcome acknowledgement
+      // needed by first-run readiness are represented here. Fixture-backed
+      // journeys do not open the Models editor; real schema-driven forms ride
+      // the HTTP transport.
       describe: request => ok(request, {
         writable: true,
         hasDocument: true,
-        namespaces: [{
-          ns: 'llm-deepseek',
-          schema: {},
-          value: { apiKeyEnv: 'DEEPSEEK_API_KEY' },
-          applies: 'live',
-          secrets: [{ path: ['apiKey'], set: false }],
-          revision: 0,
-        }],
+        namespaces: [
+          {
+            ns: 'llm-deepseek',
+            schema: {},
+            value: { apiKeyEnv: 'DEEPSEEK_API_KEY' },
+            applies: 'live',
+            secrets: [{ path: ['apiKey'], set: false }],
+            revision: 0,
+          },
+          fixtureWelcomeView(),
+        ],
       }),
       // Native opens are deterministic no-op successes in this fixture, as is host.openPath.
       openDocument: request => ok(request, { opened: true as const }),
@@ -2920,11 +3044,39 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         message: 'fixture: the minimal readiness settings descriptor is read-only',
         details: { ns: request.payload.ns },
       }),
-      mutate: request => err(request, {
-        code: 'settings-rejected',
-        message: 'fixture: no settings namespaces are registered',
-        details: { ns: request.payload.ns },
-      }),
+      mutate: (request) => {
+        if (request.payload.ns !== 'ui-onboarding') {
+          return err(request, {
+            code: 'settings-rejected',
+            message: 'fixture: the requested settings namespace is read-only',
+            details: { ns: request.payload.ns },
+          })
+        }
+        if (request.payload.expectedRevision !== undefined
+          && request.payload.expectedRevision !== fixtureWelcomeRevision) {
+          return err(request, {
+            code: 'settings-conflict',
+            message: 'fixture: stale welcome acknowledgement revision',
+            details: {
+              ns: request.payload.ns,
+              expected: request.payload.expectedRevision,
+              actual: fixtureWelcomeRevision,
+            },
+          })
+        }
+        for (const op of request.payload.ops) {
+          if (op.path.length !== 1 || op.path[0] !== 'welcomeNoticeVersion') {
+            return err(request, {
+              code: 'settings-rejected',
+              message: 'fixture: only the welcome acknowledgement may be changed',
+              details: { ns: request.payload.ns },
+            })
+          }
+          fixtureWelcomeVersion = op.op === 'set' ? op.value : undefined
+        }
+        fixtureWelcomeRevision++
+        return ok(request, fixtureWelcomeView())
+      },
     },
     credentials: {
       describe: request => ok(request, {
@@ -2995,6 +3147,285 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     },
   }
 
+  let taskboardClock = Date.parse(fixtureTaskboardTime)
+  const taskboardNow = (): string => new Date(taskboardClock += 1000).toISOString()
+  const copyTaskboardIssue = (issue: FxTaskboardIssue): FxTaskboardIssue => ({ ...issue, labels: [...issue.labels] })
+  const taskboardOk = <T>(value: T): RpcResult<FxTaskboardResult<T>> => ({
+    ok: true,
+    value: { ok: true, value },
+  })
+  const taskboardReject = <T>(code: string, message: string): RpcResult<FxTaskboardResult<T>> => ({
+    ok: true,
+    value: { ok: false, error: { code, message } },
+  })
+  const findTaskboardIssue = (reference: string): FxTaskboardIssue | undefined =>
+    taskboardIssues.find(issue => issue.id === reference || issue.identifier === reference)
+  const ensureFixtureTaskboard = (
+    workspaceId: WorkspaceId,
+  ): RpcResult<FxTaskboardResult<NonNullable<ReturnType<typeof taskboards.get>>>> => {
+    const workspace = workspaces.find(candidate => candidate.workspaceId === workspaceId)
+    if (workspace === undefined) return taskboardReject('workspace_not_found', `Workspace '${workspaceId}' does not exist`)
+    let taskboard = taskboards.get(workspaceId)
+    if (taskboard === undefined) {
+      const prefix = workspace.title.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 12) || 'WORKSPACE'
+      const now = taskboardNow()
+      taskboard = { workspaceId, title: workspace.title, prefix, version: 1, createdAt: now, updatedAt: now }
+      taskboards.set(workspaceId, taskboard)
+    }
+    return taskboardOk({ ...taskboard })
+  }
+  const requireTaskboardIssue = <T>(reference: string, expectedVersion?: number):
+  | { issue: FxTaskboardIssue }
+  | { result: RpcResult<FxTaskboardResult<T>> } => {
+    const issue = findTaskboardIssue(reference)
+    if (issue === undefined) {
+      return { result: taskboardReject('issue_not_found', `Issue '${reference}' does not exist`) }
+    }
+    if (expectedVersion !== undefined && issue.version !== expectedVersion) {
+      return {
+        result: taskboardReject(
+          'version_conflict',
+          `cannot update Issue '${issue.id}': expected version ${expectedVersion}, found ${issue.version}`,
+        ),
+      }
+    }
+    return { issue }
+  }
+  const appendTaskboardActivity = (
+    issueId: string,
+    actor: FxTaskboardActor,
+    changes: FxTaskboardActivity['changes'],
+  ): void => {
+    taskboardActivities.push({
+      id: `fx-activity-${nextTaskboardActivity++}`,
+      issueId,
+      actor,
+      changes,
+      createdAt: taskboardNow(),
+    })
+  }
+
+  /** Canonical fixture implementation of the generated Taskboard Remote contract. */
+  const taskboardRemotes = {
+    workspace(workspaceId: WorkspaceId) {
+      return ensureFixtureTaskboard(workspaceId)
+    },
+    setPrefix(input: { workspaceId: WorkspaceId; prefix: string; expectedVersion: number }) {
+      const ensured = ensureFixtureTaskboard(input.workspaceId)
+      if (!ensured.ok || !ensured.value.ok) return ensured
+      const taskboard = taskboards.get(input.workspaceId)
+      if (taskboard === undefined) throw new Error(`fixture lost Taskboard ${input.workspaceId}`)
+      if (taskboard.version !== input.expectedVersion) {
+        return taskboardReject('version_conflict', `cannot update Taskboard '${input.workspaceId}': expected version ${input.expectedVersion}, found ${taskboard.version}`)
+      }
+      taskboard.prefix = input.prefix
+      taskboard.version++
+      taskboard.updatedAt = taskboardNow()
+      return taskboardOk({ ...taskboard })
+    },
+    listIssues(input: {
+      workspaceId: WorkspaceId
+      status?: FxTaskboardStatus
+      priority?: FxTaskboardPriority
+      label?: string
+      assignee?: FxTaskboardAssignee
+      startDate?: string
+      dueDate?: string
+      query?: string
+      archived?: 'exclude' | 'only' | 'include'
+    }) {
+      const ensured = ensureFixtureTaskboard(input.workspaceId)
+      if (!ensured.ok || !ensured.value.ok) return ensured
+      const query = input.query?.toLowerCase()
+      const items = taskboardIssues.filter(issue => (
+        issue.workspaceId === input.workspaceId
+        && (input.archived === 'include' || (input.archived === 'only' ? issue.archivedAt !== null : issue.archivedAt === null))
+        && (input.status === undefined || issue.status === input.status)
+        && (input.priority === undefined || issue.priority === input.priority)
+        && (input.label === undefined || issue.labels.includes(input.label))
+        && (input.assignee === undefined || issue.assignee === input.assignee)
+        && (input.startDate === undefined || issue.startDate === input.startDate)
+        && (input.dueDate === undefined || issue.dueDate === input.dueDate)
+        && (query === undefined || `${issue.identifier}\n${issue.title}\n${issue.description}`.toLowerCase().includes(query))
+      )).map(copyTaskboardIssue)
+      return taskboardOk({ items })
+    },
+    getIssue(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      return taskboardOk({ issue: issue === undefined ? null : copyTaskboardIssue(issue) })
+    },
+    createIssue(input: {
+      workspaceId: WorkspaceId
+      title: string
+      description?: string
+      status?: FxTaskboardStatus
+      priority?: FxTaskboardPriority
+      labels?: readonly string[]
+      assignee?: FxTaskboardAssignee
+      startDate?: string
+      dueDate?: string
+    }) {
+      const ensured = ensureFixtureTaskboard(input.workspaceId)
+      if (!ensured.ok || !ensured.value.ok) return ensured
+      const number = taskboardIssues.filter(issue => issue.workspaceId === input.workspaceId).length + 1
+      const now = taskboardNow()
+      const issue: FxTaskboardIssue = {
+        id: `fx-issue-${nextTaskboardIssue++}`,
+        identifier: `${ensured.value.value.prefix}-${number}`,
+        workspaceId: input.workspaceId,
+        title: input.title,
+        description: input.description ?? '',
+        status: input.status ?? 'backlog',
+        priority: input.priority ?? 'none',
+        labels: [...input.labels ?? []],
+        assignee: input.assignee ?? 'unassigned',
+        startDate: input.startDate ?? null,
+        dueDate: input.dueDate ?? null,
+        sortOrder: 1000 * (taskboardIssues.filter(candidate => (
+          candidate.workspaceId === input.workspaceId
+          && candidate.status === (input.status ?? 'backlog')
+        )).length + 1),
+        version: 1,
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      }
+      taskboardIssues.push(issue)
+      return taskboardOk(copyTaskboardIssue(issue))
+    },
+    updateIssue(input: Record<string, unknown> & {
+      reference: string
+      expectedVersion: number
+      actor: FxTaskboardActor
+    }) {
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      const fields = ['title', 'description', 'status', 'priority', 'labels', 'assignee', 'startDate', 'dueDate', 'sortOrder'] as const
+      const changes: FxTaskboardActivity['changes'] = []
+      for (const field of fields) {
+        if (!(field in input)) continue
+        const before = resolved.issue[field]
+        const after = field === 'labels' ? [...input[field] as readonly string[]] : input[field]
+        Object.assign(resolved.issue, { [field]: after })
+        changes.push({ field, before, after })
+      }
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      if (changes.length > 0) appendTaskboardActivity(resolved.issue.id, input.actor, changes)
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
+    moveIssue(input: { reference: string; targetWorkspaceId: WorkspaceId; expectedVersion: number; actor: FxTaskboardActor }) {
+      const target = ensureFixtureTaskboard(input.targetWorkspaceId)
+      if (!target.ok || !target.value.ok) return target
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      if (resolved.issue.workspaceId === input.targetWorkspaceId) return taskboardOk(copyTaskboardIssue(resolved.issue))
+      const before = resolved.issue.workspaceId
+      resolved.issue.workspaceId = input.targetWorkspaceId
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'workspaceId', before, after: input.targetWorkspaceId }])
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
+    archiveIssue(input: { reference: string; expectedVersion: number; actor: FxTaskboardActor }) {
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      resolved.issue.archivedAt = taskboardNow()
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'archivedAt', before: null, after: resolved.issue.archivedAt }])
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
+    restoreIssue(input: { reference: string; expectedVersion: number; actor: FxTaskboardActor }) {
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      const before = resolved.issue.archivedAt
+      resolved.issue.archivedAt = null
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'archivedAt', before, after: null }])
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
+    listComments(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      return taskboardOk({
+        items: taskboardComments
+          .filter(comment => comment.issueId === issue.id)
+          .map(comment => ({ ...comment, actor: { ...comment.actor } })),
+      })
+    },
+    addComment(input: { reference: string; body: string; actor: FxTaskboardActor }) {
+      const issue = findTaskboardIssue(input.reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${input.reference}' does not exist`)
+      const comment: FxTaskboardComment = {
+        id: `fx-comment-${nextTaskboardComment++}`,
+        issueId: issue.id,
+        body: input.body,
+        actor: { ...input.actor },
+        createdAt: taskboardNow(),
+      }
+      taskboardComments.push(comment)
+      return taskboardOk({ ...comment, actor: { ...comment.actor } })
+    },
+    listActivities(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      return taskboardOk({
+        items: taskboardActivities
+          .filter(activity => activity.issueId === issue.id)
+          .map(activity => ({
+            ...activity,
+            actor: { ...activity.actor },
+            changes: activity.changes.map(change => ({ ...change })),
+          })),
+      })
+    },
+    listRelations(reference: string) {
+      const issue = findTaskboardIssue(reference)
+      if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      return taskboardOk({ items: taskboardRelations.filter(relation => relation.issueId === issue.id).map(relation => ({ ...relation })) })
+    },
+    addRelation(input: {
+      reference: string
+      relatedReference: string
+      type: FxTaskboardRelation['type']
+      expectedVersion: number
+      actor: FxTaskboardActor
+    }) {
+      const resolved = requireTaskboardIssue<{ issue: FxTaskboardIssue; relation: FxTaskboardRelation }>(
+        input.reference,
+        input.expectedVersion,
+      )
+      if ('result' in resolved) return resolved.result
+      const related = findTaskboardIssue(input.relatedReference)
+      if (related === undefined) return taskboardReject('issue_not_found', `Issue '${input.relatedReference}' does not exist`)
+      const relation: FxTaskboardRelation = {
+        id: `fx-relation-${nextTaskboardRelation++}`,
+        type: input.type,
+        issueId: resolved.issue.id,
+        relatedIssueId: related.id,
+        createdAt: taskboardNow(),
+      }
+      taskboardRelations.push(relation)
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'relations', before: [], after: [relation.id] }])
+      return taskboardOk({ issue: copyTaskboardIssue(resolved.issue), relation: { ...relation } })
+    },
+    removeRelation(input: { reference: string; relationId: string; expectedVersion: number; actor: FxTaskboardActor }) {
+      const resolved = requireTaskboardIssue<FxTaskboardIssue>(input.reference, input.expectedVersion)
+      if ('result' in resolved) return resolved.result
+      const at = taskboardRelations.findIndex(relation => relation.id === input.relationId && relation.issueId === resolved.issue.id)
+      if (at === -1) return taskboardReject('relation_not_found', `Relation '${input.relationId}' does not exist`)
+      taskboardRelations.splice(at, 1)
+      resolved.issue.version++
+      resolved.issue.updatedAt = taskboardNow()
+      appendTaskboardActivity(resolved.issue.id, input.actor, [{ field: 'relations', before: [input.relationId], after: [] }])
+      return taskboardOk(copyTaskboardIssue(resolved.issue))
+    },
+  }
+
   const rpc: ClientConnectionRpc = {
     call(channel, endpoint, payload) {
       if (channel !== '/api') {
@@ -3006,6 +3437,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           line?: string
           ref?: { id: string; revision: number }
           request?: { objective?: string; maxGoalRounds?: number }
+          workspaceId?: WorkspaceId
+          input?: Record<string, unknown>
+          reference?: string
         }
       }).args
       const sessionId = args.agentId
@@ -3021,6 +3455,21 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'goals/resume': return Promise.resolve(goalRemotes.resume(sessionId, args.ref as FxGoalRef))
         case 'goals/complete': return Promise.resolve(goalRemotes.complete(sessionId, args.ref as FxGoalRef))
         case 'goals/clear': return Promise.resolve(goalRemotes.clear(sessionId, args.ref as FxGoalRef))
+        case 'taskboard/workspace': return Promise.resolve(taskboardRemotes.workspace(args.workspaceId as WorkspaceId))
+        case 'taskboard/setPrefix': return Promise.resolve(taskboardRemotes.setPrefix(args.input as never))
+        case 'taskboard/listIssues': return Promise.resolve(taskboardRemotes.listIssues(args.input as never))
+        case 'taskboard/getIssue': return Promise.resolve(taskboardRemotes.getIssue(args.reference as string))
+        case 'taskboard/createIssue': return Promise.resolve(taskboardRemotes.createIssue(args.input as never))
+        case 'taskboard/updateIssue': return Promise.resolve(taskboardRemotes.updateIssue(args.input as never))
+        case 'taskboard/moveIssue': return Promise.resolve(taskboardRemotes.moveIssue(args.input as never))
+        case 'taskboard/archiveIssue': return Promise.resolve(taskboardRemotes.archiveIssue(args.input as never))
+        case 'taskboard/restoreIssue': return Promise.resolve(taskboardRemotes.restoreIssue(args.input as never))
+        case 'taskboard/listComments': return Promise.resolve(taskboardRemotes.listComments(args.reference as string))
+        case 'taskboard/addComment': return Promise.resolve(taskboardRemotes.addComment(args.input as never))
+        case 'taskboard/listActivities': return Promise.resolve(taskboardRemotes.listActivities(args.reference as string))
+        case 'taskboard/listRelations': return Promise.resolve(taskboardRemotes.listRelations(args.reference as string))
+        case 'taskboard/addRelation': return Promise.resolve(taskboardRemotes.addRelation(args.input as never))
+        case 'taskboard/removeRelation': return Promise.resolve(taskboardRemotes.removeRelation(args.input as never))
         default:
           return Promise.reject(new Error(`fixture connection RPC endpoint ${JSON.stringify(endpoint)} is unavailable`))
       }

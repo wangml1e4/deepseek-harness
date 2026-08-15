@@ -225,6 +225,12 @@
   gap: 12px;
 }
 
+.pluginActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .projectRow:hover .rowActions,
 .sessionRow:hover .rowActions,
 .projectRow.menuOpen .rowActions,

@@ -32,6 +32,7 @@ beforeEach(() => { localStorage.clear() })
 async function createRuntime(): Promise<SlotTestRuntime> {
   const runtime = await SlotTestRuntime.create()
   const locale = new LocaleRuntime(runtime.ctx)
+  runtime.provide('layout', { showConversation: vi.fn() })
   runtime.provide('locale', locale)
   runtime.slots.installLocale(locale)
   return runtime

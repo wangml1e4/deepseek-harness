@@ -37,6 +37,9 @@
       "path": "../../taskboard/taskboard-remote"
     },
     {
+      "path": "../../taskboard/taskboard"
+    },
+    {
       "path": "../../host/plugin-inventory"
     },
     {
