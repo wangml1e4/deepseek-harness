@@ -2248,6 +2248,27 @@ export interface Config {
 
 Source: [`packages/core/system-prompt/src/index.ts:186`](../packages/core/system-prompt/src/index.ts)
 
+<a id="deepseek-aidsh-taskboard-sqlite"></a>
+
+## `@deepseek-ai/dsh-taskboard-sqlite`
+
+```ts config-catalog
+/** SQLite Taskboard Provider configuration. */
+export interface Config {
+  /** SQLite file path, or `:memory:` for an in-process store. */
+  path: string
+  /** Durable SQLite journal mode. */
+  journalMode?: JournalMode
+  /** Maximum wait for a concurrent SQLite writer. */
+  busyTimeoutMs?: number
+}
+
+/** Supported durable journal modes. */
+export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
+```
+
+Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:65`](../packages/taskboard/taskboard-sqlite/src/index.ts)
+
 <a id="deepseek-aidsh-terminal-bash"></a>
 
 ## `@deepseek-ai/dsh-terminal-bash`
@@ -3114,6 +3135,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 - `@deepseek-ai/dsh-shell` — abstract `ShellExecutor` ([`packages/shell/shell/src/index.ts`](../packages/shell/shell/src/index.ts))
 - `@deepseek-ai/dsh-spill` — abstract `SpillStore` ([`packages/spill/spill/src/index.ts`](../packages/spill/spill/src/index.ts))
 - `@deepseek-ai/dsh-subprocess` — abstract `SubprocessRuntime` ([`packages/subprocess/subprocess/src/index.ts`](../packages/subprocess/subprocess/src/index.ts))
+- `@deepseek-ai/dsh-taskboard` — abstract `TaskboardService` ([`packages/taskboard/taskboard/src/index.ts`](../packages/taskboard/taskboard/src/index.ts))
 - `@deepseek-ai/dsh-workflow` — abstract `WorkflowEngine` ([`packages/workflow/workflow/src/index.ts`](../packages/workflow/workflow/src/index.ts))
 
 ## Library packages (no plugin entry)

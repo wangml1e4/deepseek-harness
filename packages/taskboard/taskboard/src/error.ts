@@ -1,0 +1,30 @@
+/** Stable Taskboard service failures. */
+
+/** Error codes returned by current Taskboard mutations. */
+export type TaskboardErrorCode =
+  | 'workspace_not_found'
+  | 'issue_not_found'
+  | 'issue_not_archived'
+  | 'issue_archived'
+  | 'relation_self'
+  | 'relation_exists'
+  | 'relation_cross_workspace'
+  | 'relation_cycle'
+  | 'relation_not_found'
+  | 'reason_required'
+  | 'version_conflict'
+  | 'prefix_frozen'
+  | 'invalid_prefix'
+  | 'prefix_exists'
+
+/** Taskboard failure with a machine-readable code. */
+export class TaskboardError extends Error {
+  /**
+   * @param code - Stable failure category.
+   * @param message - Human-readable explanation.
+   */
+  constructor(readonly code: TaskboardErrorCode, message: string) {
+    super(message)
+    this.name = 'TaskboardError'
+  }
+}

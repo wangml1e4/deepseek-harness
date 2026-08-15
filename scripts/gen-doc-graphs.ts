@@ -97,6 +97,14 @@ const GROUP_ORDER = [
 
 const SERVICE_ROLES: ServiceRole[] = [
   {
+    key: 'taskboard',
+    pkg: 'taskboard',
+    title: 'Workspace Taskboard seam',
+    mode: 'seam',
+    implementations: ['taskboard-sqlite'],
+    note: 'The Service Definition owns Workspace-scoped Issues and append-only history; the local Provider commits those records in one Host-owned SQLite database.',
+  },
+  {
     key: 'attachments',
     pkg: 'attachment',
     title: 'Durable binary attachment storage',

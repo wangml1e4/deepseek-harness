@@ -1,0 +1,947 @@
+/** SQLite Provider for the Workspace-owned Taskboard service. */
+
+import { randomUUID } from 'node:crypto'
+import { open } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { Context, Service } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+import {
+  ActivityId,
+  CommentId,
+  IssueId,
+  IssueIdentifier,
+  RelationId,
+  TaskboardError,
+  TaskboardService,
+} from '@deepseek-ai/dsh-taskboard'
+import type {
+  Activity,
+  ActivityChange,
+  AddCommentInput,
+  AddIssueRelationInput,
+  Comment,
+  CreateIssueInput,
+  EnsureWorkspaceInput,
+  Issue,
+  IssueReference,
+  IssueRelation,
+  IssueRelationMutation,
+  ListIssuesInput,
+  MoveIssueInput,
+  RemoveIssueRelationInput,
+  SetWorkspacePrefixInput,
+  UpdateIssueInput,
+  VersionedIssueInput,
+  WorkspaceTaskboard,
+  TaskboardActor,
+} from '@deepseek-ai/dsh-taskboard'
+import {
+  openTaskboardDatabase,
+  rowToActivity,
+  rowToComment,
+  rowToIssue,
+  rowToRelation,
+  rowToWorkspace,
+  type ActivityRow,
+  type CommentRow,
+  type IssueRow,
+  type JournalMode,
+  type RelationRow,
+  type WorkspaceRow,
+} from './schema.ts'
+import type { DatabaseSync } from 'node:sqlite'
+
+export { SCHEMA_VERSION, TASKBOARD_SQLITE_APPLICATION_ID } from './schema.ts'
+
+/** Default time SQLite waits for another writer before returning busy. */
+export const DEFAULT_BUSY_TIMEOUT_MS = 5000
+/** Default durable SQLite journal mode. */
+export const DEFAULT_JOURNAL_MODE: JournalMode = 'wal'
+/** Dashi-compatible maximum Issue prefix length. */
+export const MAX_ISSUE_PREFIX_LENGTH = 12
+
+/** SQLite Taskboard Provider configuration. */
+export interface Config {
+  /** SQLite file path, or `:memory:` for an in-process store. */
+  path: string
+  /** Durable SQLite journal mode. */
+  journalMode?: JournalMode
+  /** Maximum wait for a concurrent SQLite writer. */
+  busyTimeoutMs?: number
+}
+
+interface ResolvedConfig {
+  path: string
+  journalMode: JournalMode
+  busyTimeoutMs: number
+}
+
+/** Resolve optional deployment settings before the Provider opens its database. */
+function resolveConfig(config: Config): ResolvedConfig {
+  return {
+    path: config.path,
+    journalMode: config.journalMode ?? DEFAULT_JOURNAL_MODE,
+    busyTimeoutMs: config.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
+  }
+}
+
+/** Assert a row written by the current transaction can be read back. */
+function requireStored<T>(value: T | undefined, subject: string): T {
+  if (value === undefined) throw new Error(`SQLite Taskboard failed to read stored ${subject}`)
+  return value
+}
+
+/** Exclusively create a missing owner-only database file. */
+async function createDatabaseFile(path: string): Promise<void> {
+  try {
+    const handle = await open(path, 'wx', 0o600)
+    await handle.close()
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+  }
+}
+
+/** Derive the initial Dashi-compatible prefix from a Workspace title. */
+function derivePrefix(title: string): string {
+  const prefix = title.toUpperCase().replace(/[^A-Z0-9]+/g, '')
+  return (prefix || 'TASK').slice(0, MAX_ISSUE_PREFIX_LENGTH)
+}
+
+/** Roll back a failed mutation while its write transaction still owns the connection. */
+function rollback(db: DatabaseSync): void {
+  /* v8 ignore else -- mutation failures occur before COMMIT; a post-COMMIT SQLite fault requires database corruption. */
+  if (db.isTransaction) db.exec('ROLLBACK')
+}
+
+/** Replace one Issue's ordered labels while reusing its Workspace label records. */
+function replaceLabels(
+  db: DatabaseSync,
+  workspaceId: string,
+  issueId: IssueId,
+  labels: readonly string[],
+): void {
+  db.prepare('DELETE FROM issue_labels WHERE issue_id = ?').run(issueId)
+  const ensureLabel = db.prepare(`
+    INSERT INTO labels (workspace_id, name)
+    VALUES (?, ?)
+    ON CONFLICT (workspace_id, name) DO NOTHING
+  `)
+  const findLabel = db.prepare('SELECT id FROM labels WHERE workspace_id = ? AND name = ?')
+  const attachLabel = db.prepare(`
+    INSERT INTO issue_labels (issue_id, label_id, sequence)
+    VALUES (?, ?, ?)
+  `)
+  for (const [sequence, name] of labels.entries()) {
+    ensureLabel.run(workspaceId, name)
+    const label = findLabel.get(workspaceId, name) as { id: number }
+    attachLabel.run(issueId, label.id, sequence)
+  }
+}
+
+/** Local SQLite implementation of {@link TaskboardService}. */
+export class SqliteTaskboard extends TaskboardService {
+  static Config: z<Config> = z.object({
+    path: z.string().required(),
+    journalMode: z.union(['wal', 'delete', 'truncate', 'persist'] as const).default(DEFAULT_JOURNAL_MODE),
+    busyTimeoutMs: z.number().step(1).min(0).default(DEFAULT_BUSY_TIMEOUT_MS),
+  })
+
+  private db: DatabaseSync | undefined
+  private readonly resolvedConfig: ResolvedConfig
+
+  constructor(ctx: Context, readonly config: Config) {
+    super(ctx)
+    this.resolvedConfig = resolveConfig(config)
+  }
+
+  /** Create directories, open the database, and bind handle cleanup to the plugin fiber. */
+  protected async [Service.init](): Promise<void> {
+    const actual = this.resolvedConfig.path === ':memory:'
+      ? this.resolvedConfig.path
+      : resolve(this.resolvedConfig.path)
+    if (actual !== ':memory:') {
+      await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
+      await createDatabaseFile(actual)
+    }
+    this.db = openTaskboardDatabase(
+      actual,
+      this.resolvedConfig.journalMode,
+      this.resolvedConfig.busyTimeoutMs,
+    )
+    this.ctx.effect(() => () => {
+      this.db?.close()
+      this.db = undefined
+    }, 'taskboardSqlite.close()')
+  }
+
+  async ensureWorkspace(input: EnsureWorkspaceInput): Promise<WorkspaceTaskboard> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const existingRow = db.prepare(`
+        SELECT workspace_id, title, prefix, version, created_at, updated_at
+        FROM taskboards
+        WHERE workspace_id = ?
+      `).get(input.workspaceId) as WorkspaceRow | undefined
+      if (existingRow !== undefined) {
+        db.exec('COMMIT')
+        return rowToWorkspace(existingRow)
+      }
+      const timestamp = new Date().toISOString()
+      const prefix = this.allocatePrefix(input.title)
+      db.prepare(`
+        INSERT INTO taskboards (
+          workspace_id, title, prefix, next_issue_number, version, created_at, updated_at
+        ) VALUES (?, ?, ?, 1, 1, ?, ?)
+      `).run(input.workspaceId, input.title, prefix, timestamp, timestamp)
+      db.exec('COMMIT')
+      return requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+    } catch (error: unknown) {
+      /* v8 ignore start -- allocator output satisfies the schema; this retains rollback for storage faults. */
+      rollback(db)
+      throw error
+      /* v8 ignore stop */
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async getWorkspace(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<WorkspaceTaskboard | undefined> {
+    const row = this.database().prepare(`
+      SELECT workspace_id, title, prefix, version, created_at, updated_at
+      FROM taskboards
+      WHERE workspace_id = ?
+    `).get(workspaceId) as WorkspaceRow | undefined
+    return row === undefined ? undefined : rowToWorkspace(row)
+  }
+
+  async setWorkspacePrefix(input: SetWorkspacePrefixInput): Promise<WorkspaceTaskboard> {
+    if (!new RegExp(`^[A-Z0-9]{1,${MAX_ISSUE_PREFIX_LENGTH}}$`).test(input.prefix)) {
+      throw new TaskboardError(
+        'invalid_prefix',
+        `Taskboard prefix must contain 1-${MAX_ISSUE_PREFIX_LENGTH} uppercase ASCII letters or digits`,
+      )
+    }
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const current = db.prepare(`
+        SELECT version, next_issue_number
+        FROM taskboards
+        WHERE workspace_id = ?
+      `).get(input.workspaceId) as { version: number; next_issue_number: number } | undefined
+      if (current === undefined) {
+        throw new TaskboardError(
+          'workspace_not_found',
+          `cannot change prefix: Workspace '${input.workspaceId}' has no Taskboard`,
+        )
+      }
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot change prefix: expected Taskboard version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      if (current.next_issue_number !== 1) {
+        throw new TaskboardError(
+          'prefix_frozen',
+          `cannot change prefix for Workspace '${input.workspaceId}' after its first Issue`,
+        )
+      }
+      const duplicate = db.prepare(`
+        SELECT 1 FROM taskboards WHERE prefix = ? AND workspace_id != ?
+      `).get(input.prefix, input.workspaceId)
+      if (duplicate !== undefined) {
+        throw new TaskboardError('prefix_exists', `Taskboard prefix '${input.prefix}' is already in use`)
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE taskboards
+        SET prefix = ?, version = version + 1, updated_at = ?
+        WHERE workspace_id = ? AND version = ?
+      `).run(input.prefix, timestamp, input.workspaceId, input.expectedVersion)
+      db.exec('COMMIT')
+      return requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  async createIssue(input: CreateIssueInput): Promise<Issue> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const workspace = db.prepare(`
+        SELECT workspace_id, prefix, next_issue_number
+        FROM taskboards
+        WHERE workspace_id = ?
+      `).get(input.workspaceId) as {
+        workspace_id: string
+        prefix: string
+        next_issue_number: number
+      } | undefined
+      if (workspace === undefined) {
+        throw new TaskboardError(
+          'workspace_not_found',
+          `cannot create Issue: Workspace '${input.workspaceId}' has no Taskboard`,
+        )
+      }
+      const timestamp = new Date().toISOString()
+      const identifier = IssueIdentifier(`${workspace.prefix}-${workspace.next_issue_number}`)
+      const id = IssueId(randomUUID())
+      const status = input.status ?? 'backlog'
+      const description = input.description ?? ''
+      const priority = input.priority ?? 'none'
+      const labels = [...new Set(input.labels ?? [])]
+      const assignee = input.assignee ?? 'unassigned'
+      const row = db.prepare(`
+        SELECT MIN(sort_order) AS minimum
+        FROM issues
+        WHERE workspace_id = ? AND status = ? AND archived_at IS NULL
+      `).get(input.workspaceId, status) as { minimum: number | null }
+      const sortOrder = row.minimum === null ? 1000 : row.minimum - 1000
+      db.prepare(`
+        UPDATE taskboards
+        SET next_issue_number = next_issue_number + 1, version = version + 1, updated_at = ?
+        WHERE workspace_id = ?
+      `).run(timestamp, input.workspaceId)
+      db.prepare(`
+        INSERT INTO issues (
+          id, identifier, workspace_id, title, description, status, priority,
+          assignee, start_date, due_date, sort_order, version, archived_at,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+      `).run(
+        id,
+        identifier,
+        input.workspaceId,
+        input.title,
+        description,
+        status,
+        priority,
+        assignee,
+        input.startDate ?? null,
+        input.dueDate ?? null,
+        sortOrder,
+        timestamp,
+        timestamp,
+      )
+      replaceLabels(db, input.workspaceId, id, labels)
+      db.exec('COMMIT')
+      return requireStored(await this.getIssue(id), 'Issue')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async listIssues(input: ListIssuesInput): Promise<readonly Issue[]> {
+    const clauses = ['workspace_id = ?']
+    const values: string[] = [input.workspaceId]
+    if (input.archived === 'only') clauses.push('archived_at IS NOT NULL')
+    else if (input.archived !== 'include') clauses.push('archived_at IS NULL')
+    if (input.status !== undefined) {
+      clauses.push('status = ?')
+      values.push(input.status)
+    }
+    if (input.priority !== undefined) {
+      clauses.push('priority = ?')
+      values.push(input.priority)
+    }
+    if (input.label !== undefined) {
+      clauses.push(`EXISTS (
+        SELECT 1
+        FROM issue_labels
+        JOIN labels ON labels.id = issue_labels.label_id
+        WHERE issue_labels.issue_id = issues.id AND labels.name = ?
+      )`)
+      values.push(input.label)
+    }
+    if (input.assignee !== undefined) {
+      clauses.push('assignee = ?')
+      values.push(input.assignee)
+    }
+    if (input.startDate !== undefined) {
+      clauses.push('start_date = ?')
+      values.push(input.startDate)
+    }
+    if (input.dueDate !== undefined) {
+      clauses.push('due_date = ?')
+      values.push(input.dueDate)
+    }
+    if (input.query !== undefined) {
+      clauses.push(`(
+        instr(lower(identifier), lower(?)) > 0 OR
+        instr(lower(title), lower(?)) > 0 OR
+        instr(lower(description), lower(?)) > 0
+      )`)
+      values.push(input.query, input.query, input.query)
+    }
+    const rows = this.database().prepare(`
+      SELECT id, identifier, workspace_id, title, description, status, priority,
+             labels, assignee, start_date, due_date, sort_order, version,
+             archived_at, created_at, updated_at
+      FROM issue_records AS issues
+      WHERE ${clauses.join(' AND ')}
+      ORDER BY status, sort_order, created_at, id
+    `).all(...values)
+    return (rows as unknown as IssueRow[]).map(rowToIssue)
+  }
+
+  async updateIssue(input: UpdateIssueInput): Promise<Issue> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const current = db.prepare(`
+        SELECT id, workspace_id, title, description, status, priority, labels,
+               assignee, start_date, due_date, sort_order, version, archived_at
+        FROM issue_records
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        workspace_id: string
+        title: string
+        description: string
+        status: Issue['status']
+        priority: Issue['priority']
+        labels: string
+        assignee: Issue['assignee']
+        start_date: string | null
+        due_date: string | null
+        sort_order: number
+        version: number
+        archived_at: string | null
+      } | undefined
+      if (current === undefined) {
+        throw new TaskboardError('issue_not_found', `cannot update missing Issue '${input.reference}'`)
+      }
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot update Issue '${input.reference}': expected version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      if (current.archived_at !== null) {
+        throw new TaskboardError('issue_archived', `cannot update archived Issue '${input.reference}'`)
+      }
+      const status = input.status ?? current.status
+      const returnsToTodo = status === 'todo'
+        && (current.status === 'in_review' || current.status === 'blocked' || current.status === 'done')
+      if (returnsToTodo && (input.reason === undefined || input.reason.trim().length === 0)) {
+        throw new TaskboardError(
+          'reason_required',
+          `returning Issue '${input.reference}' from ${current.status} to todo requires a reason`,
+        )
+      }
+      const returnReason = returnsToTodo ? input.reason : undefined
+      const title = input.title ?? current.title
+      const description = input.description ?? current.description
+      const priority = input.priority ?? current.priority
+      const currentLabels = JSON.parse(current.labels) as string[]
+      const labels = input.labels === undefined ? currentLabels : [...new Set(input.labels)]
+      const assignee = input.assignee ?? current.assignee
+      const startDate = input.startDate === undefined ? current.start_date : input.startDate
+      const dueDate = input.dueDate === undefined ? current.due_date : input.dueDate
+      let sortOrder = input.sortOrder ?? current.sort_order
+      if (input.sortOrder === undefined && current.status !== status) {
+        const row = db.prepare(`
+          SELECT MIN(sort_order) AS minimum
+          FROM issues
+          WHERE workspace_id = ? AND status = ? AND archived_at IS NULL
+        `).get(current.workspace_id, status) as { minimum: number | null }
+        sortOrder = row.minimum === null ? 1000 : row.minimum - 1000
+      }
+      const changes: ActivityChange[] = []
+      if (current.title !== title) changes.push({ field: 'title', before: current.title, after: title })
+      if (current.description !== description) {
+        changes.push({ field: 'description', before: current.description, after: description })
+      }
+      if (current.status !== status) {
+        changes.push({ field: 'status', before: current.status, after: status })
+      }
+      if (current.priority !== priority) {
+        changes.push({ field: 'priority', before: current.priority, after: priority })
+      }
+      if (current.labels !== JSON.stringify(labels)) {
+        changes.push({ field: 'labels', before: currentLabels, after: labels })
+      }
+      if (current.assignee !== assignee) {
+        changes.push({ field: 'assignee', before: current.assignee, after: assignee })
+      }
+      if (current.start_date !== startDate) {
+        changes.push({ field: 'startDate', before: current.start_date, after: startDate })
+      }
+      if (current.due_date !== dueDate) {
+        changes.push({ field: 'dueDate', before: current.due_date, after: dueDate })
+      }
+      if (current.sort_order !== sortOrder) {
+        changes.push({ field: 'sortOrder', before: current.sort_order, after: sortOrder })
+      }
+      if (changes.length === 0) {
+        db.exec('COMMIT')
+        return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE issues
+        SET title = ?, description = ?, status = ?, priority = ?, assignee = ?,
+            start_date = ?, due_date = ?, sort_order = ?,
+            version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(
+        title,
+        description,
+        status,
+        priority,
+        assignee,
+        startDate,
+        dueDate,
+        sortOrder,
+        timestamp,
+        current.id,
+        input.expectedVersion,
+      )
+      if (current.labels !== JSON.stringify(labels)) {
+        replaceLabels(db, current.workspace_id, IssueId(current.id), labels)
+      }
+      this.recordActivity(IssueId(current.id), input.actor, changes, timestamp)
+      if (returnReason !== undefined) {
+        db.prepare(`
+          INSERT INTO comments (
+            id, issue_id, body, actor_type, actor_id, actor_name, actor_avatar_url, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          CommentId(randomUUID()),
+          current.id,
+          returnReason,
+          input.actor.type,
+          input.actor.id,
+          input.actor.name,
+          input.actor.avatarUrl ?? null,
+          timestamp,
+        )
+      }
+      db.exec('COMMIT')
+      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  archiveIssue(input: VersionedIssueInput): Promise<Issue> {
+    return this.setIssueArchived(input, false)
+  }
+
+  restoreIssue(input: VersionedIssueInput): Promise<Issue> {
+    return this.setIssueArchived(input, true)
+  }
+
+  async moveIssue(input: MoveIssueInput): Promise<Issue> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const current = db.prepare(`
+        SELECT id, workspace_id, status, sort_order, version, archived_at, labels
+        FROM issue_records
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        workspace_id: string
+        status: Issue['status']
+        sort_order: number
+        version: number
+        archived_at: string | null
+        labels: string
+      } | undefined
+      if (current === undefined) {
+        throw new TaskboardError('issue_not_found', `cannot move missing Issue '${input.reference}'`)
+      }
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot move Issue '${input.reference}': expected version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      const target = db.prepare('SELECT 1 FROM taskboards WHERE workspace_id = ?')
+        .get(input.targetWorkspaceId)
+      if (target === undefined) {
+        throw new TaskboardError(
+          'workspace_not_found',
+          `cannot move Issue '${input.reference}': Workspace '${input.targetWorkspaceId}' has no Taskboard`,
+        )
+      }
+      if (current.workspace_id === input.targetWorkspaceId) {
+        db.exec('COMMIT')
+        return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      }
+      const relation = db.prepare(`
+        SELECT 1
+        FROM relations
+        WHERE source_issue_id = ? OR target_issue_id = ?
+        LIMIT 1
+      `).get(current.id, current.id)
+      if (relation !== undefined) {
+        throw new TaskboardError(
+          'relation_cross_workspace',
+          `cannot move Issue '${input.reference}' while it has Workspace-scoped dependencies`,
+        )
+      }
+      let sortOrder = current.sort_order
+      if (current.archived_at === null && current.workspace_id !== input.targetWorkspaceId) {
+        const row = db.prepare(`
+          SELECT MIN(sort_order) AS minimum
+          FROM issues
+          WHERE workspace_id = ? AND status = ? AND archived_at IS NULL
+        `).get(input.targetWorkspaceId, current.status) as { minimum: number | null }
+        sortOrder = row.minimum === null ? 1000 : row.minimum - 1000
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE issues
+        SET workspace_id = ?, sort_order = ?, version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(input.targetWorkspaceId, sortOrder, timestamp, current.id, input.expectedVersion)
+      replaceLabels(
+        db,
+        input.targetWorkspaceId,
+        IssueId(current.id),
+        JSON.parse(current.labels) as string[],
+      )
+      db.prepare(`
+        UPDATE taskboards
+        SET version = version + 1, updated_at = ?
+        WHERE workspace_id IN (?, ?)
+      `).run(timestamp, current.workspace_id, input.targetWorkspaceId)
+      this.recordActivity(IssueId(current.id), input.actor, [{
+        field: 'workspaceId',
+        before: current.workspace_id,
+        after: input.targetWorkspaceId,
+      }], timestamp)
+      db.exec('COMMIT')
+      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async addComment(input: AddCommentInput): Promise<Comment> {
+    const db = this.database()
+    const issueId = this.requireIssueId(input.reference)
+    const id = CommentId(randomUUID())
+    const timestamp = new Date().toISOString()
+    db.prepare(`
+      INSERT INTO comments (
+        id, issue_id, body, actor_type, actor_id, actor_name, actor_avatar_url, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      issueId,
+      input.body,
+      input.actor.type,
+      input.actor.id,
+      input.actor.name,
+      input.actor.avatarUrl ?? null,
+      timestamp,
+    )
+    const row = db.prepare(`
+      SELECT id, issue_id, body, actor_type, actor_id, actor_name, actor_avatar_url, created_at
+      FROM comments
+      WHERE id = ?
+    `).get(id) as unknown as CommentRow
+    return rowToComment(row)
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async listComments(reference: IssueReference): Promise<readonly Comment[]> {
+    const issueId = this.requireIssueId(reference)
+    const rows = this.database().prepare(`
+      SELECT id, issue_id, body, actor_type, actor_id, actor_name, actor_avatar_url, created_at
+      FROM comments
+      WHERE issue_id = ?
+      ORDER BY sequence
+    `).all(issueId) as unknown as CommentRow[]
+    return rows.map(rowToComment)
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async listActivities(reference: IssueReference): Promise<readonly Activity[]> {
+    const issueId = this.requireIssueId(reference)
+    const rows = this.database().prepare(`
+      SELECT id, issue_id, actor_type, actor_id, actor_name, actor_avatar_url, changes, created_at
+      FROM activities
+      WHERE issue_id = ?
+      ORDER BY sequence
+    `).all(issueId) as unknown as ActivityRow[]
+    return rows.map(rowToActivity)
+  }
+
+  async addRelation(input: AddIssueRelationInput): Promise<IssueRelationMutation> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const anchor = db.prepare(`
+        SELECT id, workspace_id, version
+        FROM issues
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        workspace_id: string
+        version: number
+      } | undefined
+      const related = db.prepare(`
+        SELECT id, workspace_id
+        FROM issues
+        WHERE id = ? OR identifier = ?
+      `).get(input.relatedReference, input.relatedReference) as {
+        id: string
+        workspace_id: string
+      } | undefined
+      if (anchor === undefined || related === undefined) {
+        const missing = anchor === undefined ? input.reference : input.relatedReference
+        throw new TaskboardError('issue_not_found', `Issue '${missing}' does not exist`)
+      }
+      if (anchor.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot add relation to Issue '${input.reference}': expected version ${input.expectedVersion}, found ${anchor.version}`,
+        )
+      }
+      if (anchor.id === related.id) {
+        throw new TaskboardError('relation_self', `Issue '${input.reference}' cannot block itself`)
+      }
+      if (anchor.workspace_id !== related.workspace_id) {
+        throw new TaskboardError(
+          'relation_cross_workspace',
+          'Issue dependencies must remain within one Workspace',
+        )
+      }
+      const sourceIssueId = input.type === 'blocks' ? anchor.id : related.id
+      const targetIssueId = input.type === 'blocks' ? related.id : anchor.id
+      const existing = db.prepare(`
+        SELECT 1 FROM relations WHERE source_issue_id = ? AND target_issue_id = ?
+      `).get(sourceIssueId, targetIssueId)
+      if (existing !== undefined) {
+        throw new TaskboardError('relation_exists', 'This Issue dependency already exists')
+      }
+      const cycle = db.prepare(`
+        WITH RECURSIVE descendants(issue_id) AS (
+          SELECT target_issue_id FROM relations WHERE source_issue_id = ?
+          UNION
+          SELECT relations.target_issue_id
+          FROM relations
+          JOIN descendants ON relations.source_issue_id = descendants.issue_id
+        )
+        SELECT 1 FROM descendants WHERE issue_id = ?
+      `).get(targetIssueId, sourceIssueId)
+      if (cycle !== undefined) {
+        throw new TaskboardError('relation_cycle', 'This Issue dependency would create a cycle')
+      }
+      const id = RelationId(randomUUID())
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        INSERT INTO relations (id, source_issue_id, target_issue_id, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(id, sourceIssueId, targetIssueId, timestamp)
+      db.prepare(`
+        UPDATE issues
+        SET version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(timestamp, anchor.id, input.expectedVersion)
+      this.recordActivity(IssueId(anchor.id), input.actor, [{
+        field: 'relation',
+        before: null,
+        after: { type: input.type, relatedIssueId: related.id },
+      }], timestamp)
+      db.exec('COMMIT')
+      return {
+        issue: requireStored(await this.getIssue(IssueId(anchor.id)), 'Issue'),
+        relation: {
+          id,
+          type: input.type,
+          issueId: IssueId(anchor.id),
+          relatedIssueId: IssueId(related.id),
+          createdAt: timestamp,
+        },
+      }
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async listRelations(reference: IssueReference): Promise<readonly IssueRelation[]> {
+    const issueId = this.requireIssueId(reference)
+    const rows = this.database().prepare(`
+      SELECT id, source_issue_id, target_issue_id, created_at
+      FROM relations
+      WHERE source_issue_id = ? OR target_issue_id = ?
+      ORDER BY sequence
+    `).all(issueId, issueId) as unknown as RelationRow[]
+    return rows.map(row => rowToRelation(row, issueId))
+  }
+
+  async removeRelation(input: RemoveIssueRelationInput): Promise<Issue> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const anchor = db.prepare(`
+        SELECT id, version FROM issues WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as { id: string; version: number } | undefined
+      if (anchor === undefined) {
+        throw new TaskboardError('issue_not_found', `Issue '${input.reference}' does not exist`)
+      }
+      if (anchor.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot remove relation from Issue '${input.reference}': expected version ${input.expectedVersion}, found ${anchor.version}`,
+        )
+      }
+      const row = db.prepare(`
+        SELECT id, source_issue_id, target_issue_id, created_at
+        FROM relations
+        WHERE id = ? AND (source_issue_id = ? OR target_issue_id = ?)
+      `).get(input.relationId, anchor.id, anchor.id) as RelationRow | undefined
+      if (row === undefined) {
+        throw new TaskboardError('relation_not_found', `Relation '${input.relationId}' does not exist for this Issue`)
+      }
+      const relation = rowToRelation(row, IssueId(anchor.id))
+      const timestamp = new Date().toISOString()
+      db.prepare('DELETE FROM relations WHERE id = ?').run(input.relationId)
+      db.prepare(`
+        UPDATE issues
+        SET version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(timestamp, anchor.id, input.expectedVersion)
+      this.recordActivity(IssueId(anchor.id), input.actor, [{
+        field: 'relation',
+        before: { type: relation.type, relatedIssueId: relation.relatedIssueId },
+        after: null,
+      }], timestamp)
+      db.exec('COMMIT')
+      return requireStored(await this.getIssue(IssueId(anchor.id)), 'Issue')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- async keeps SQLite failures as Promise rejections
+  async getIssue(reference: IssueReference): Promise<Issue | undefined> {
+    const row = this.database().prepare(`
+      SELECT id, identifier, workspace_id, title, description, status, priority,
+             labels, assignee, start_date, due_date, sort_order, version,
+             archived_at, created_at, updated_at
+      FROM issue_records
+      WHERE id = ? OR identifier = ?
+    `).get(reference, reference) as IssueRow | undefined
+    return row === undefined ? undefined : rowToIssue(row)
+  }
+
+  /** Return the initialized database or fail if the Service lifecycle was bypassed. */
+  private database(): DatabaseSync {
+    if (this.db === undefined) throw new Error('SQLite Taskboard is not initialized')
+    return this.db
+  }
+
+  /** Resolve an Issue reference for child-record foreign keys. */
+  private requireIssueId(reference: IssueReference): IssueId {
+    const row = this.database().prepare(`
+      SELECT id FROM issues WHERE id = ? OR identifier = ?
+    `).get(reference, reference) as { id: string } | undefined
+    if (row === undefined) {
+      throw new TaskboardError('issue_not_found', `Issue '${reference}' does not exist`)
+    }
+    return IssueId(row.id)
+  }
+
+  /** Append one Activity entry inside the caller's mutation transaction. */
+  private recordActivity(
+    issueId: IssueId,
+    actor: TaskboardActor,
+    changes: readonly ActivityChange[],
+    timestamp: string,
+  ): void {
+    this.database().prepare(`
+      INSERT INTO activities (
+        id, issue_id, actor_type, actor_id, actor_name, actor_avatar_url, changes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      ActivityId(randomUUID()),
+      issueId,
+      actor.type,
+      actor.id,
+      actor.name,
+      actor.avatarUrl ?? null,
+      JSON.stringify(changes),
+      timestamp,
+    )
+  }
+
+  /** Persist an archive transition with optimistic concurrency. */
+  private async setIssueArchived(input: VersionedIssueInput, restore: boolean): Promise<Issue> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const current = db.prepare(`
+        SELECT id, version, archived_at
+        FROM issues
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        version: number
+        archived_at: string | null
+      } | undefined
+      if (current === undefined) {
+        throw new TaskboardError('issue_not_found', `cannot change archive state of missing Issue '${input.reference}'`)
+      }
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot change archive state of Issue '${input.reference}': expected version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      if (restore && current.archived_at === null) {
+        throw new TaskboardError('issue_not_archived', `cannot restore active Issue '${input.reference}'`)
+      }
+      if (!restore && current.archived_at !== null) {
+        throw new TaskboardError('issue_archived', `cannot archive already archived Issue '${input.reference}'`)
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE issues
+        SET archived_at = ?, version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(restore ? null : timestamp, timestamp, current.id, input.expectedVersion)
+      this.recordActivity(IssueId(current.id), input.actor, [{
+        field: 'archivedAt',
+        before: current.archived_at,
+        after: restore ? null : timestamp,
+      }], timestamp)
+      db.exec('COMMIT')
+      return requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  /** Allocate the first unused deterministic prefix while holding the write transaction. */
+  private allocatePrefix(title: string): string {
+    const base = derivePrefix(title)
+    const exists = this.database().prepare('SELECT 1 FROM taskboards WHERE prefix = ?')
+    if (exists.get(base) === undefined) return base
+    for (let number = 2; ; number += 1) {
+      const suffix = String(number)
+      const candidate = `${base.slice(0, MAX_ISSUE_PREFIX_LENGTH - suffix.length)}${suffix}`
+      if (exists.get(candidate) === undefined) return candidate
+    }
+  }
+}
+
+export default SqliteTaskboard

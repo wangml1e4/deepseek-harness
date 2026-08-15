@@ -365,6 +365,11 @@
         "src/**/*.ts"
       ]
     },
+    "packages/taskboard/taskboard": {
+      "project": [
+        "src/**/*.ts"
+      ]
+    },
     "packages/util/timeout": {
       "entry": [
         "tests/**/*.spec.ts"
