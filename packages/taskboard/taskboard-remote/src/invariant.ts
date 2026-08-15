@@ -10,7 +10,7 @@ export const name = 'taskboard-remote-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
-/** No companion check: the adapter owns no mutable state outside its Providers. */
+/** No runtime invariant: the adapter owns no mutable state outside its Providers. */
 const install: InvariantInstaller = () => {}
 
 /** Register this package's invariant companion. */

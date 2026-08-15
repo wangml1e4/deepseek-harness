@@ -10,7 +10,7 @@ export const name = 'taskctl-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
-/** No runtime check: taskctl owns no process state after one invocation. */
+/** No runtime invariant: taskctl owns no process state after one invocation. */
 const install: InvariantInstaller = () => {}
 
 /** Register this package's invariant companion. */

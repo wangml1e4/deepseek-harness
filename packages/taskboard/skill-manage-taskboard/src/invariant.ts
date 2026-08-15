@@ -10,7 +10,7 @@ export const name = 'skill-manage-taskboard-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
-/** No runtime check: the package owns one immutable Provider registration. */
+/** No runtime invariant: the package owns one immutable Provider registration. */
 const install: InvariantInstaller = () => {}
 
 /** Register this package's invariant companion. */
