@@ -2,9 +2,9 @@
 
 English | [中文](README.zh.md)
 
-Standalone Token usage section for the 800px settings shell. The browser plugin registers one `settings.section` entry, reads the framework-provided root `useSessions` hook, and receives projection hydration through the injected `ctx.sessions` face. It folds each unique session-list id once, so ordinary, forked, and subagent sessions follow the product's existing visible-list scope without lineage duplication.
+Standalone Token usage section for the 800px settings shell. The browser plugin registers one `settings.section` entry, reads the framework-provided root `useSessions` hook, and receives projection hydration through the injected `ctx.sessions` face. It folds each unique session-list id once. The `tokenActivity` projection drops copied seed prefixes, so ordinary, forked, and subagent sessions follow the product's existing visible-list scope without charging one provider request more than once.
 
-The page combines the durable `tokenActivity` projection from every visible persisted session. Its total is uncached input plus cache reads, cache writes, and output; reasoning is not added separately. When a visible row lacks the key (including a cold cache row written before this projection existed), the page serially asks the sessions service for an exact projection-only baseline. The Host uses the live registry cut or cold cache ladder and writes rebuilt cold checkpoints back; `session.list` itself remains zero full-log I/O. Loading and per-session failure are shown separately from a genuine zero-usage state.
+The page combines the durable `tokenActivity` projection from every visible persisted session. Its total is uncached input plus cache reads, cache writes, and output; reasoning is not added separately. The page serially asks the sessions service for an exact projection-only baseline for every visible row because an existing cold-cache value may be stale. The Host uses the live registry cut or cold cache ladder and writes rebuilt cold checkpoints back; `session.list` itself remains zero full-log I/O. Loading and per-session failure are shown separately from a genuine zero-usage state.
 
 ## Calendar semantics
 
@@ -32,5 +32,5 @@ None.
 
 ## Known Limitations and Deferred Work
 
-- A failed exact projection load leaves known sessions visible and marks the aggregate incomplete; Retry repeats only the still-missing identities. It is never presented as the genuine zero state.
+- A failed exact projection load leaves known sessions visible and marks the aggregate incomplete; Retry rechecks every visible identity because list rows do not carry an exactness flag. It is never presented as the genuine zero state.
 - Each provider bucket preserves the existing number contract; client aggregation converts buckets to `bigint` before cross-session addition, so formatting does not add precision loss.

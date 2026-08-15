@@ -1,6 +1,6 @@
 - list "Token 用量":
   - listitem:
-    - strong: "2710"
+    - strong: "2760"
     - text: 累计 Token 数
   - listitem:
     - strong: "2500"

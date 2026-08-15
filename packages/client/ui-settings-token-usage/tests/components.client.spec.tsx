@@ -69,6 +69,18 @@ describe('TokenUsageSection', () => {
     expect(screen.getByLabelText('最长工作时间: 2分5秒')).toBeDefined()
   })
 
+  it('hydrates listed sessions even when the list already carries cached activity', async () => {
+    const requested: string[][] = []
+    const hydrateActivity: TokenUsageSectionProps['hydrateActivity'] = (sessionIds) => {
+      requested.push([...sessionIds])
+      return Promise.resolve({ failed: [] })
+    }
+    const view = render(<TokenUsageSection {...props(populated())} hydrateActivity={hydrateActivity} />)
+    await waitFor(() => { expect(requested).toEqual([['session-1']]) })
+    view.rerender(<TokenUsageSection {...props(populated())} hydrateActivity={hydrateActivity} />)
+    expect(requested).toEqual([['session-1']])
+  })
+
   it('switches all three keyboard buttons and updates pressed state and chart identity', () => {
     const { container } = render(<TokenUsageSection {...props(populated())} />)
     const daily = screen.getByRole('button', { name: zh.daily })

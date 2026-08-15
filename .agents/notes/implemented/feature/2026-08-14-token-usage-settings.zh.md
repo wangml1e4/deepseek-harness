@@ -10,11 +10,11 @@ Status: implemented
 
 ## Decision
 
-Token-meter 在 `tokenUsage` 旁拥有一个 `tokenActivity` 会话投影。它把相同的服务商报告用量——互不重叠的未缓存输入、缓存读取、缓存写入和输出 bucket——重放到自然日行中。同一 `(turn, step)` 的最终 assistant 用量样本会替换分片样本；当两次事件时间跨越本地午夜时，样本可以移动到另一日期行。推理仍属于输出，不会单独再加一次。
+Token-meter 在 `tokenUsage` 旁拥有一个 `tokenActivity` 会话投影。它把相同的服务商报告用量——互不重叠的未缓存输入、缓存读取、缓存写入和输出 bucket——重放到自然日行中。同一 `(turn, step)` 的最终 assistant 用量样本会替换分片样本；当两次事件时间跨越本地午夜时，样本可以移动到另一日期行。推理仍属于输出，不会单独再加一次。`session/end-seed` 会清空已累计日期、样本替换状态和已完成轮次时长，但保留继承的时区，因此 fork 或带种子的 subagent 只贡献复制前缀之后发生的提供方工作。
 
 一条直接用户消息为其准入的工作选择经过 Host 验证的 `clientTimeZone`。直接用户时区来源缺失或格式错误时使用 UTC。每个用量样本按自身的持久事件时间归日。投影还记录匹配的 `turn/start` 到结束原因为 `completed` 的 `turn/end` 的最大时间间隔；已中止、未完成与不匹配的轮次不贡献时长。
 
-Token 用量客户端包通过 `settings.section` 注册页面。它从标准 slot props 接收 root-scoped `useSessions` hook，并且只折叠一次 `SessionListState.ids` 中的每个唯一条目。普通、分支与子代理会话因此沿用列表现有的产品可见范围，不会再遍历一遍 lineage。可见行缺少 `tokenActivity` 时，注入的 sessions face 只对这些唯一 id 调用 `hydrateProjection`。请求串行运行并使用 `session.history({ projectionsOnly: true })`：attached 会话返回注册表 live cut；cold 会话执行投影缓存带版本的缓存行 + 持久 tail restore 与 durable 写回。结果播种既有的 seq 高者胜客户端 store。因此 `session.list` 保持零全日志 I/O，旧缓存行则无需打开／恢复会话即可修复。加载中、失败和真正的零用量是三种不同的页面状态。
+Token 用量客户端包通过 `settings.section` 注册页面。它从标准 slot props 接收 root-scoped `useSessions` hook，并且只折叠一次 `SessionListState.ids` 中的每个唯一条目。普通会话、fork 会话与 subagent 会话沿用列表现有的产品可见范围；投影重置种子状态，避免复制的 lineage 把同一个提供方请求计费多次。注入的 sessions face 会对每个可见的唯一 id 调用 `hydrateProjection`，因为 `session.list` 中存在的 cold cache 行仍可能陈旧。请求串行运行并使用 `session.history({ projectionsOnly: true })`：attached 会话返回注册表 live cut；cold 会话执行投影缓存带版本的缓存行 + 持久 tail restore 与 durable 写回。结果播种既有的 seq 高者胜客户端 store。因此 `session.list` 保持零全日志 I/O，页面则无需打开／恢复会话即可修复陈旧或缺失的行。加载中、失败和真正的零用量是三种不同的页面状态。
 
 浏览器的显式 IANA 时区定义今天。每日视图在以周一为首日的日历网格中显示当前月及此前十一个月；每周视图显示 52 个周一开始的周；每月视图显示 12 个日历月。峰值用量是当前选中可见周期的最大值。累计用量与最长连续记录覆盖全部已投影历史。Token 总量为正的自然日是活跃日；若今天活跃，当前连续记录截至今天，否则可截至昨天，再否则为零。
 

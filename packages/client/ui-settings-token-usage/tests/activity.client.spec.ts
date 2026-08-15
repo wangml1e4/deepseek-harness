@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TokenActivityProjection } from '@deepseek-ai/dsh-token-meter/client'
 import {
-  dateKeyAt, deriveTokenActivity, mergeVisibleActivity, missingActivitySessionIds,
+  activitySessionIds, dateKeyAt, deriveTokenActivity, mergeVisibleActivity,
 } from '../src/client/activity.ts'
 
 function sessions(entries: readonly [string, TokenActivityProjection | undefined][]): SessionListState {
@@ -42,6 +42,20 @@ describe('Token usage calendar aggregation', () => {
     expect(dateKeyAt(instant, 'America/Los_Angeles')).toBe('2024-12-31')
   })
 
+  it('keeps calendar month labels stable in a negative-offset host zone', () => {
+    const previousTimeZone = process.env['TZ']
+    process.env['TZ'] = 'America/Los_Angeles'
+    try {
+      const state = sessions([])
+      expect(deriveTokenActivity(state, 'day', '2026-08-14', 'en-US').labels[0]?.label).toBe('Sep')
+      expect(deriveTokenActivity(state, 'week', '2026-08-14', 'en-US').labels[0]?.label).toBe('Aug')
+      expect(deriveTokenActivity(state, 'month', '2026-08-14', 'en-US').labels[0]?.label).toBe('Sep')
+    } finally {
+      if (previousTimeZone === undefined) delete process.env['TZ']
+      else process.env['TZ'] = previousTimeZone
+    }
+  })
+
   it('deduplicates identities, identifies missing cold keys, and keeps four buckets disjoint', () => {
     const state = sessions([
       ['ordinary', {
@@ -55,7 +69,7 @@ describe('Token usage calendar aggregation', () => {
       ['subagent', activity([['2026-08-14', 7]], 8_000)],
     ])
     state.ids.push(state.ids[0]!)
-    expect(missingActivitySessionIds(state)).toEqual(['cold-with-old-cache'])
+    expect(activitySessionIds(state)).toEqual(['ordinary', 'cold-with-old-cache', 'subagent'])
     const merged = mergeVisibleActivity(state)
     expect([...merged.days]).toEqual([['2026-08-14', 27n]])
     expect(merged.longestCompletedTurnMs).toBe(8_000)

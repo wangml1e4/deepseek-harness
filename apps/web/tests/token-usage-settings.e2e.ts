@@ -91,6 +91,7 @@ async function persistColdWithLegacyCache(
   scaffold: WebScaffold,
   id: string,
   rows: readonly UsageSeed[],
+  lineage?: { parentSession: SessionId; seed: readonly SessionEvent[] },
 ): Promise<void> {
   const sessionId = SessionId(id)
   const header: SessionHeader = {
@@ -98,9 +99,26 @@ async function persistColdWithLegacyCache(
     id: sessionId,
     createdAt: Date.parse(`${rows[0]!.date}T08:00:00.000Z`),
     cwd: scaffold.workspaceCwd,
+    ...lineage === undefined
+      ? {}
+      : { parentSession: lineage.parentSession, seedLength: lineage.seed.length },
   }
   await scaffold.ctx.sessionPersistence.create(header)
-  await scaffold.ctx.sessionPersistence.append(sessionId, seedEvents(rows))
+  const seedBoundary = lineage === undefined
+    ? []
+    : [{
+      type: 'session/end-seed',
+      seq: lineage.seed.length,
+      time: lineage.seed.at(-1)?.time ?? header.createdAt,
+      data: {},
+    } as unknown as SessionEvent]
+  const ownBase = lineage === undefined ? 0 : lineage.seed.length + 1
+  const ownEvents = seedEvents(rows).map(event => ({ ...event, seq: event.seq + ownBase }))
+  await scaffold.ctx.sessionPersistence.append(sessionId, [
+    ...(lineage?.seed ?? []),
+    ...seedBoundary,
+    ...ownEvents,
+  ])
   // Upgrade regression: write the shape a pre-tokenActivity cache could have
   // held, directly through the already-open cache table. Do not call
   // coldSnapshot here: opening Settings must be the action that exact-folds
@@ -114,6 +132,31 @@ async function persistColdWithLegacyCache(
   legacyHeaders.set(sessionId, header)
 }
 
+async function persistColdWithStaleCache(
+  scaffold: WebScaffold,
+  id: string,
+  rows: readonly [UsageSeed, ...UsageSeed[]],
+): Promise<void> {
+  const sessionId = SessionId(id)
+  const header: SessionHeader = {
+    version: SESSION_FORMAT_VERSION,
+    id: sessionId,
+    createdAt: Date.parse(`${rows[0].date}T08:00:00.000Z`),
+    cwd: scaffold.workspaceCwd,
+  }
+  await scaffold.ctx.sessionPersistence.create(header)
+  const cachedEvents = seedEvents([rows[0]])
+  await scaffold.ctx.sessionPersistence.append(sessionId, cachedEvents)
+  const cached = await scaffold.ctx.sessionProjectionCache.coldSnapshot(sessionId)
+  if (cached.values.tokenActivity === undefined) throw new Error('stale activity fixture did not cache its first turn')
+  const laterEvents = seedEvents(rows.slice(1)).map(event => ({
+    ...event,
+    seq: event.seq + cachedEvents.length,
+  }))
+  await scaffold.ctx.sessionPersistence.append(sessionId, laterEvents)
+  legacyHeaders.set(sessionId, header)
+}
+
 describe('web e2e: Token usage settings over cold persisted sessions', () => {
   let scaffold: WebScaffold
   let browser: Browser
@@ -123,7 +166,7 @@ describe('web e2e: Token usage settings over cold persisted sessions', () => {
   beforeAll(async () => {
     if (MODE === 'record') throw new Error('token-usage-settings is a keyless assembled snapshot')
     scaffold = await launchWebScaffold({})
-    await persistColdWithLegacyCache(scaffold, 'token-usage-cold-a', [
+    await persistColdWithStaleCache(scaffold, 'token-usage-cold-a', [
       { date: '2026-08-12', turn: 1, usage: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 20, cacheWriteTokens: 5 }, durationMs: 30_000 },
       {
         date: '2026-08-13', turn: 2,
@@ -133,9 +176,14 @@ describe('web e2e: Token usage settings over cold persisted sessions', () => {
       },
       { date: '2026-08-14', turn: 3, usage: { inputTokens: 50, outputTokens: 25 }, durationMs: 10_000 },
     ])
-    await persistColdWithLegacyCache(scaffold, 'token-usage-cold-b', [
+    const parentId = SessionId('token-usage-cold-b')
+    const parentRows = [
       { date: '2026-08-13', turn: 1, usage: { inputTokens: 200, outputTokens: 100 }, durationMs: 60_000 },
-    ])
+    ] as const
+    await persistColdWithLegacyCache(scaffold, parentId, parentRows)
+    await persistColdWithLegacyCache(scaffold, 'token-usage-cold-child', [
+      { date: '2026-08-14', turn: 2, usage: { inputTokens: 30, outputTokens: 20 }, durationMs: 15_000 },
+    ], { parentSession: parentId, seed: seedEvents(parentRows) })
     browser = await chromium.launch()
     page = await browser.newPage({
       viewport: { width: 960, height: 900 },
@@ -163,21 +211,22 @@ describe('web e2e: Token usage settings over cold persisted sessions', () => {
     const section = dialog.locator('[data-token-usage-section]')
     await section.getByRole('heading', { name: 'Token 用量' }).waitFor({ timeout: 10_000 })
     expect(await dialog.getByRole('button', { name: 'Token 用量' }).getAttribute('aria-current')).toBe('true')
-    await section.getByLabel('累计 Token 数: 2,710 Token').waitFor({ timeout: 10_000 })
+    await section.getByLabel('累计 Token 数: 2,760 Token').waitFor({ timeout: 10_000 })
     expect(await section.getByLabel('峰值 Token 数: 2,500 Token').count()).toBe(1)
     expect(await section.getByLabel('最长工作时间: 2分5秒').count()).toBe(1)
     expect(await section.getByLabel('当前连续天数: 3 天').count()).toBe(1)
     expect(await section.getByLabel('最长连续天数: 3 天').count()).toBe(1)
     expect(await section.getByRole('button', { name: /2026年8月13日：2,500 Token/ }).count()).toBe(1)
+    expect(await section.getByRole('button', { name: /2026年8月14日：125 Token/ }).count()).toBe(1)
 
     const weekly = section.getByRole('button', { name: '每周' })
     await weekly.click()
     expect(await weekly.getAttribute('aria-pressed')).toBe('true')
-    expect(await section.getByLabel('峰值 Token 数: 2,710 Token').count()).toBe(1)
+    expect(await section.getByLabel('峰值 Token 数: 2,760 Token').count()).toBe(1)
     const monthly = section.getByRole('button', { name: '每月' })
     await monthly.click()
     expect(await monthly.getAttribute('aria-pressed')).toBe('true')
-    expect(await section.getByLabel('峰值 Token 数: 2,710 Token').count()).toBe(1)
+    expect(await section.getByLabel('峰值 Token 数: 2,760 Token').count()).toBe(1)
     const daily = section.getByRole('button', { name: '每日' })
     await daily.click()
     expect(await daily.getAttribute('aria-pressed')).toBe('true')
@@ -186,7 +235,7 @@ describe('web e2e: Token usage settings over cold persisted sessions', () => {
     await compareOrRefreshGolden(SUMMARY_EXPECTED, snapshot, MODE)
   }, 60_000)
 
-  it('writes the exact key into the formerly old cold row and keeps the browser console clean', async () => {
+  it('replaces the stale cold value with the exact key and keeps the browser console clean', async () => {
     const id = SessionId('token-usage-cold-a')
     const header = legacyHeaders.get(id)
     if (header === undefined) throw new Error('legacy cache header missing')

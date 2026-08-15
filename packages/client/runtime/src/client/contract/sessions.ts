@@ -86,12 +86,12 @@ export interface ISessions {
     signal: AbortSignal,
   ): Promise<RpcResult<{ items: SessionSearchResultItem[]; hasMore: boolean }>>
   /**
-   * Ensure one projection key is exact for the listed Sessions named by the
-   * caller. Missing cold-cache rows use the Host's projection-only tail
-   * baseline and seed the shared higher-seq-wins stores; calls are serialized
-   * so a settings surface cannot create unbounded persistence I/O.
+   * Refresh one projection key for every listed Session named by the caller
+   * from the Host's exact projection-only tail baseline, even when the list
+   * cache already carried that key. Calls are serialized and seed the shared
+   * higher-seq-wins stores without unbounded persistence I/O.
    * @param key - registered projection key the consumer needs.
-   * @param sessionIds - visible list identities to check, de-duplicated by the service.
+   * @param sessionIds - visible list identities to refresh, de-duplicated by the service.
    * @param signal - optional cancellation when the consuming surface unmounts.
    * @returns listed identities that still lack the requested key after loading.
    */

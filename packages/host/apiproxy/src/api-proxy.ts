@@ -2239,13 +2239,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return ok(request, { sessionId, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
       },
 
-      async history(request) {
+      async history(request, signal) {
         const { sessionId, beforeSeq, maxMessages, projectionsOnly } = request.payload
         try {
           if (projectionsOnly === true) {
             const attached = ctx.sessions.get(sessionId)
             const projections = attached === undefined
-              ? await ctx.get('sessionProjectionCache')?.coldSnapshot(sessionId)
+              ? await ctx.get('sessionProjectionCache')?.coldSnapshot(sessionId, signal)
               : projectionsFor(ctx, attached)
             if (projections === undefined) {
               return err(request, {
@@ -2272,6 +2272,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...cut.projections === undefined ? {} : { projections: cut.projections },
           })
         } catch (error: unknown) {
+          if (signal?.aborted === true) {
+            return err(request, {
+              code: 'cancelled',
+              message: 'session history read was cancelled',
+              details: {},
+            })
+          }
           if (error instanceof SessionNotFound) {
             return err(request, { code: 'session-not-found', message: error.message, details: { sessionId } })
           }

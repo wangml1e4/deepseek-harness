@@ -6,7 +6,7 @@ import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { TokenUsageKey } from './locales.ts'
 import {
-  dateKeyAt, deriveTokenActivity, missingActivitySessionIds, type ActivityGranularity,
+  activitySessionIds, dateKeyAt, deriveTokenActivity, type ActivityGranularity,
 } from './activity.ts'
 import styles from './TokenUsageSection.module.css'
 
@@ -65,10 +65,11 @@ export function TokenUsageSection(props: TokenUsageSectionProps): ReactNode {
   ) return null
   const state = useSessions(snapshot => snapshot)
   const [granularity, setGranularity] = useState<ActivityGranularity>('day')
-  const missingIds = useMemo(() => missingActivitySessionIds(state), [state])
+  const exactIds = activitySessionIds(state)
+  const exactIdsKey = JSON.stringify(exactIds)
   const [retryGeneration, setRetryGeneration] = useState(0)
   const [load, setLoad] = useState<{ state: 'loading' | 'ready' | 'error'; failed: number }>(() => ({
-    state: state.phase === 'ready' && missingIds.length === 0 ? 'ready' : 'loading',
+    state: state.phase === 'ready' && exactIds.length === 0 ? 'ready' : 'loading',
     failed: 0,
   }))
   useEffect(() => {
@@ -76,28 +77,28 @@ export function TokenUsageSection(props: TokenUsageSectionProps): ReactNode {
       setLoad({ state: 'loading', failed: 0 })
       return
     }
-    if (missingIds.length === 0) {
+    if (exactIds.length === 0) {
       setLoad({ state: 'ready', failed: 0 })
       return
     }
     const controller = new AbortController()
     let active = true
     setLoad({ state: 'loading', failed: 0 })
-    void hydrateActivity(missingIds, controller.signal).then((result) => {
+    void hydrateActivity(exactIds, controller.signal).then((result) => {
       if (!active) return
       setLoad(result.failed.length === 0
         ? { state: 'ready', failed: 0 }
         : { state: 'error', failed: result.failed.length })
     }).catch(() => {
       if (active && !controller.signal.aborted) {
-        setLoad({ state: 'error', failed: missingIds.length })
+        setLoad({ state: 'error', failed: exactIds.length })
       }
     })
     return () => {
       active = false
       controller.abort()
     }
-  }, [hydrateActivity, missingIds, retryGeneration, state.phase])
+  }, [exactIdsKey, hydrateActivity, retryGeneration, state.phase])
   const localeId = locale()
   const zone = timeZone()
   const today = dateKeyAt(now(), zone)
@@ -105,7 +106,7 @@ export function TokenUsageSection(props: TokenUsageSectionProps): ReactNode {
     () => deriveTokenActivity(state, granularity, today, localeId),
     [state, granularity, today, localeId],
   )
-  const displayLoadState = load.state === 'ready' && missingIds.length > 0 ? 'loading' : load.state
+  const displayLoadState = load.state
   const fullTokens = (value: bigint): string => interpolation(t('fullTokens'), { tokens: fullNumber(value, localeId) })
   const cards = [
     { label: t('totalTokens'), value: compactNumber(view.totalTokens, localeId), title: fullTokens(view.totalTokens) },

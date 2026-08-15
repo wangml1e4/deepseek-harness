@@ -136,7 +136,8 @@ function applyUsage(state: TokenActivityState, event: SessionEvent): TokenActivi
  * uses UTC. Usage is dated when the provider report is logged. A final
  * assistant sample replaces the same `(turn, step)` chunk sample and can move
  * it across a local midnight. Completed-turn duration is `turn/start` to a
- * matching `turn/end` whose reason is `completed`.
+ * matching `turn/end` whose reason is `completed`. `session/end-seed` drops
+ * copied usage and duration while retaining the inherited time zone.
  */
 export const tokenActivityProjectionDefinition:
 ProjectionDefinition<'tokenActivity', TokenActivityState> = {
@@ -150,6 +151,15 @@ ProjectionDefinition<'tokenActivity', TokenActivityState> = {
     longestCompletedTurnMs: 0,
   }),
   apply: (state, event) => {
+    if (event.type === 'session/end-seed') {
+      return {
+        days: {},
+        last: null,
+        timeZone: state.timeZone,
+        openTurn: null,
+        longestCompletedTurnMs: 0,
+      }
+    }
     const timeZone = directUserTimeZone(event)
     if (timeZone !== undefined) {
       return timeZone === state.timeZone ? state : { ...state, timeZone }
@@ -176,5 +186,5 @@ ProjectionDefinition<'tokenActivity', TokenActivityState> = {
       .map(([date, buckets]): TokenActivityDay => ({ date, ...buckets })),
     longestCompletedTurnMs: state.longestCompletedTurnMs,
   }),
-  stateVersion: 1,
+  stateVersion: 2,
 }

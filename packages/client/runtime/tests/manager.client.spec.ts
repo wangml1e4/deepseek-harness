@@ -240,7 +240,7 @@ describe('list lifecycle', () => {
     expect(items.find(item => item.sessionId === S2)?.title).toBe('Pushed')
   })
 
-  it('hydrates a missing listed projection exactly once and seeds the shared store', async () => {
+  it('de-duplicates listed ids and seeds exact projection baselines into the shared stores', async () => {
     const api = new FakeApiClient()
     api.onList = () => Promise.resolve(ok({
       items: [
@@ -257,8 +257,69 @@ describe('list lifecycle', () => {
     await manager.refreshList()
     const result = await manager.hydrateProjection('title', [S1, S2, S2])
     expect(result.failed).toEqual([])
-    expect(api.callsOf('session.history')).toEqual([{ sessionId: S2, projectionsOnly: true }])
+    expect(api.callsOf('session.history')).toEqual([
+      { sessionId: S1, projectionsOnly: true },
+      { sessionId: S2, projectionsOnly: true },
+    ])
+    expect(manager.getListSnapshot().items.find(item => item.sessionId === S1)?.title).toBe('Cold exact')
     expect(manager.getListSnapshot().items.find(item => item.sessionId === S2)?.title).toBe('Cold exact')
+  })
+
+  it('refreshes a present listed projection from the exact Host baseline', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({
+      items: [{
+        ...summary(S1),
+        projections: { asOfSeq: 4, values: { title: 'Stale cached' } },
+      }] as never[],
+    }))
+    api.onHistory = () => Promise.resolve(ok({
+      events: [],
+      hasMore: false,
+      projections: { asOfSeq: 8, values: { title: 'Cold exact' } },
+    }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+
+    expect(await manager.hydrateProjection('title', [S1])).toEqual({ failed: [] })
+    expect(api.callsOf('session.history')).toEqual([{ sessionId: S1, projectionsOnly: true }])
+    expect(manager.getListSnapshot().items.find(item => item.sessionId === S1)?.title).toBe('Cold exact')
+  })
+
+  it('serializes concurrent projection hydration calls', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1), summary(S2)] as never[] }))
+    const firstHistory = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    const secondHistory = deferred<Awaited<ReturnType<FakeApiClient['onHistory']>>>()
+    const histories = [firstHistory, secondHistory]
+    api.onHistory = () => {
+      const history = histories.shift()
+      if (history === undefined) throw new Error('unexpected extra history request')
+      return history.promise
+    }
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+
+    const first = manager.hydrateProjection('title', [S1])
+    const second = manager.hydrateProjection('title', [S2])
+    await vi.waitFor(() => {
+      expect(api.callsOf('session.history')).toEqual([{ sessionId: S1, projectionsOnly: true }])
+    })
+
+    firstHistory.resolve(ok({
+      events: [], hasMore: false, projections: { asOfSeq: 2, values: { title: 'First' } },
+    }))
+    await expect(first).resolves.toEqual({ failed: [] })
+    await vi.waitFor(() => {
+      expect(api.callsOf('session.history')).toEqual([
+        { sessionId: S1, projectionsOnly: true },
+        { sessionId: S2, projectionsOnly: true },
+      ])
+    })
+    secondHistory.resolve(ok({
+      events: [], hasMore: false, projections: { asOfSeq: 3, values: { title: 'Second' } },
+    }))
+    await expect(second).resolves.toEqual({ failed: [] })
   })
 
   it('reports a listed projection that remains absent after exact loading', async () => {

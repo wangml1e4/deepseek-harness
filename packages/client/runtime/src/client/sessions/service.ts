@@ -445,7 +445,7 @@ export class SessionRuntime implements ISessions {
     return this.manager.search(query, signal)
   }
 
-  /** Load an exact Host projection baseline for listed rows missing one key. */
+  /** Refresh one key for named listed rows from exact Host projection baselines. */
   hydrateProjection(
     key: Extract<keyof SessionProjectionMap, string>,
     sessionIds: readonly SessionId[],

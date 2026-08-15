@@ -34,7 +34,7 @@ function usage(inputTokens: number, outputTokens: number, extras: Record<string,
 
 describe('tokenActivity projection', () => {
   it('serves the empty value and owns an independent cache version', () => {
-    expect(tokenActivityProjectionDefinition.stateVersion).toBe(1)
+    expect(tokenActivityProjectionDefinition.stateVersion).toBe(2)
     expect(fold([])).toEqual({ days: [], longestCompletedTurnMs: 0 })
   })
 
@@ -126,6 +126,20 @@ describe('tokenActivity projection', () => {
       }),
     ]).days).toEqual([
       { date: '2026-06-15', uncachedInputTokens: 9, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
+    ])
+  })
+
+  it('excludes usage inherited through a seeded session prefix', () => {
+    const time = Date.parse('2026-06-15T01:00:00.000Z')
+    expect(fold([
+      at(0, time - 1, 'user/message', directUser('America/Los_Angeles')),
+      at(1, time, 'assistant/chunk', usage(9, 1)),
+      at(2, time + 1, 'session/end-seed', {}),
+      at(3, time + 2, 'assistant/chunk', {
+        turn: 2, step: 1, chunk: { type: 'usage', usage: { inputTokens: 4, outputTokens: 2 } },
+      }),
+    ]).days).toEqual([
+      { date: '2026-06-14', uncachedInputTokens: 4, outputTokens: 2, cacheReadTokens: 0, cacheWriteTokens: 0 },
     ])
   })
 

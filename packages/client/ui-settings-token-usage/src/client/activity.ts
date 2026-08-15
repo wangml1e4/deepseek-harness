@@ -35,19 +35,19 @@ export interface TokenActivityView {
 }
 
 /**
- * Find unique visible list identities whose cold/list baseline lacks token activity.
+ * Find every unique visible list identity whose token activity must be exacted.
  * @param state - root-scoped session-list mirror.
  * @returns visible identities requiring an exact projection baseline.
  */
-export function missingActivitySessionIds(state: SessionListState): SessionListState['ids'] {
-  const missing: SessionListState['ids'][number][] = []
+export function activitySessionIds(state: SessionListState): SessionListState['ids'] {
+  const ids: SessionListState['ids'][number][] = []
   const visited = new Set<string>()
   for (const id of state.ids) {
     if (visited.has(id)) continue
     visited.add(id)
-    if (state.byId[id]?.projectionValues?.tokenActivity === undefined) missing.push(id)
+    ids.push(id)
   }
-  return missing
+  return ids
 }
 
 const DAY_MS = 86_400_000
@@ -94,7 +94,8 @@ function mondayOf(key: string): string {
 }
 
 function monthLabel(key: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, { month: 'short' }).format(new Date(`${key.slice(0, 7)}-01T00:00:00.000Z`))
+  return new Intl.DateTimeFormat(locale, { month: 'short', timeZone: 'UTC' })
+    .format(new Date(`${key.slice(0, 7)}-01T00:00:00.000Z`))
 }
 
 function fullMonthLabel(key: string, locale: string): string {

@@ -27,7 +27,7 @@ fold 跟踪完整请求标头快照、步骤边界、表层追加与替换、成
 
 `tokenUsage` 携带完整持久日志中的 `uncachedInputTokens`、`outputTokens`、`cacheReadTokens` 和 `cacheWriteTokens`。即使请求随后失败，用量分片仍会计入；同一 `(turn, step)` 的最终 assistant 消息用量会替换该样本，而不是重复计数。推理仍是输出的一个细分项。只保留单个最新样本，依赖的是会话日志的一条顺序性质：一旦某个更晚的步骤报告了用量，合法日志就绝不会再为更早的步骤报告用量。
 
-`tokenActivity` 以 `YYYY-MM-DD` 行携带相同的四个不重叠用量 bucket，并记录最长已完成轮次时长。一条直接用户消息为其准入的工作选择经过 Host 验证的 `clientTimeZone`；时区缺失或格式错误时使用 UTC。用量按提供方报告事件的持久时间归日。同一步骤的最终样本会替换较早分片；当两次报告跨越本地午夜时，样本也会移动到新的日期行。已完成工作的时长是匹配的 `turn/start` 到结束原因为 `completed` 的 `turn/end` 的间隔；已中止、不匹配或仍打开的轮次不贡献时长。
+`tokenActivity` 以 `YYYY-MM-DD` 行携带相同的四个不重叠用量 bucket，并记录最长已完成轮次时长。一条直接用户消息为其准入的工作选择经过 Host 验证的 `clientTimeZone`；时区缺失或格式错误时使用 UTC。用量按提供方报告事件的持久时间归日。同一步骤的最终样本会替换较早分片；当两次报告跨越本地午夜时，样本也会移动到新的日期行。`session/end-seed` 会清空已累计用量、样本替换状态和已完成轮次时长，但保留继承的时区，因此带种子的会话只报告复制前缀之后发生的提供方工作。已完成工作的时长是匹配的 `turn/start` 到结束原因为 `completed` 的 `turn/end` 的间隔；已中止、不匹配或仍打开的轮次不贡献时长。
 
 `contextPressure` 携带可选的 `pressureTokens`（提供方报告的最新提示词规模，为未缓存输入加缓存读取与写入之和）、可选的 `projectedTokens`，以及来自最新一条 `request/context` 记录的可选 `contextWindow`。提供方报告用量前两个数字都保持缺失；路由适配器未公布容量时容量也保持缺失。输出不计入其中，因此轮次流式输出期间 `pressureTokens` 保持不动，等到下一个请求报告用量时才前进。
 

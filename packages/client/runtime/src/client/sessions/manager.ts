@@ -134,6 +134,8 @@ export class SessionManager {
   private listPhase: SessionListPhase = 'pending'
   private listError: RpcError | null = null
   private listInflight: Promise<void> | null = null
+  /** Shared tail keeping explicit projection repair to one Host request chain at a time. */
+  private projectionHydrationTail: Promise<void> = Promise.resolve()
   /** Mutations arriving after a list request starts are replayed over its response. */
   private listMutations: SessionListMutation[] | null = null
   private readonly addresses = new Map<SessionId, SubagentAddress>()
@@ -528,15 +530,28 @@ export class SessionManager {
   }
 
   /**
-   * Fill one projection key for listed sessions whose list/cache baseline did
-   * not carry it. Requests are intentionally sequential: this path is
-   * explicit page-driven repair, never an unbounded extension of session.list.
-   * @param key - projection key that must be present after hydration.
-   * @param sessionIds - visible session identities that currently lack the key.
+   * Refresh one projection key for every explicitly named listed session from
+   * an exact Host baseline. Batches and their per-session requests are
+   * intentionally sequential: this path is explicit page-driven repair,
+   * never an unbounded extension of session.list.
+   * @param key - projection key that must be exact after hydration.
+   * @param sessionIds - visible session identities to refresh.
    * @param signal - optional cancellation for a page that unmounts or retries.
    * @returns the identities whose exact Host baseline could not supply the key.
    */
-  async hydrateProjection(
+  hydrateProjection(
+    key: Extract<keyof SessionProjectionMap, string>,
+    sessionIds: readonly SessionId[],
+    signal?: AbortSignal,
+  ): Promise<{ failed: readonly SessionId[] }> {
+    const operation = this.projectionHydrationTail.then(() =>
+      this.hydrateProjectionNow(key, sessionIds, signal))
+    this.projectionHydrationTail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  /** Execute one queued projection-refresh batch. */
+  private async hydrateProjectionNow(
     key: Extract<keyof SessionProjectionMap, string>,
     sessionIds: readonly SessionId[],
     signal?: AbortSignal,
@@ -547,7 +562,6 @@ export class SessionManager {
       signal?.throwIfAborted()
       if (!visible.has(sessionId)) continue
       const store = this.projectionStore(sessionId)
-      if (store.get(key) !== undefined) continue
       try {
         const { result } = await this.api.sessions.history(
           { sessionId, projectionsOnly: true },
