@@ -650,6 +650,9 @@ describe('SQLite Taskboard service', () => {
       await expect(mounted.ctx.taskboard.listRelations(blocker.id)).resolves.toMatchObject([
         { id: result.relation.id, type: 'blocks', issueId: blocker.id, relatedIssueId: blocked.id },
       ])
+      await expect(mounted.ctx.taskboard.listWorkspaceRelations(workspaceId)).resolves.toMatchObject([
+        { id: result.relation.id, type: 'blocks', issueId: blocker.id, relatedIssueId: blocked.id },
+      ])
       await expect(mounted.ctx.taskboard.addRelation({
         reference: blocked.id,
         type: 'blocked_by',

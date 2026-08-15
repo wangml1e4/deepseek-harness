@@ -207,6 +207,7 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async getWorkspace(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<WorkspaceTaskboard | undefined> {
     const row = this.database().prepare(`
       SELECT workspace_id, title, prefix, version, created_at, updated_at
@@ -341,6 +342,7 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async listIssues(input: ListIssuesInput): Promise<readonly Issue[]> {
     const clauses = ['workspace_id = ?']
     const values: string[] = [input.workspaceId]
@@ -637,6 +639,7 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async addComment(input: AddCommentInput): Promise<Comment> {
     const db = this.database()
     const issueId = this.requireIssueId(input.reference)
@@ -667,6 +670,7 @@ export class SqliteTaskboard extends TaskboardService {
     return stored
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async listComments(reference: IssueReference): Promise<readonly Comment[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -678,6 +682,7 @@ export class SqliteTaskboard extends TaskboardService {
     return rows.map(rowToComment)
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async listActivities(reference: IssueReference): Promise<readonly Activity[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -785,6 +790,7 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async listRelations(reference: IssueReference): Promise<readonly IssueRelation[]> {
     const issueId = this.requireIssueId(reference)
     const rows = this.database().prepare(`
@@ -794,6 +800,20 @@ export class SqliteTaskboard extends TaskboardService {
       ORDER BY sequence
     `).all(issueId, issueId) as unknown as RelationRow[]
     return rows.map(row => rowToRelation(row, issueId))
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listWorkspaceRelations(
+    workspaceId: EnsureWorkspaceInput['workspaceId'],
+  ): Promise<readonly IssueRelation[]> {
+    const rows = this.database().prepare(`
+      SELECT relations.id, relations.source_issue_id, relations.target_issue_id, relations.created_at
+      FROM relations
+      JOIN issues AS source ON source.id = relations.source_issue_id
+      WHERE source.workspace_id = ?
+      ORDER BY relations.sequence
+    `).all(workspaceId) as unknown as RelationRow[]
+    return rows.map(row => rowToRelation(row, IssueId(row.source_issue_id)))
   }
 
   async removeRelation(input: RemoveIssueRelationInput): Promise<Issue> {
@@ -843,6 +863,7 @@ export class SqliteTaskboard extends TaskboardService {
     }
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async getIssue(reference: IssueReference): Promise<Issue | undefined> {
     const row = this.database().prepare(`
       SELECT id, identifier, workspace_id, title, description, status, priority,

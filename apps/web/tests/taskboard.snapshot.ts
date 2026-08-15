@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Assembled Taskboard snapshot: boots the built browser plugin graph against
 // FixtureApiClient, enters the implicit Taskboard from a Workspace row, and
-// pins the shared Dashboard, Board, List, and right-column Issue detail path.
+// pins the shared Dashboard, Board, List, Gantt, and right-column Issue detail path.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
@@ -50,12 +50,22 @@ describe('assembled Workspace Taskboard', () => {
     const detailPanel = details.closest('aside')
     if (detailPanel === null) throw new Error('Issue details must render in the right column')
     const detail = [
-      `issue=${detailPanel.textContent?.includes('FIX-1') === true ? 'FIX-1' : '<absent>'}`,
+      `issue=${detailPanel.textContent?.includes('FIX-1') ? 'FIX-1' : '<absent>'}`,
       `sections=${['Comments', 'Dependencies', 'Activity'].filter(label => detailPanel.textContent?.includes(label)).join(',')}`,
+      `dependency=${detailPanel.textContent?.includes('FIX-2') ? 'FIX-2' : '<absent>'}`,
       `archive=${within(detailPanel).getByRole('button', { name: 'Archive Issue' }).textContent}`,
     ].join('\n')
 
-    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n`
+    fireEvent.click(within(surface).getByRole('tab', { name: 'Gantt' }))
+    const gantt = await within(surface).findByLabelText('Issue Gantt chart')
+    await waitFor(() => { expect(gantt.querySelector('.gantt_container')).not.toBeNull() })
+    await waitFor(() => { expect(gantt.querySelectorAll('.gantt_task_link')).toHaveLength(1) })
+    const ganttStyles = document.querySelector('style[data-plugin-css="@deepseek-ai/dsh-client-ui-taskboard/dhtmlxgantt.css"]')
+    expect(ganttStyles?.textContent).toContain('.gantt_container')
+    const scale = within(surface).getByLabelText('Gantt timeline scale') as HTMLSelectElement
+    const timeline = `gantt=${scale.value}|mounted=${gantt.querySelector('.gantt_container') !== null}|styled=${ganttStyles !== null}|links=${gantt.querySelectorAll('.gantt_task_link').length}`
+
+    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${timeline}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(EXPECTED), { recursive: true })
       writeFileSync(EXPECTED, shape)

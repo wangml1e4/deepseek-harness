@@ -12,6 +12,7 @@ import {
 import type { Issue, IssuePriority, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardStatusFilter } from './store.ts'
 import type { TaskboardSurfaceProps as SurfaceProps } from './contract.ts'
+import { GanttView } from './GanttView.tsx'
 import { filterIssues, ISSUE_PRIORITIES, ISSUE_STATUSES, priorityLabel, statusLabel } from './model.ts'
 import css from './Taskboard.module.css'
 
@@ -248,6 +249,7 @@ export function TaskboardSurface({
   createIssue,
   openIssue,
   moveIssue,
+  updateIssue,
   t,
 }: SurfaceProps) {
   const snapshot = useTaskboard(value => value)
@@ -269,15 +271,26 @@ export function TaskboardSurface({
     body = <DashboardView issues={filtered} openIssue={openIssue} t={t} />
   } else if (view.mode === 'board') {
     body = <BoardView issues={filtered} openIssue={openIssue} moveIssue={moveIssue} t={t} />
-  } else {
+  } else if (view.mode === 'list') {
     body = <ListView issues={filtered} openIssue={openIssue} t={t} />
+  } else {
+    body = (
+      <GanttView
+        issues={filtered}
+        relations={snapshot.workspaceRelations}
+        zoom={view.ganttZoom}
+        openIssue={openIssue}
+        updateIssue={updateIssue}
+        t={t}
+      />
+    )
   }
   return (
     <main className={css.surface}>
       <header className={css.topbar}>
         <div className={css.heading}><h1>{snapshot.workspace?.title ?? t('title')}</h1><span>{snapshot.workspace?.prefix ?? ''}</span></div>
         <nav className={css.tabs} role="tablist" aria-label={t('title')}>
-          {(['dashboard', 'board', 'list'] as const).map(mode => <button type="button" role="tab" aria-selected={view.mode === mode} onClick={() => { actions.setMode(mode) }} key={mode}>{t(`view.${mode}`)}</button>)}
+          {(['dashboard', 'board', 'list', 'gantt'] as const).map(mode => <button type="button" role="tab" aria-selected={view.mode === mode} onClick={() => { actions.setMode(mode) }} key={mode}>{t(`view.${mode}`)}</button>)}
         </nav>
         <div className={css.topActions}>
           <button type="button" className={css.iconButton} aria-label={t('retry')} onClick={() => { void refresh() }}><IconRefreshOutline16 /></button>
@@ -289,6 +302,11 @@ export function TaskboardSurface({
         <select aria-label={t('filter.status')} value={view.status} onChange={(event) => { actions.setStatus(event.target.value as TaskboardStatusFilter) }}><option value="all">{t('filter.status')}</option>{ISSUE_STATUSES.map(status => <option value={status} key={status}>{statusLabel(t, status)}</option>)}</select>
         <select aria-label={t('filter.priority')} value={view.priority} onChange={(event) => { actions.setPriority(event.target.value as typeof view.priority) }}><option value="all">{t('filter.priority')}</option>{ISSUE_PRIORITIES.map(priority => <option value={priority} key={priority}>{priorityLabel(t, priority)}</option>)}</select>
         <input className={css.labelFilter} aria-label={t('filter.label')} placeholder={t('filter.label')} value={view.label} onChange={(event) => { actions.setLabel(event.target.value) }} />
+        {view.mode === 'gantt' && (
+          <select aria-label={t('gantt.zoom')} value={view.ganttZoom} onChange={(event) => { actions.setGanttZoom(event.target.value as typeof view.ganttZoom) }}>
+            {(['day', 'week', 'month'] as const).map(zoom => <option value={zoom} key={zoom}>{t(`gantt.zoom.${zoom}`)}</option>)}
+          </select>
+        )}
         {hasFilters && <button type="button" className={css.ghostButton} onClick={() => { actions.resetFilters() }}>{t('filter.reset')}</button>}
       </div>
       <div className={css.content}>{body}</div>

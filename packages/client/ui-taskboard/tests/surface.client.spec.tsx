@@ -13,6 +13,16 @@ import type { TaskboardSnapshot } from '../src/client/controller.ts'
 import { zh } from '../src/client/locales.ts'
 import { createTaskboardViewStore } from '../src/client/store.ts'
 
+vi.mock('dhtmlx-gantt', () => ({
+  Gantt: {
+    getGanttInstance: () => ({
+      config: {}, templates: {},
+      ext: { zoom: { init: vi.fn(), setLevel: vi.fn() } },
+      attachEvent: vi.fn(), init: vi.fn(), clearAll: vi.fn(), parse: vi.fn(), render: vi.fn(), destructor: vi.fn(),
+    }),
+  },
+}))
+
 afterEach(cleanup)
 beforeEach(() => { localStorage.clear() })
 
@@ -63,6 +73,7 @@ function snapshot(overrides: Partial<TaskboardSnapshot> = {}): TaskboardSnapshot
     detailPhase: 'idle',
     comments: [],
     activities: [],
+    workspaceRelations: [],
     relations: [],
     error: null,
     detailError: null,
@@ -96,6 +107,7 @@ function mountSurface(current = snapshot()) {
     createIssue: vi.fn(async () => ({ ok: true as const })),
     openIssue: vi.fn(),
     moveIssue: vi.fn(async () => ({ ok: true as const })),
+    updateIssue: vi.fn(async () => ({ ok: true as const })),
     t,
   } as unknown as TaskboardSurfaceProps
   return { ...render(<TaskboardSurface {...props} />), props, store }
@@ -116,6 +128,11 @@ describe('TaskboardSurface', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '列表' }))
     expect(screen.getByRole('table', { name: 'Issue 列表' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('tab', { name: '甘特图' }))
+    expect(screen.getByLabelText('Issue 甘特图')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('甘特图时间刻度'), { target: { value: 'month' } })
+    expect(view.store.getSnapshot().ganttZoom).toBe('month')
   })
 
   it('filters Issues and creates a new Issue without inventing placeholder data', async () => {

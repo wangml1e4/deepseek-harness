@@ -28,7 +28,7 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-当前消费层提供双语 Web 仪表盘、看板、列表和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图、附件、巡检调度、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
+当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。附件、巡检调度、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -128,6 +128,13 @@ abstract listComments(reference: IssueReference): Promise<readonly Comment[]>
  * @returns append-only field changes in chronological order.
  */
 abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+/**
+ * List every directed dependency in one Workspace from its blocking Issue's perspective.
+ * @param workspaceId - Workspace whose canonical dependency records are listed.
+ * @returns relation views in append order with type `blocks`.
+ */
+abstract listWorkspaceRelations(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<readonly IssueRelation[]>
 
 /**
  * Add one directed dependency between two Issues.
@@ -250,6 +257,13 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns ordered Activity or a stable business failure.
  */
 @Remote('listActivities') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>
+
+/**
+ * List one registered Workspace's canonical dependency records.
+ * @param workspaceId - Authoritative Workspace identity.
+ * @returns ordered `blocks` relation views or a stable business failure.
+ */
+@Remote('listWorkspaceRelations') listWorkspaceRelations(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>
 
 /**
  * List one Issue's dependency views.

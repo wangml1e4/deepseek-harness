@@ -6,7 +6,7 @@ The Host Remote Consumer for the Workspace-owned Taskboard capability. It expose
 
 ## Remote methods
 
-The `taskboard` namespace provides `workspace`, `setPrefix`, `listIssues`, `getIssue`, `createIssue`, `updateIssue`, `moveIssue`, `archiveIssue`, `restoreIssue`, `listComments`, `addComment`, `listActivities`, `listRelations`, `addRelation`, and `removeRelation`.
+The `taskboard` namespace provides `workspace`, `setPrefix`, `listIssues`, `getIssue`, `createIssue`, `updateIssue`, `moveIssue`, `archiveIssue`, `restoreIssue`, `listComments`, `addComment`, `listActivities`, `listWorkspaceRelations`, `listRelations`, `addRelation`, and `removeRelation`.
 
 Workspace-scoped methods reject unknown Workspace ids before touching Taskboard state. Reads that need the implicit Taskboard ensure it from the current registered Workspace title. Moving an Issue also verifies and ensures the destination Workspace.
 
@@ -24,6 +24,6 @@ No direct effect.
 
 ## Known Limitations and Deferred Work
 
-- The current Remote has request/response methods only. Live Taskboard events and Client cache invalidation arrive with the Web UI layer.
+- `taskboard/changed` is forwarded by the browser API assembly for active-Workspace invalidation; the event carries no Issue payload.
 - Attachments, Session and Git bindings, Patrol policy and Run history, and review evidence are not in this protocol layer yet.
 - The Remote is a Host-local application API; it does not publish or synchronize GitHub Issues.

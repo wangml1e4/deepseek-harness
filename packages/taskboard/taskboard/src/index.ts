@@ -150,6 +150,13 @@ export abstract class TaskboardService extends Service {
   abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
 
   /**
+   * List every directed dependency in one Workspace from its blocking Issue's perspective.
+   * @param workspaceId - Workspace whose canonical dependency records are listed.
+   * @returns relation views in append order with type `blocks`.
+   */
+  abstract listWorkspaceRelations(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<readonly IssueRelation[]>
+
+  /**
    * Add one directed dependency between two Issues.
    * @param input - Anchor, direction, related Issue, version, and actor.
    * @returns the updated anchor Issue and relation view.

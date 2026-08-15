@@ -34,6 +34,7 @@ async function bench() {
       getIssue: () => ok({ issue: one }),
       listComments: () => ok({ items: [] }),
       listActivities: () => ok({ items: [] }),
+      listWorkspaceRelations: () => ok({ items: [] }),
       listRelations: () => ok({ items: [] }),
       createIssue: () => ok(one),
       updateIssue: () => ok(one),

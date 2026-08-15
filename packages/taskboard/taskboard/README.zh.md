@@ -13,6 +13,7 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 未改变任何字段的更新是无操作。归档可逆，重复归档会被拒绝，服务不提供永久删除 Issue 的操作。评论和活动记录仅可追加。
 - 活动记录和评论的操作者会区分用户、Patrol Agent、Reviewer 与系统责任来源。
 - 一项依赖是同一条有向边：从来源查看为 `blocks`，从目标查看为 `blocked_by`。自环、重复、跨 Workspace 和成环依赖都会在不写入的情况下被拒绝。
+- `listWorkspaceRelations` 会把每条 Workspace 依赖以规范 `blocks` 视图返回一次，供时间轴消费方使用；`listRelations` 为详情界面保留相对于所请求 Issue 的方向。
 
 稳定失败使用 `TaskboardError.code`；提供方保留本包声明的错误码。[Taskboard 子系统参考](../../../docs/subsystems/taskboard.md)负责公开值与服务参考。
 

@@ -13,6 +13,7 @@ The Workspace-owned Taskboard Service Definition. `ctx.taskboard` exposes durabl
 - An update that changes no field is a no-op. Archiving is reversible, repeated archive attempts reject, and the service has no permanent Issue deletion operation. Comments and Activity entries are append-only.
 - Activity and Comment actors distinguish User, Patrol Agent, Reviewer, and System responsibility.
 - A dependency is one directed edge presented as `blocks` from its source and `blocked_by` from its target. Self, duplicate, cross-Workspace, and cyclic dependencies reject without mutation.
+- `listWorkspaceRelations` returns each Workspace dependency once as a canonical `blocks` view for timeline Consumers; `listRelations` retains the requested Issue-relative direction for details.
 
 Stable failures use `TaskboardError.code`; providers preserve the codes declared by this package. The [Taskboard subsystem reference](../../../docs/subsystems/taskboard.md) owns the public value and service reference.
 

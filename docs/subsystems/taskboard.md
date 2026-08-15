@@ -28,7 +28,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The current Consumer layer exposes bilingual Web Dashboard, Board, List, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt, attachments, Patrol scheduling, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
+The current Consumer layer exposes bilingual Web Dashboard, Board, List, Gantt, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Attachments, Patrol scheduling, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -128,6 +128,13 @@ abstract listComments(reference: IssueReference): Promise<readonly Comment[]>
  * @returns append-only field changes in chronological order.
  */
 abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+/**
+ * List every directed dependency in one Workspace from its blocking Issue's perspective.
+ * @param workspaceId - Workspace whose canonical dependency records are listed.
+ * @returns relation views in append order with type `blocks`.
+ */
+abstract listWorkspaceRelations(workspaceId: EnsureWorkspaceInput['workspaceId']): Promise<readonly IssueRelation[]>
 
 /**
  * Add one directed dependency between two Issues.
@@ -250,6 +257,13 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns ordered Activity or a stable business failure.
  */
 @Remote('listActivities') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>
+
+/**
+ * List one registered Workspace's canonical dependency records.
+ * @param workspaceId - Authoritative Workspace identity.
+ * @returns ordered `blocks` relation views or a stable business failure.
+ */
+@Remote('listWorkspaceRelations') listWorkspaceRelations(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>
 
 /**
  * List one Issue's dependency views.

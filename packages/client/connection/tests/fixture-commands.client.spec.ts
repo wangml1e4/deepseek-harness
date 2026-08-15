@@ -143,9 +143,21 @@ describe('FixtureApiClient Taskboard Remote', () => {
       rpc, 'taskboard/workspace', { workspaceId: 'fx-ws-fixture' })
     expect(board).toMatchObject({ ok: true, value: { prefix: 'FIX' } })
 
-    const listed = await callRemote<{ ok: true; value: { items: { identifier: string }[] } }>(
+    const listed = await callRemote<{ ok: true; value: { items: { id: string; identifier: string }[] } }>(
       rpc, 'taskboard/listIssues', { input: { workspaceId: 'fx-ws-fixture' } })
     expect(listed.value.items.map(issue => issue.identifier)).toEqual(['FIX-1', 'FIX-2', 'FIX-3'])
+
+    const seededRelations = await callRemote<{
+      ok: true
+      value: { items: { id: string; type: string; issueId: string; relatedIssueId: string; createdAt: string }[] }
+    }>(rpc, 'taskboard/listWorkspaceRelations', { workspaceId: 'fx-ws-fixture' })
+    expect(seededRelations.value.items).toMatchObject([{
+      id: 'fx-relation-1',
+      type: 'blocks',
+      issueId: listed.value.items[1]!.id,
+      relatedIssueId: listed.value.items[0]!.id,
+    }])
+    expect(typeof seededRelations.value.items[0]?.createdAt).toBe('string')
 
     const created = await callRemote<{ ok: true; value: { id: string; version: number } }>(
       rpc, 'taskboard/createIssue', { input: { workspaceId: 'fx-ws-fixture', title: 'Exercise fixture' } })
@@ -159,5 +171,29 @@ describe('FixtureApiClient Taskboard Remote', () => {
         },
       })
     expect(updated.value).toMatchObject({ title: 'Exercise fixture mutation', version: 2 })
+
+    const related = await callRemote<{ ok: true; value: { relation: { id: string } } }>(
+      rpc, 'taskboard/addRelation', {
+        input: {
+          reference: created.value.id,
+          relatedReference: listed.value.items[0]!.id,
+          type: 'blocked_by',
+          expectedVersion: updated.value.version,
+          actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' },
+        },
+      })
+    const workspaceRelations = await callRemote<{
+      ok: true
+      value: { items: { id: string; type: string; issueId: string; relatedIssueId: string; createdAt: string }[] }
+    }>(rpc, 'taskboard/listWorkspaceRelations', { workspaceId: 'fx-ws-fixture' })
+    const added = workspaceRelations.value.items.find(item => item.id === related.value.relation.id)
+    expect(added).toMatchObject({
+      id: related.value.relation.id,
+      type: 'blocks',
+      issueId: listed.value.items[0]!.id,
+      relatedIssueId: created.value.id,
+    })
+    expect(typeof added?.createdAt).toBe('string')
+    expect(workspaceRelations.value.items).toHaveLength(2)
   })
 })
