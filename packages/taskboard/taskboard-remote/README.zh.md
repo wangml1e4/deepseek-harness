@@ -12,6 +12,8 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 按 Workspace 划分的方法会在接触 Taskboard 状态前拒绝未知 Workspace id。需要隐式 Taskboard 的读取会根据当前已注册 Workspace 的标题确保其存在。移动 Issue 时也会校验并确保目标 Workspace 存在。
 
+挂载该 Host 消费方期间，它会注册一项 Workspace 删除守卫。任何活动或已归档 Issue 都会返回带有确切保留数量的 `taskboard-issues` blocker；把全部 Issue 移到其他 Workspace 后，blocker 即消失。创建 Issue 和把 Issue 移入 Workspace 会使用注册表变更队列，因此并发删除会先看到已完成的写入，再运行守卫。该检查绝不删除或改写 Taskboard 数据。
+
 每个方法都返回 `TaskboardRemoteResult<T>`。领域失败会保留为带有 `TaskboardError.code` 的稳定业务结果；格式错误的请求在生成的 Typert 载体中失败，基础设施故障则直接拒绝，不会被错误标记为领域错误。`getIssue` 使用显式可空值，因此 Issue 不存在与调用失败是两种不同结果。
 
 `patrol` 会组合已保存策略、当前 Host 选项以及永久 Run／Attempt 历史。`updatePatrol` 把 Host 所属选项校验委托给 Patrol 消费方，`runPatrol` 启动一轮手工后台 Run，`patrolIssue` 则为详情栏返回永久 Development Context 与独立 Reviewer 证据。

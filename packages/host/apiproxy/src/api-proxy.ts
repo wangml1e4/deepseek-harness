@@ -25,7 +25,8 @@ import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
   workspaceDomainState, workspaceRecord, WorkspaceId as brandWorkspaceId,
-  WorkspaceMoveInvalidError, WorkspaceOrderInvalidError, WorkspaceUnknownSessionError,
+  WorkspaceDeleteBlockedError, WorkspaceMoveInvalidError,
+  WorkspaceOrderInvalidError, WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
 // Type-only: brings the `ctx.tools` Context merge into this program (viewFor reads presenters).
 import {
@@ -2884,7 +2885,18 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         const operation = workspaceCreationChain.then(() =>
           ctx.workspaceRegistry.delete(brandWorkspaceId(workspaceId)))
         workspaceCreationChain = operation.then(() => undefined, () => undefined)
-        if (!await operation) return workspaceNotFound(request, workspaceId)
+        let deleted: boolean
+        try {
+          deleted = await operation
+        } catch (error: unknown) {
+          if (!(error instanceof WorkspaceDeleteBlockedError)) throw error
+          return err(request, {
+            code: 'workspace-delete-blocked',
+            message: error.message,
+            details: { workspaceId, blocker: error.blocker.code },
+          })
+        }
+        if (!deleted) return workspaceNotFound(request, workspaceId)
         return ok(request, { deleted: true as const })
       },
 

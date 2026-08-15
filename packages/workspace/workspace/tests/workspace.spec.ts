@@ -11,6 +11,7 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionHeader } from '@deepseek-ai/dsh-session'
 import { MemoryMediaPool, MemoryStorageBackend } from '../../../storage/storage-domain/tests/helpers/memory-backend.ts'
 import WorkspaceRegistry, {
+  WorkspaceDeleteBlockedError,
   WorkspaceId,
   WorkspaceMoveInvalidError,
   WorkspaceOrderInvalidError,
@@ -497,6 +498,65 @@ describe('WorkspaceRegistry create and lookup', () => {
     expect(reregistered.id).not.toBe(workspace.id)
     expect(reregistered.path).toBe(dir)
     expect(reregistered.sessionIds).toEqual([])
+  })
+
+  it('keeps the registration when a delete guard reports retained product data', async () => {
+    const dir = await makeDir('delete-blocked')
+    const result = await harness()
+    const workspace = await result.registry.create(dir)
+    const guard = vi.fn(async () => ({
+      code: 'taskboard-issues',
+      message: 'Move every active and archived Taskboard Issue to another Workspace before deleting this Workspace.',
+    }))
+    const unregister = result.registry.registerDeleteGuard(guard)
+
+    await expect(result.registry.delete(workspace.id)).rejects.toMatchObject({
+      name: 'WorkspaceDeleteBlockedError',
+      workspaceId: workspace.id,
+      blocker: {
+        code: 'taskboard-issues',
+        message: 'Move every active and archived Taskboard Issue to another Workspace before deleting this Workspace.',
+      },
+    } satisfies Partial<WorkspaceDeleteBlockedError>)
+    expect(guard).toHaveBeenCalledOnce()
+    expect(guard).toHaveBeenCalledWith(workspace)
+    expect(result.registry.get(workspace.id)).toBe(workspace)
+    expect(storedState(result.pool).workspaceIds).toEqual([workspace.id])
+    expect(storedRecord(result.pool, workspace.id)).toMatchObject({ path: dir })
+
+    unregister()
+    await expect(result.registry.delete(workspace.id)).resolves.toBe(true)
+  })
+
+  it('serializes retained-data creation with guarded registration deletion', async () => {
+    const dir = await makeDir('delete-create-race')
+    const result = await harness()
+    const workspace = await result.registry.create(dir)
+    let retained = false
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => { enter = resolve })
+    const released = new Promise<void>((resolve) => { release = resolve })
+    result.registry.registerDeleteGuard(async () => retained
+      ? { code: 'retained-data', message: 'Move retained data first.' }
+      : undefined)
+
+    const creation = result.registry.withRegistration(workspace.id, async (registered) => {
+      expect(registered).toBe(workspace)
+      enter()
+      await released
+      retained = true
+    })
+    await entered
+    const deletion = result.registry.delete(workspace.id)
+    release()
+    await creation
+
+    await expect(deletion).rejects.toMatchObject({
+      name: 'WorkspaceDeleteBlockedError',
+      blocker: { code: 'retained-data' },
+    })
+    expect(result.registry.get(workspace.id)).toBe(workspace)
   })
 
   it('rolls registry order and cache back when record deletion fails', async () => {

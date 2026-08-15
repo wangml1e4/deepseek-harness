@@ -12,6 +12,8 @@ Attachment metadata is listed separately from bytes. Upload and read methods car
 
 Workspace-scoped methods reject unknown Workspace ids before touching Taskboard state. Reads that need the implicit Taskboard ensure it from the current registered Workspace title. Moving an Issue also verifies and ensures the destination Workspace.
 
+While this Host Consumer is mounted, it registers a Workspace deletion guard. Any active or archived Issue returns the `taskboard-issues` blocker with the exact retained count; moving every Issue to another Workspace removes the blocker. Issue creation and movement into a Workspace use the registry mutation queue, so a concurrent deletion observes the completed write before its guard runs. The check never deletes or rewrites Taskboard data.
+
 Every method returns `TaskboardRemoteResult<T>`. Domain failures remain stable business results with `TaskboardError.code`; malformed requests fail in the generated Typert carrier, and infrastructure failures reject instead of being mislabeled as domain errors. `getIssue` uses an explicit nullable value so a missing Issue is distinct from a failed call.
 
 `patrol` combines the saved Policy, current Host choices, and permanent Run/Attempt history. `updatePatrol` delegates Host-owned selection validation to the Patrol Consumer, `runPatrol` starts one manual background Run, and `patrolIssue` returns the permanent Development Context and independent Reviewer evidence for the details sidebar.

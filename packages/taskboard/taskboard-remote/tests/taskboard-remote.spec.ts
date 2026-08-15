@@ -5,12 +5,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { MAX_ATTACHMENT_BYTES, TaskboardActorId } from '@deepseek-ai/dsh-taskboard'
 import SqliteTaskboard from '@deepseek-ai/dsh-taskboard-sqlite'
-import { WorkspaceId, type Workspace, type WorkspaceRegistry } from '@deepseek-ai/dsh-workspace'
+import {
+  WorkspaceId,
+  type Workspace,
+  type WorkspaceDeleteGuard,
+  type WorkspaceRegistry,
+} from '@deepseek-ai/dsh-workspace'
 import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import TaskboardRemote from '../src/index.ts'
 
 const contexts: Context[] = []
 const tempDirs: string[] = []
+const deletionGuards: WorkspaceDeleteGuard[] = []
 const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000101')
 const secondWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000102')
 const actor = {
@@ -44,6 +50,15 @@ async function harness() {
   ])
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => registered.get(id),
+    withRegistration: async <T>(id: WorkspaceId, operation: (value: Workspace | undefined) => Promise<T>) =>
+      await operation(registered.get(id)),
+    registerDeleteGuard: (guard: WorkspaceDeleteGuard) => {
+      deletionGuards.push(guard)
+      return () => {
+        const index = deletionGuards.indexOf(guard)
+        if (index >= 0) deletionGuards.splice(index, 1)
+      }
+    },
   } as WorkspaceRegistry)
   const attachmentsPath = await mkdtemp(join(tmpdir(), 'dsh-taskboard-remote-attachments-'))
   tempDirs.push(attachmentsPath)
@@ -77,9 +92,50 @@ async function harness() {
 afterEach(async () => {
   await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose()))
   await Promise.all(tempDirs.splice(0).map(path => rm(path, { recursive: true, force: true })))
+  deletionGuards.length = 0
 })
 
 describe('Taskboard Remote Consumer', () => {
+  it('blocks Workspace deletion while active or archived Issues remain', async () => {
+    const ctx = await harness()
+    const withRegistration = vi.spyOn(ctx.workspaceRegistry, 'withRegistration')
+    expect(deletionGuards).toHaveLength(1)
+    await expect(deletionGuards[0]?.(workspace())).resolves.toBeUndefined()
+
+    const created = await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Retain Taskboard history' })
+    if (!created.ok) throw new Error(created.error.message)
+    expect(withRegistration).toHaveBeenCalledWith(workspaceId, expect.any(Function))
+    await expect(deletionGuards[0]?.(workspace())).resolves.toEqual({
+      code: 'taskboard-issues',
+      message: 'Move all 1 active or archived Taskboard Issue to another Workspace before deleting this Workspace.',
+    })
+
+    const archived = await ctx.taskboardRemote.archiveIssue({
+      reference: created.value.id,
+      expectedVersion: created.value.version,
+      actor,
+    })
+    if (!archived.ok) throw new Error(archived.error.message)
+    await expect(deletionGuards[0]?.(workspace())).resolves.toEqual({
+      code: 'taskboard-issues',
+      message: 'Move all 1 active or archived Taskboard Issue to another Workspace before deleting this Workspace.',
+    })
+
+    const moved = await ctx.taskboardRemote.moveIssue({
+      reference: created.value.id,
+      targetWorkspaceId: secondWorkspaceId,
+      expectedVersion: archived.value.version,
+      actor,
+    })
+    if (!moved.ok) throw new Error(moved.error.message)
+    expect(withRegistration).toHaveBeenCalledWith(secondWorkspaceId, expect.any(Function))
+    await expect(deletionGuards[0]?.(workspace())).resolves.toBeUndefined()
+    await expect(deletionGuards[0]?.(workspace(secondWorkspaceId, 'Beta Workspace'))).resolves.toEqual({
+      code: 'taskboard-issues',
+      message: 'Move all 1 active or archived Taskboard Issue to another Workspace before deleting this Workspace.',
+    })
+  })
+
   it('publishes the complete V1 domain namespace as direct methods', async () => {
     const ctx = await harness()
     expect(ctx.taskboardRemote.typertRemote).toMatchObject({

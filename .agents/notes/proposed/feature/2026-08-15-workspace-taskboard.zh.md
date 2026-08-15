@@ -108,7 +108,7 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 
 ## 当前实现
 
-八个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情、持久 Patrol 状态、本地 Git 与准确 Session 执行、固定间隔协调、启动恢复、独立 Reviewer 和人工审查控件。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录、依赖、Patrol 配置与历史、手工 Run 和 Issue 证据。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
+前十个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill、浏览器 Dashboard、Board、List、Gantt 和 Issue 详情、持久 Patrol 状态、本地 Git 与准确 Session 执行、固定间隔协调、启动恢复、独立 Reviewer、人工审查控件、附件和 Workspace 删除保护。标准 Web Host 会把交互角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录、依赖、附件、Patrol 配置与历史、手工 Run 和 Issue 证据。Taskboard Host 消费方会注册保留数据守卫，因此任何活动或已归档 Issue 都会在不改变两类存储的前提下拒绝 Workspace 删除；把所有 Issue 移到另一个 Workspace 后，blocker 即消失。创建 Issue 和把 Issue 移入 Workspace 会与删除共享注册表变更队列，因此守卫能够看到并发写入。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
 
 浏览器 UI 从每个 Workspace 行进入，以所选 Taskboard 替换对话中间区域，并复用现有右侧详情栏。其视图、甘特图时间刻度与筛选偏好保存在浏览器存储中，权威 Issue 数据仍由 Host 持有。甘特图渲染器会在表格中保留未排期 Issue，在已排期条形之间绘制规范 `blocks` 连线，并只持久化被拖动 Issue 的日期而不产生级联变更。
 

@@ -50,7 +50,7 @@ Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git �
 
 消费方依赖 Service Definition，而非 SQLite 提供方。提供方启用外键，通过有序 Issue-label 行存储可复用的 Workspace 标签，使用固定 application id 和单调 schema 版本，并在初始化时拒绝存在内容但未标版本的文件、外来 application id 或不受支持的版本。其写事务使 Issue 版本、顺序、标签、必需评论、关系、附件元数据和活动记录保持一致。附件字节以不透明 id 作为仅所有者可访问的文件名，存放在相邻受管目录中，绝不进入 Workspace 仓库。
 
-`@deepseek-ai/dsh-taskboard-remote` 在 Typert `taskboard` namespace 下暴露 Service，并针对 `ctx.workspaceRegistry` 校验 Workspace 身份。领域失败会保留为类型化业务结果，载体校验与基础设施失败仍保持独立。浏览器 API 组合会挂载它生成的 Client 贡献。
+`@deepseek-ai/dsh-taskboard-remote` 在 Typert `taskboard` namespace 下暴露 Service，并针对 `ctx.workspaceRegistry` 校验 Workspace 身份。它还会注册 `taskboard-issues` Workspace 删除守卫：活动和已归档 Issue 会保持注册记录不变，直到全部 Issue 移到另一个 Workspace。创建 Issue 和把 Issue 移入 Workspace 会与删除共享注册表变更队列，因此守卫不会漏掉并发 Taskboard 写入。领域失败会保留为类型化业务结果，载体校验与基础设施失败仍保持独立。浏览器 API 组合会挂载它生成的 Client 贡献。
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 

@@ -63,6 +63,34 @@ export class WorkspaceOrderInvalidError extends Error {
   }
 }
 
+/** Product-owned data that prevents one Workspace registration from being removed. */
+export interface WorkspaceDeleteBlocker {
+  /** Stable owning-product discriminator surfaced by Host APIs. */
+  readonly code: string
+  /** Actionable user-facing reason the registration must remain. */
+  readonly message: string
+}
+
+/** Read-only check run before a known Workspace registration is deleted. */
+export type WorkspaceDeleteGuard = (
+  workspace: Workspace,
+) => Promise<WorkspaceDeleteBlocker | undefined>
+
+/** A registered product reported durable data that still belongs to the Workspace. */
+export class WorkspaceDeleteBlockedError extends Error {
+  /**
+   * @param workspaceId - Workspace whose registration must remain.
+   * @param blocker - Product-owned retained data and actionable resolution.
+   */
+  constructor(
+    readonly workspaceId: WorkspaceId,
+    readonly blocker: WorkspaceDeleteBlocker,
+  ) {
+    super(blocker.message)
+    this.name = 'WorkspaceDeleteBlockedError'
+  }
+}
+
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -99,6 +127,7 @@ export class WorkspaceRegistry extends Service {
   private readonly headers = new Map<SessionId, SessionHeader>()
   private readonly sessionPaths = new Map<SessionId, string>()
   private readonly invalidSessionPaths = new Map<SessionId, string>()
+  private readonly deleteGuards = new Set<WorkspaceDeleteGuard>()
   private operationTail: Promise<void> = Promise.resolve()
 
   private readonly host: WorkspaceEntityHost = {
@@ -198,6 +227,31 @@ export class WorkspaceRegistry extends Service {
    */
   delete(id: WorkspaceId): Promise<boolean> {
     return this.enqueueOperation(() => this.deleteKnown(id))
+  }
+
+  /**
+   * Register a product-owned pre-delete check. Guards run in registration
+   * order inside the Workspace mutation queue and must not mutate the registry.
+   * @param guard - Check that returns retained product data or `undefined`.
+   * @returns disposer that removes this exact guard.
+   */
+  registerDeleteGuard(guard: WorkspaceDeleteGuard): () => void {
+    this.deleteGuards.add(guard)
+    return () => { this.deleteGuards.delete(guard) }
+  }
+
+  /**
+   * Run a product-data operation against the current registration inside the
+   * Workspace mutation queue. The operation must not mutate this registry.
+   * @param id - Workspace whose registration the operation consumes.
+   * @param operation - Product-data work receiving the current registration.
+   * @returns the operation result after earlier registry mutations complete.
+   */
+  withRegistration<T>(
+    id: WorkspaceId,
+    operation: (workspace: Workspace | undefined) => Promise<T>,
+  ): Promise<T> {
+    return this.enqueueOperation(() => operation(this.entities.get(id)))
   }
 
   /**
@@ -358,6 +412,10 @@ export class WorkspaceRegistry extends Service {
   private async deleteKnown(id: WorkspaceId): Promise<boolean> {
     const entity = this.entities.get(id)
     if (entity === undefined) return false
+    for (const guard of this.deleteGuards) {
+      const blocker = await guard(entity)
+      if (blocker !== undefined) throw new WorkspaceDeleteBlockedError(id, blocker)
+    }
     const state = this.requireState()
     const nextState = {
       initialized: true,
