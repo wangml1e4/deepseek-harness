@@ -677,8 +677,29 @@ describe('createFixtureApi', () => {
     expect(noop.result.value.workspace.updatedAt).toBe(before)
   })
 
-  it('workspace.delete removes only the Workspace row and emits the removal frame', async () => {
+  it('workspace.delete retains the Workspace while seeded Taskboard Issues remain', async () => {
     const api = createFixtureApi()
+
+    const blocked = await api.workspace.delete(req({ workspaceId: 'fx-ws-fixture' as WorkspaceId }))
+
+    expect(blocked.result).toEqual({
+      ok: false,
+      error: {
+        code: 'workspace-delete-blocked',
+        message: 'Move all 3 active or archived Taskboard Issues to another Workspace before deleting this Workspace.',
+        details: { workspaceId: 'fx-ws-fixture', blocker: 'taskboard-issues' },
+      },
+    })
+    const list = await api.workspace.list(req({}))
+    if (!list.result.ok) throw new Error('workspace list failed')
+    expect(list.result.value.items.some(workspace => workspace.workspaceId === 'fx-ws-fixture')).toBe(true)
+  })
+
+  it('workspace.delete removes only an Issue-free Workspace row and emits the removal frame', async () => {
+    const api = createFixtureApi()
+    const created = await api.workspace.create(req({ path: '/fixture/issue-free' }))
+    if (!created.result.ok) throw new Error('workspace create failed')
+    const issueFreeId = created.result.value.workspace.workspaceId
     const abort = new AbortController()
     const seen: HostFrame[] = []
     const consuming = (async () => {
@@ -690,13 +711,13 @@ describe('createFixtureApi', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
     const missing = await api.workspace.delete(req({ workspaceId: 'fx-ws-void' as WorkspaceId }))
     expect(missing.result).toMatchObject({ ok: false, error: { code: 'workspace-not-found' } })
-    const deleted = await api.workspace.delete(req({ workspaceId: 'fx-ws-fixture' as WorkspaceId }))
+    const deleted = await api.workspace.delete(req({ workspaceId: issueFreeId }))
     expect(deleted.result).toEqual({ ok: true, value: { deleted: true } })
     await consuming
-    expect(seen).toEqual([{ type: 'host/workspace-removed', workspaceId: 'fx-ws-fixture' }])
+    expect(seen).toEqual([{ type: 'host/workspace-removed', workspaceId: issueFreeId }])
     const list = await api.workspace.list(req({}))
     if (!list.result.ok) throw new Error('workspace list failed')
-    expect(list.result.value.items.some(workspace => workspace.workspaceId === 'fx-ws-fixture')).toBe(false)
+    expect(list.result.value.items.some(workspace => workspace.workspaceId === issueFreeId)).toBe(false)
     const sessions = await api.sessions.list(req({}))
     if (!sessions.result.ok) throw new Error('session list failed')
     expect(sessions.result.value.items.map(session => session.sessionId)).toContain('fx-alpha')

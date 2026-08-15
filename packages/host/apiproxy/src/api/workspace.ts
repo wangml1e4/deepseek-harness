@@ -68,7 +68,8 @@ export interface WorkspaceApi {
   /**
    * Removes one Workspace registration. The directory, every user file, and
    * every session log remain untouched; those Sessions consequently become
-   * ungrouped. An unknown id fails with `workspace-not-found`.
+   * ungrouped. An unknown id fails with `workspace-not-found`; retained
+   * product data fails with `workspace-delete-blocked` and an actionable reason.
    */
   delete(request: RpcRequest<{ workspaceId: WorkspaceId }>):
   Promise<RpcResponse<{ deleted: true }>>

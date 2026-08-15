@@ -102,7 +102,25 @@ describe('assembled Workspace Taskboard', () => {
     const scale = within(surface).getByLabelText('Gantt timeline scale') as HTMLSelectElement
     const timeline = `gantt=${scale.value}|mounted=${gantt.querySelector('.gantt_container') !== null}|styled=${ganttStyles !== null}|links=${gantt.querySelectorAll('.gantt_task_link').length}`
 
-    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${patrol}\n${review}\n${timeline}\n`
+    const currentTree = screen.getByRole('tree', { name: 'Sessions' })
+    const currentWorkspaceRow = within(currentTree).getAllByText('fixture')
+      .map(node => node.closest<HTMLElement>('[role="treeitem"]'))
+      .find(node => node?.getAttribute('aria-expanded') !== null)
+    if (currentWorkspaceRow === undefined || currentWorkspaceRow === null) {
+      throw new Error('current fixture Workspace row missing')
+    }
+    fireEvent.mouseEnter(currentWorkspaceRow)
+    fireEvent.click(within(currentWorkspaceRow).getByRole('button', { name: 'Workspace actions for fixture' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete workspace' }))
+    const deleteDialog = await screen.findByRole('dialog', { name: 'Delete workspace' })
+    const explainsMigration = deleteDialog.textContent?.includes(
+      'Move every active and archived Taskboard Issue to another workspace first.',
+    ) ?? false
+    fireEvent.click(within(deleteDialog).getByRole('button', { name: 'Delete workspace' }))
+    const deleteFailure = await within(deleteDialog).findByRole('alert')
+    const workspaceDelete = `workspaceDelete=migration:${explainsMigration ? 'visible' : '<absent>'}|blocked:${deleteFailure.textContent?.includes('Move all 3 active or archived Taskboard Issues') ?? false ? 'taskboard-issues' : '<absent>'}`
+
+    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${patrol}\n${review}\n${timeline}\n${workspaceDelete}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(EXPECTED), { recursive: true })
       writeFileSync(EXPECTED, shape)

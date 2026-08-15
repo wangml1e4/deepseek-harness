@@ -2826,6 +2826,15 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
             details: { workspaceId },
           })
         }
+        const retainedIssues = taskboardIssues.filter(issue => issue.workspaceId === workspaceId).length
+        if (retainedIssues > 0) {
+          const noun = retainedIssues === 1 ? 'Issue' : 'Issues'
+          return err(request, {
+            code: 'workspace-delete-blocked',
+            message: `Move all ${String(retainedIssues)} active or archived Taskboard ${noun} to another Workspace before deleting this Workspace.`,
+            details: { workspaceId, blocker: 'taskboard-issues' },
+          })
+        }
         workspaces.splice(index, 1)
         emitHost({ type: 'host/workspace-removed', workspaceId })
         return ok(request, { deleted: true as const })

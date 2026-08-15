@@ -28,7 +28,7 @@ import type {
 } from '@deepseek-ai/dsh-taskboard/types'
 import type {} from '@deepseek-ai/dsh-taskboard-patrol'
 import type {} from '@deepseek-ai/dsh-workspace'
-import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   TaskboardActivityListValue,
@@ -60,6 +60,15 @@ export class TaskboardRemote extends TypertRemoteService {
 
   constructor(ctx: Context) {
     super(ctx, 'taskboardRemote', { namespace: 'taskboard' })
+    ctx.effect(() => ctx.workspaceRegistry.registerDeleteGuard(async (workspace) => {
+      const issues = await ctx.taskboard.listIssues({ workspaceId: workspace.id, archived: 'include' })
+      if (issues.length === 0) return undefined
+      const noun = issues.length === 1 ? 'Issue' : 'Issues'
+      return {
+        code: 'taskboard-issues',
+        message: `Move all ${String(issues.length)} active or archived Taskboard ${noun} to another Workspace before deleting this Workspace.`,
+      }
+    }), 'taskboardRemote.workspaceDeleteGuard')
   }
 
   /**
@@ -119,11 +128,10 @@ export class TaskboardRemote extends TypertRemoteService {
    */
   @Remote('createIssue')
   createIssue(input: CreateIssueInput): Promise<TaskboardRemoteResult<Issue>> {
-    return this.result(async () => {
-      const workspace = this.requireWorkspace(input.workspaceId)
+    return this.result(() => this.withRegisteredWorkspace(input.workspaceId, async (workspace) => {
       await this.ctx.taskboard.ensureWorkspace({ workspaceId: workspace.id, title: workspace.title })
       return await this.ctx.taskboard.createIssue(input)
-    })
+    }))
   }
 
   /**
@@ -143,11 +151,10 @@ export class TaskboardRemote extends TypertRemoteService {
    */
   @Remote('moveIssue')
   moveIssue(input: MoveIssueInput): Promise<TaskboardRemoteResult<Issue>> {
-    return this.result(async () => {
-      const workspace = this.requireWorkspace(input.targetWorkspaceId)
+    return this.result(() => this.withRegisteredWorkspace(input.targetWorkspaceId, async (workspace) => {
       await this.ctx.taskboard.ensureWorkspace({ workspaceId: workspace.id, title: workspace.title })
       return await this.ctx.taskboard.moveIssue(input)
-    })
+    }))
   }
 
   /**
@@ -365,6 +372,19 @@ export class TaskboardRemote extends TypertRemoteService {
       throw new TaskboardError('workspace_not_found', `Workspace '${workspaceId}' does not exist`)
     }
     return workspace
+  }
+
+  /** Serialize data creation against deletion of the owning registration. */
+  private withRegisteredWorkspace<T>(
+    workspaceId: WorkspaceId,
+    operation: (workspace: Workspace) => Promise<T>,
+  ): Promise<T> {
+    return this.ctx.workspaceRegistry.withRegistration(workspaceId, async (workspace) => {
+      if (workspace === undefined) {
+        throw new TaskboardError('workspace_not_found', `Workspace '${workspaceId}' does not exist`)
+      }
+      return await operation(workspace)
+    })
   }
 
   /** Preserve stable domain errors while allowing infrastructure faults to reject. */

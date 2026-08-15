@@ -40,6 +40,7 @@ export interface RpcErrorDetailsMap {
   'workspace-not-found': { workspaceId: string }
   'workspace-invalid-path': { path: string }
   'workspace-name-conflict': { name: string }
+  'workspace-delete-blocked': { workspaceId: string; blocker: string }
   'workspace-move-invalid': { workspaceId: string; sessionId: SessionId; beforeSessionId?: SessionId }
   'directory-unreadable': { path: string }
   'directory-exists': { path: string }

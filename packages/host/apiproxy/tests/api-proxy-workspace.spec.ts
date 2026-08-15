@@ -528,6 +528,27 @@ describe('Host Workspace increments', () => {
     abort.abort()
   })
 
+  it('returns an actionable business error when retained product data blocks deletion', async () => {
+    const { api, ctx, root } = await harness()
+    const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'retained-data') }))).workspace
+    ctx.workspaceRegistry.registerDeleteGuard(async () => ({
+      code: 'taskboard-issues',
+      message: 'Move every active and archived Taskboard Issue to another Workspace before deleting this Workspace.',
+    }))
+
+    const blocked = await api.workspace.delete(request({ workspaceId: workspace.workspaceId }))
+
+    expect(blocked.result).toEqual({
+      ok: false,
+      error: {
+        code: 'workspace-delete-blocked',
+        message: 'Move every active and archived Taskboard Issue to another Workspace before deleting this Workspace.',
+        details: { workspaceId: workspace.workspaceId, blocker: 'taskboard-issues' },
+      },
+    })
+    expect(expectOk(await api.workspace.list(request({}))).items).toEqual([workspace])
+  })
+
   it('archives a session into the global set, keeps its accounting, and streams the set once', async () => {
     const { api, root } = await harness()
     const workspace = expectOk(await api.workspace.create(request({ path: stageDir(root, 'archive-home') }))).workspace

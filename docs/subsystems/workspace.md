@@ -195,6 +195,23 @@ list(): Workspace[]
 delete(id: WorkspaceId): Promise<boolean>
 
 /**
+ * Register a product-owned pre-delete check. Guards run in registration
+ * order inside the Workspace mutation queue and must not mutate the registry.
+ * @param guard - Check that returns retained product data or `undefined`.
+ * @returns disposer that removes this exact guard.
+ */
+registerDeleteGuard(guard: WorkspaceDeleteGuard): () => void
+
+/**
+ * Run a product-data operation against the current registration inside the
+ * Workspace mutation queue. The operation must not mutate this registry.
+ * @param id - Workspace whose registration the operation consumes.
+ * @param operation - Product-data work receiving the current registration.
+ * @returns the operation result after earlier registry mutations complete.
+ */
+withRegistration<T>( id: WorkspaceId, operation: (workspace: Workspace | undefined) => Promise<T>, ): Promise<T>
+
+/**
  * Move one workspace within the durable display order, DOM-insertBefore-like.
  * With an anchor it lands before that workspace; without one it appends.
  * @param id - Workspace to move.
@@ -224,5 +241,5 @@ async resolveByPath(path: string): Promise<Workspace | undefined>
 
 Types: [SessionId](core.md)
 
-Source: [`packages/workspace/workspace/src/index.ts:92`](../../packages/workspace/workspace/src/index.ts)
+Source: [`packages/workspace/workspace/src/index.ts:120`](../../packages/workspace/workspace/src/index.ts)
 <!-- END GENERATED cordis-surface -->
