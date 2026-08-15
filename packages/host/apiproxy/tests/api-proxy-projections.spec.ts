@@ -72,6 +72,41 @@ function seedMessages(session: Session, count: number): void {
 const api = (ctx: Context) => createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 
 describe('session.history projections block', () => {
+  it('serves an attached projection-only cut without transcript events', async () => {
+    const { ctx, session } = await harness(true)
+    ctx.sessionProjections.register(lastUserUnit())
+    seedMessages(session, 2)
+    const response = await api(ctx).sessions.history(request({
+      sessionId: session.id,
+      projectionsOnly: true,
+    }))
+    if (!response.result.ok) throw new Error('projection-only history failed')
+    expect(response.result.value.events).toEqual([])
+    expect(response.result.value.hasMore).toBe(false)
+    expect(response.result.value.projections?.values['test/last-user']).toEqual({ text: 'm1' })
+  })
+
+  it('uses the cold projection-cache ladder for a projection-only cut', async () => {
+    const { ctx } = await harness(true)
+    const coldId = SessionId('projection-only-cold')
+    const coldSnapshot = vi.fn(async () => ({
+      asOfSeq: 9,
+      values: { 'test/last-user': { text: 'cold exact' } },
+    }))
+    ctx.provide('sessionProjectionCache', { coldSnapshot } as never)
+    const response = await api(ctx).sessions.history(request({
+      sessionId: coldId,
+      projectionsOnly: true,
+    }))
+    if (!response.result.ok) throw new Error('cold projection-only history failed')
+    expect(coldSnapshot).toHaveBeenCalledWith(coldId)
+    expect(response.result.value).toEqual({
+      events: [],
+      hasMore: false,
+      projections: { asOfSeq: 9, values: { 'test/last-user': { text: 'cold exact' } } },
+    })
+  })
+
   it('serves the unit value on the tail page with asOfSeq = last event seq', async () => {
     const { ctx, session } = await harness(true)
     ctx.sessionProjections.register(lastUserUnit())

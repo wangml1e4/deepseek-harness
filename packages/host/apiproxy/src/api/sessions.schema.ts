@@ -138,12 +138,17 @@ export const sessionForkValueSchema = z.object({
   sessionId: sessionIdSchema,
 }) satisfies z.ZodType<Wire<ResponseValue<'session.fork'>>>
 
-/** session.history request payload (beforeSeq/maxMessages page backwards from the window tail). */
+/** session.history request payload (pagination, or an exact projection-baseline-only read). */
 export const sessionHistoryRequestSchema = z.object({
   sessionId: sessionIdSchema,
   beforeSeq: z.number().int().nonnegative().optional(),
   maxMessages: z.number().int().positive().optional(),
-}) satisfies z.ZodType<Wire<RequestPayload<'session.history'>>>
+  projectionsOnly: z.literal(true).optional(),
+}).refine(
+  payload => payload.projectionsOnly !== true
+    || (payload.beforeSeq === undefined && payload.maxMessages === undefined),
+  { message: 'projectionsOnly cannot be combined with history pagination' },
+) satisfies z.ZodType<Wire<RequestPayload<'session.history'>>>
 
 /** Complete provider/model selection. */
 export const modelSelectionSchema = z.object({

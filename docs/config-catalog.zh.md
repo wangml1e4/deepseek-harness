@@ -2338,7 +2338,7 @@ export interface Config {
 export type TokenMeterConfig = Record<string, never>
 ```
 
-来源：[`packages/llm/token-meter/src/types.ts:12`](../packages/llm/token-meter/src/types.ts)
+来源：[`packages/llm/token-meter/src/types.ts:15`](../packages/llm/token-meter/src/types.ts)
 
 <a id="deepseek-aidsh-tool-bash"></a>
 
@@ -3057,6 +3057,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-settings-models`（[`packages/client/ui-settings-models/src/index.ts`](../packages/client/ui-settings-models/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-settings-plugin-inventory`（[`packages/client/ui-settings-plugin-inventory/src/index.ts`](../packages/client/ui-settings-plugin-inventory/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-settings-plugins`（[`packages/client/ui-settings-plugins/src/index.ts`](../packages/client/ui-settings-plugins/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-settings-token-usage`（[`packages/client/ui-settings-token-usage/src/index.ts`](../packages/client/ui-settings-token-usage/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-sidebar`（[`packages/client/ui-sidebar/src/index.ts`](../packages/client/ui-sidebar/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-skill`（[`packages/client/ui-skill/src/index.ts`](../packages/client/ui-skill/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-subagent`（[`packages/client/ui-subagent/src/index.ts`](../packages/client/ui-subagent/src/index.ts)）

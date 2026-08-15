@@ -5,6 +5,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-session-title/types'
 import { SessionManager } from '../src/client/sessions/manager.ts'
 import { FakeApiClient, deferred, err, fakeRemote, ok } from './fake-api.client.ts'
 import { entries, ev, plainTurn } from './event-script.client.ts'
@@ -237,6 +238,38 @@ describe('list lifecycle', () => {
     expect(items.find(item => item.sessionId === S1)?.title).toBe('Cold cached')
     // The stale list block (seq 5) cannot overwrite the newer push frame (seq 9).
     expect(items.find(item => item.sessionId === S2)?.title).toBe('Pushed')
+  })
+
+  it('hydrates a missing listed projection exactly once and seeds the shared store', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({
+      items: [
+        { ...summary(S1), projections: { asOfSeq: 4, values: { title: 'Already cached' } } },
+        summary(S2, { updatedAt: 200 }),
+      ] as never[],
+    }))
+    api.onHistory = () => Promise.resolve(ok({
+      events: [],
+      hasMore: false,
+      projections: { asOfSeq: 8, values: { title: 'Cold exact' } },
+    }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    const result = await manager.hydrateProjection('title', [S1, S2, S2])
+    expect(result.failed).toEqual([])
+    expect(api.callsOf('session.history')).toEqual([{ sessionId: S2, projectionsOnly: true }])
+    expect(manager.getListSnapshot().items.find(item => item.sessionId === S2)?.title).toBe('Cold exact')
+  })
+
+  it('reports a listed projection that remains absent after exact loading', async () => {
+    const api = new FakeApiClient()
+    api.onList = () => Promise.resolve(ok({ items: [summary(S1)] as never[] }))
+    api.onHistory = () => Promise.resolve(ok({
+      events: [], hasMore: false, projections: { asOfSeq: 2, values: {} },
+    }))
+    const manager = new SessionManager(api, fakeRemote())
+    await manager.refreshList()
+    expect(await manager.hydrateProjection('title', [S1])).toEqual({ failed: [S1] })
   })
 
   it('drops a projection row beyond the subscription baseline before accepting its durable replay', async () => {

@@ -48,7 +48,12 @@ export class FakeApiClient implements IApiClient {
   onCreate: (payload: unknown) => Promise<RpcResponse<{ sessionId: SessionId }>> = () => Promise.resolve(ok({ sessionId: 'fk-new' as SessionId }))
   onRename: (payload: unknown) => Promise<RpcResponse<{ title: string; seq: number }>> = () => Promise.resolve(ok({ title: 'fk-renamed', seq: 0 }))
   onFork: (payload: unknown) => Promise<RpcResponse<{ sessionId: SessionId }>> = () => Promise.resolve(ok({ sessionId: 'fk-fork' as SessionId }))
-  onHistory: (payload: { sessionId: SessionId; beforeSeq?: number; maxMessages?: number })
+  onHistory: (payload: {
+    sessionId: SessionId
+    beforeSeq?: number
+    maxMessages?: number
+    projectionsOnly?: true
+  })
   => Promise<RpcResponse<{ events: never[]; hasMore: boolean; modelSelection: ModelSelection }>> =
     () => Promise.resolve(ok({
       events: [],
@@ -110,7 +115,12 @@ export class FakeApiClient implements IApiClient {
       return this.record('session.search', payload, this.onSearch(payload))
     },
     create: (payload: unknown) => this.record('session.create', payload, this.onCreate(payload)),
-    history: (payload: { sessionId: SessionId; beforeSeq?: number; maxMessages?: number }) =>
+    history: (payload: {
+      sessionId: SessionId
+      beforeSeq?: number
+      maxMessages?: number
+      projectionsOnly?: true
+    }) =>
       this.record('session.history', payload, this.onHistory(payload)),
     models: (payload: unknown) => this.record('session.models', payload, this.onModels(payload)),
     selectModel: (payload: ModelSelection & { sessionId: SessionId }) =>

@@ -197,7 +197,9 @@ describe('sessions domain schemas', () => {
     expect(() => sessionCreateRequestSchema.parse({ workspaceId: 'w1', cwd: '/w' })).toThrow(/not both/)
     expect(sessionCreateValueSchema.parse({ sessionId: 's1' }).sessionId).toBe('s1')
     expect(sessionHistoryRequestSchema.parse({ sessionId: 's1', beforeSeq: 3, maxMessages: 5 }).beforeSeq).toBe(3)
+    expect(sessionHistoryRequestSchema.parse({ sessionId: 's1', projectionsOnly: true }).projectionsOnly).toBe(true)
     expect(() => sessionHistoryRequestSchema.parse({ sessionId: 's1', maxMessages: 0 })).toThrow()
+    expect(() => sessionHistoryRequestSchema.parse({ sessionId: 's1', projectionsOnly: true, maxMessages: 1 })).toThrow()
     expect(sessionHistoryValueSchema.parse({
       events: [],
       hasMore: false,

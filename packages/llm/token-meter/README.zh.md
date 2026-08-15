@@ -23,9 +23,11 @@ fold 跟踪完整请求标头快照、步骤边界、表层追加与替换、成
 
 ## 会话投影
 
-当组合提供 `ctx.sessionProjections` 时，token-meter 会通过一个可选子 fiber 注册三个单元。
+当组合提供 `ctx.sessionProjections` 时，token-meter 会通过一个可选子 fiber 注册四个单元。
 
 `tokenUsage` 携带完整持久日志中的 `uncachedInputTokens`、`outputTokens`、`cacheReadTokens` 和 `cacheWriteTokens`。即使请求随后失败，用量分片仍会计入；同一 `(turn, step)` 的最终 assistant 消息用量会替换该样本，而不是重复计数。推理仍是输出的一个细分项。只保留单个最新样本，依赖的是会话日志的一条顺序性质：一旦某个更晚的步骤报告了用量，合法日志就绝不会再为更早的步骤报告用量。
+
+`tokenActivity` 以 `YYYY-MM-DD` 行携带相同的四个不重叠用量 bucket，并记录最长已完成轮次时长。一条直接用户消息为其准入的工作选择经过 Host 验证的 `clientTimeZone`；时区缺失或格式错误时使用 UTC。用量按提供方报告事件的持久时间归日。同一步骤的最终样本会替换较早分片；当两次报告跨越本地午夜时，样本也会移动到新的日期行。已完成工作的时长是匹配的 `turn/start` 到结束原因为 `completed` 的 `turn/end` 的间隔；已中止、不匹配或仍打开的轮次不贡献时长。
 
 `contextPressure` 携带可选的 `pressureTokens`（提供方报告的最新提示词规模，为未缓存输入加缓存读取与写入之和）、可选的 `projectedTokens`，以及来自最新一条 `request/context` 记录的可选 `contextWindow`。提供方报告用量前两个数字都保持缺失；路由适配器未公布容量时容量也保持缺失。输出不计入其中，因此轮次流式输出期间 `pressureTokens` 保持不动，等到下一个请求报告用量时才前进。
 
@@ -33,7 +35,7 @@ fold 跟踪完整请求标头快照、步骤边界、表层追加与替换、成
 
 `contextBreakdown` 携带启发式的 `systemTokens`、`toolsTokens` 与 `messageTokens`，描述上下文的组成而非提供方计费规模。envelope 数字在每条 `request/header` 上按后者胜重新计价；消息数字重放 `surface-fold.ts`——也就是 `measure()` 运行的同一个带位置 fold——因此它在每个事件边界上都等于 `measure().surfaceTokens`，压缩会像缩小下一个请求那样缩小它。三个数字都使用测量服务的固定启发式规则，属于估算值：它们加起来不等于 `projectedTokens`——后者的提供方锚点所体现的恰好是这些明细行仍然带着的误差（按「4 字符 ≈ 1 token」计价，CJK 文本与 JSON schema 会被严重低估）。请把它们当作近似的**组成**呈现，而不是总量。
 
-三个单元都使用标准的投影基线、实时帧、seq 高者胜值仓和 JSON 检查点路径。卸载 token-meter 会移除这三个键。不带投影 seam 的组合会保留测量服务的既有行为。
+四个单元都使用标准的投影基线、实时帧、seq 高者胜值仓和 JSON 检查点路径。卸载 token-meter 会移除这四个键。不带投影 seam 的组合会保留测量服务的既有行为。
 
 ### 上下文占用率是刻意为之的近似值
 

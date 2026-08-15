@@ -2240,8 +2240,22 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       },
 
       async history(request) {
-        const { sessionId, beforeSeq, maxMessages } = request.payload
+        const { sessionId, beforeSeq, maxMessages, projectionsOnly } = request.payload
         try {
+          if (projectionsOnly === true) {
+            const attached = ctx.sessions.get(sessionId)
+            const projections = attached === undefined
+              ? await ctx.get('sessionProjectionCache')?.coldSnapshot(sessionId)
+              : projectionsFor(ctx, attached)
+            if (projections === undefined) {
+              return err(request, {
+                code: 'internal',
+                message: 'projection baseline is unavailable: this deployment does not mount the projection cache',
+                details: {},
+              })
+            }
+            return ok(request, { events: [], hasMore: false, projections })
+          }
           const source = await historySourceFor(sessionId)
           // Both awaits happen BEFORE the cut. Ensuring the recorded
           // composition's standing mount is what registers its projection
