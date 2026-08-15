@@ -1108,10 +1108,7 @@ export class SqliteTaskboard extends TaskboardService {
         SET state = 'completed', result = ?, error = ?, ended_at = ?
         WHERE id = ? AND state = 'active'
       `).run(input.result, input.error ?? null, timestamp, input.runId)
-      db.exec('COMMIT')
-      const stored = requireStored(this.findPatrolRun(input.runId), 'Patrol Run')
-      this.notifyChanged(row.workspace_id as EnsureWorkspaceInput['workspaceId'])
-      return stored
+      return this.commitPatrolRunMutation(db, input.runId, row.workspace_id)
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -1160,10 +1157,7 @@ export class SqliteTaskboard extends TaskboardService {
         SET recovery_count = recovery_count + 1, last_recovered_at = ?
         WHERE id = ? AND state = 'active'
       `).run(timestamp, runId)
-      db.exec('COMMIT')
-      const stored = requireStored(this.findPatrolRun(runId), 'Patrol Run')
-      this.notifyChanged(row.workspace_id as EnsureWorkspaceInput['workspaceId'])
-      return stored
+      return this.commitPatrolRunMutation(db, runId, row.workspace_id)
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -1234,10 +1228,7 @@ export class SqliteTaskboard extends TaskboardService {
         SET state = 'completed', result = 'failed', error = ?, ended_at = ?
         WHERE id = ? AND state = 'active'
       `).run(detail, timestamp, input.runId)
-      db.exec('COMMIT')
-      const stored = requireStored(this.findPatrolRun(input.runId), 'Patrol Run')
-      this.notifyChanged(row.workspace_id as EnsureWorkspaceInput['workspaceId'])
-      return stored
+      return this.commitPatrolRunMutation(db, input.runId, row.workspace_id)
     } catch (error: unknown) {
       rollback(db)
       throw error
@@ -1714,6 +1705,14 @@ export class SqliteTaskboard extends TaskboardService {
     `).get(runId) as PatrolRunRow | undefined
     /* v8 ignore next -- callers pass an id read or inserted in the same SQLite transaction. */
     return row === undefined ? undefined : rowToPatrolRun(row)
+  }
+
+  /** Commit one Patrol Run mutation and publish its settled durable record. */
+  private commitPatrolRunMutation(db: DatabaseSync, runId: PatrolRunId, workspaceId: string): PatrolRun {
+    db.exec('COMMIT')
+    const stored = requireStored(this.findPatrolRun(runId), 'Patrol Run')
+    this.notifyChanged(workspaceId as EnsureWorkspaceInput['workspaceId'])
+    return stored
   }
 
   /** Read one Patrol Attempt from the initialized database. */
