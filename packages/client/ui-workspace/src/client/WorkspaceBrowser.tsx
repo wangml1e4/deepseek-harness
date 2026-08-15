@@ -10,6 +10,7 @@
  * (same package — direct composition, no slot between them).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16,
@@ -243,6 +244,8 @@ type SessionTreeProps = Pick<
   onSessionArchive: (sessionId: SessionNode['id']) => void
   /** Session order behavior: fixed after edits, or additionally promoted by user activity. */
   orderBy: SessionOrderBy
+  /** Render plugin actions for one real Workspace row. */
+  renderWorkspaceActions: (workspaceId: WorkspaceId, title: string) => ReactNode
 }
 
 /** The scrolling session tree; unmounting drops the sessions subscription and expand-all state. */
@@ -252,6 +255,7 @@ function SessionTree({
   insertWorkspaceBefore, insertSessionBefore, orderBy,
   groupExpansion, setGroupExpanded,
   sessionOrderByAccount, sessionUpdatedAtByAccount, syncSessionOrderAccount, setSessionOrder, t,
+  renderWorkspaceActions,
 }: SessionTreeProps) {
   const list = useSessions(s => s)
   const current = list.current
@@ -476,6 +480,9 @@ function SessionTree({
                       if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
                     },
                   }}
+                extraActions={group.workspaceId === undefined
+                  ? undefined
+                  : renderWorkspaceActions(group.workspaceId, group.label)}
               />
               {(expandedSessionGroups.includes(group.key)
                 ? group.sessions
@@ -1152,6 +1159,10 @@ export function WorkspaceBrowser({
                 insertWorkspaceBefore={insertWorkspaceBefore}
                 insertSessionBefore={insertSessionBefore}
                 orderBy={orderBy}
+                renderWorkspaceActions={(workspaceId, title) => renderSlot('sidebar.workspace.action', {
+                  workspaceId,
+                  title,
+                })}
                 t={t}
                 onRenameRequest={(workspaceId, currentTitle) => {
                   setRenameTarget({ workspaceId, currentTitle })

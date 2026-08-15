@@ -28,7 +28,7 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-当前消费层尚不提供 Web Taskboard 视图、实时更新事件、附件、Patrol 调度、开发上下文绑定或审查证据。这些仍属于按顺序交付的 Taskboard PR stack 后续层，而且版本一不会发布或同步 GitHub Issue。
+当前消费层提供双语 Web 仪表盘、看板、列表和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图、附件、巡检调度、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -276,4 +276,28 @@ Host Remote adapter that keeps Workspace identity authoritative.
 Types: [WorkspaceId](workspace.md)
 
 Source: [`packages/taskboard/taskboard-remote/src/index.ts:44`](../../packages/taskboard/taskboard-remote/src/index.ts)
+
+<a id="taskboard-events"></a>
+
+### `taskboard/*` events
+
+<a id="taskboardchanged--emit"></a>
+
+#### `taskboard/changed` — emit
+
+A durable Taskboard mutation committed for one Workspace. Observer failures are contained and cannot veto the committed mutation.
+
+```ts cordis-catalog
+/**
+ * A durable Taskboard mutation committed for one Workspace. Observer
+ * failures are contained and cannot veto the committed mutation.
+ * @mode emit
+ * @param workspaceId - Workspace whose Taskboard projection changed.
+ */
+'taskboard/changed'(workspaceId: WorkspaceId): void
+```
+
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard/src/types.ts:303`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

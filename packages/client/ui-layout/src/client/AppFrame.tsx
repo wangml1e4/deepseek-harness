@@ -12,16 +12,18 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { computeColumns, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
+import type { AppFrameInjected } from './index.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.center' | 'shell.details' | 'shell.overlay'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
+  & InjectFace<AppFrameInjected>
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode }) {
@@ -86,11 +88,14 @@ function DragHandle(props: { side: 'sidebar' | 'details'; left: number; onStart:
 /** The three-column frame (see module doc). */
 export function AppFrame({
   useStore,
+  useSurface,
   useSessions,
   actions,
   renderSlot,
+  renderSlotChain,
 }: AppFrameProps) {
   const panels = useStore(s => s)
+  const surface = useSurface(value => value)
   const detailsSession = useSessions((s) => {
     const current = s.current
     return current !== undefined && s.byId[current]?.blank === false ? current : undefined
@@ -101,11 +106,11 @@ export function AppFrame({
   const lastSession = useRef(detailsSession)
   useLayoutEffect(() => {
     if (detailsSession === undefined) return
-    if (lastSession.current !== undefined && lastSession.current !== detailsSession) {
+    if (surface === null && lastSession.current !== undefined && lastSession.current !== detailsSession) {
       actions.closeDetails()
     }
     lastSession.current = detailsSession
-  }, [actions, detailsSession])
+  }, [actions, detailsSession, surface])
 
   // Track the frame's own box (not the window): rAF-throttled ResizeObserver.
   useEffect(() => {
@@ -139,7 +144,8 @@ export function AppFrame({
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const cols = computeColumns(viewport, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  const detailsWidth = detailsSession === undefined && surface === null ? 0 : panels.details
+  const cols = computeColumns(viewport, sidebarPreference, detailsWidth)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -187,8 +193,16 @@ export function AppFrame({
             the shell's own pending rendering. The conversation
             is session-maybe; the strict details entry naturally renders
             empty while no session is current. */}
-        <CenterColumn>{renderSlot('conversation', {})}</CenterColumn>
-        <DetailsColumn>{renderSlot('details', {})}</DetailsColumn>
+        <CenterColumn>{renderSlotChain(
+          'shell.center',
+          { surface },
+          { fallback: renderSlot('conversation', {}), overlay: true },
+        )}</CenterColumn>
+        <DetailsColumn>{renderSlotChain(
+          'shell.details',
+          { surface },
+          { fallback: renderSlot('details', {}), overlay: true },
+        )}</DetailsColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}

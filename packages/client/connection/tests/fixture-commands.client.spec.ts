@@ -113,3 +113,51 @@ describe('FixtureApiClient command/skill dispatch', () => {
     expect(skills.result.value.skills.length).toBeGreaterThan(0)
   })
 })
+
+describe('FixtureApiClient onboarding settings', () => {
+  it('persists the welcome acknowledgement used by local browser journeys', async () => {
+    const api = createFixtureApi()
+    const before = await api.settings.describe(req({}))
+    expect(before.result).toMatchObject({
+      ok: true,
+      value: {
+        namespaces: [{ ns: 'llm-deepseek' }, { ns: 'ui-onboarding', value: {}, revision: 0 }],
+      },
+    })
+
+    const changed = await api.settings.mutate(req({
+      ns: 'ui-onboarding',
+      ops: [{ op: 'set', path: ['welcomeNoticeVersion'], value: '2026-08-13.1' }],
+    }))
+    expect(changed.result).toMatchObject({
+      ok: true,
+      value: { ns: 'ui-onboarding', value: { welcomeNoticeVersion: '2026-08-13.1' }, revision: 1 },
+    })
+  })
+})
+
+describe('FixtureApiClient Taskboard Remote', () => {
+  it('serves and mutates the Workspace-owned Taskboard through generated endpoint names', async () => {
+    const { rpc } = createFixtureFaces()
+    const board = await callRemote<{ ok: true; value: { prefix: string } }>(
+      rpc, 'taskboard/workspace', { workspaceId: 'fx-ws-fixture' })
+    expect(board).toMatchObject({ ok: true, value: { prefix: 'FIX' } })
+
+    const listed = await callRemote<{ ok: true; value: { items: { identifier: string }[] } }>(
+      rpc, 'taskboard/listIssues', { input: { workspaceId: 'fx-ws-fixture' } })
+    expect(listed.value.items.map(issue => issue.identifier)).toEqual(['FIX-1', 'FIX-2', 'FIX-3'])
+
+    const created = await callRemote<{ ok: true; value: { id: string; version: number } }>(
+      rpc, 'taskboard/createIssue', { input: { workspaceId: 'fx-ws-fixture', title: 'Exercise fixture' } })
+    const updated = await callRemote<{ ok: true; value: { title: string; version: number } }>(
+      rpc, 'taskboard/updateIssue', {
+        input: {
+          reference: created.value.id,
+          expectedVersion: created.value.version,
+          title: 'Exercise fixture mutation',
+          actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' },
+        },
+      })
+    expect(updated.value).toMatchObject({ title: 'Exercise fixture mutation', version: 2 })
+  })
+})

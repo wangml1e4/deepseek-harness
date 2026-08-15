@@ -279,6 +279,24 @@ describe('workspace browser rows', () => {
     expect(screen.queryByRole('menu')).toBeNull()
   })
 
+  it('renders a plugin action inside a real Workspace row without toggling the group', () => {
+    const onToggle = vi.fn()
+    const onTaskboard = vi.fn()
+    const group: GroupNode = {
+      key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    render(<ProjectRowItem
+      group={group} onToggle={onToggle} onCreate={vi.fn()} t={t}
+      extraActions={<button type="button" onClick={onTaskboard}>Taskboard</button>}
+    />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Taskboard' }))
+
+    expect(onTaskboard).toHaveBeenCalledOnce()
+    expect(onToggle).not.toHaveBeenCalled()
+  })
+
   it('workspace hover card shows its details and copies the full directory path', async () => {
     vi.useFakeTimers()
     const writeText = vi.fn(async () => {})

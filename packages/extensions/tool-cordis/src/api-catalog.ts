@@ -2710,6 +2710,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [],
   },
   {
+    name: 'taskboard/changed',
+    mode: 'emit',
+    signature: '\'taskboard/changed\'(workspaceId: WorkspaceId): void',
+    summary: 'A durable Taskboard mutation committed for one Workspace.',
+    description: 'A durable Taskboard mutation committed for one Workspace. Observer failures are contained and cannot veto the committed mutation.',
+    parameters: [{ name: 'workspaceId', description: 'Workspace whose Taskboard projection changed.' }],
+  },
+  {
     name: 'tools/change',
     mode: 'emit',
     signature: '\'tools/change\'(): void',

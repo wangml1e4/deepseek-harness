@@ -34,6 +34,66 @@ async function mount(path: string, config: Omit<Config, 'path'> = { journalMode:
 }
 
 describe('SQLite Taskboard service', () => {
+  it('contains synchronous and asynchronous Taskboard observers after commit', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000031')
+    const mounted = await mount(path)
+    const changed: string[] = []
+    const warnings: string[] = []
+    mounted.ctx.logger.warn = ((message: unknown) => { warnings.push(String(message)) }) as typeof mounted.ctx.logger.warn
+    mounted.ctx.on('taskboard/changed', () => { throw new Error('sync observer') })
+    mounted.ctx.on('taskboard/changed', () => Promise.reject(new Error('async observer')) as never)
+    mounted.ctx.on('taskboard/changed', (id) => { changed.push(id) })
+    try {
+      await expect(mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Contained Board' }))
+        .resolves.toMatchObject({ workspaceId })
+      await Promise.resolve()
+      expect(changed).toEqual([workspaceId])
+      expect(warnings).toEqual([
+        'taskboard/changed listener threw: Error: sync observer',
+        'taskboard/changed listener rejected: Error: async observer',
+      ])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
+  it('publishes successful durable changes by owning Workspace without reporting reads or failed writes', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000030')
+    const mounted = await mount(path)
+    const changed: string[] = []
+    mounted.ctx.on('taskboard/changed', (id) => { changed.push(id) })
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Live Board' })
+      await mounted.ctx.taskboard.getWorkspace(workspaceId)
+      await mounted.ctx.taskboard.listIssues({ workspaceId })
+      const created = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Visible work' })
+      const updated = await mounted.ctx.taskboard.updateIssue({
+        reference: created.id,
+        status: 'todo',
+        expectedVersion: created.version,
+        actor,
+      })
+      await expect(mounted.ctx.taskboard.updateIssue({
+        reference: created.id,
+        status: 'done',
+        expectedVersion: created.version,
+        actor,
+      })).rejects.toMatchObject({ code: 'version_conflict' })
+      await mounted.ctx.taskboard.addComment({ reference: created.id, body: 'Live note', actor })
+      await mounted.ctx.taskboard.archiveIssue({
+        reference: created.id,
+        expectedVersion: updated.version,
+        actor,
+      })
+
+      expect(changed).toEqual([workspaceId, workspaceId, workspaceId, workspaceId, workspaceId])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
   it('creates the first backlog Issue and retrieves it after reopening the store', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000001')

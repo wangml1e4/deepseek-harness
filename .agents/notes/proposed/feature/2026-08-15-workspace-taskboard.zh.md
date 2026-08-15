@@ -106,9 +106,9 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 
 ## 当前实现
 
-前两个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行和内置 `manage-taskboard` skill。标准 Web Host 会把这些角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录和依赖关系；尚未暴露附件、Client 实时事件、Patrol 状态、开发上下文或审查证据。
+前三个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行、内置 `manage-taskboard` skill，以及浏览器 Dashboard、Board、List 和 Issue 详情。标准 Web Host 会把这些角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录和依赖关系。写操作成功后会发布经过错误隔离的 `taskboard/changed` 事件，让当前浏览器投影无需轮询即可刷新。
 
-浏览器 Taskboard UI、Gantt 渲染器、Patrol 调度器、Git 与 Session 执行、独立 Reviewer、人工审查控件和恢复层仍处于提案状态。这些能力尚未交付，不会削弱当前 Service 的禁止删除、乐观版本、历史只追加和 Workspace 身份规则。
+浏览器 UI 从每个 Workspace 行进入，以所选 Taskboard 替换对话中间区域，并复用现有右侧详情栏。其视图与筛选偏好保存在浏览器存储中，权威 Issue 数据仍由 Host 持有。Gantt 渲染器、附件、Patrol 调度器、Git 与 Session 执行、独立 Reviewer、人工审查控件和恢复层仍处于提案状态。这些能力尚未交付，不会削弱当前 Service 的禁止删除、乐观版本、历史只追加和 Workspace 身份规则。
 
 ## 考虑过的替代方案
 

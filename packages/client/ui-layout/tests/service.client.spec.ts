@@ -55,4 +55,55 @@ describe('LayoutController', () => {
     expect(stale.toggleSidebar).not.toHaveBeenCalled()
     expect(fresh.toggleSidebar).toHaveBeenCalledTimes(1)
   })
+
+  it('publishes an alternate shell surface and returns to conversation', () => {
+    const service = new LayoutController()
+    const panels = fakePanels()
+    const notified = vi.fn()
+    service.attachPanels(panels)
+    const unsubscribe = service.subscribe(notified)
+
+    service.openSurface({ id: 'taskboard', context: 'workspace-1' })
+
+    expect(service.getSnapshot()).toEqual({ id: 'taskboard', context: 'workspace-1' })
+    expect(panels.closeDetails).toHaveBeenCalledTimes(1)
+    expect(notified).toHaveBeenCalledTimes(1)
+
+    service.showConversation()
+
+    expect(service.getSnapshot()).toBeNull()
+    expect(panels.closeDetails).toHaveBeenCalledTimes(2)
+    expect(notified).toHaveBeenCalledTimes(2)
+    unsubscribe()
+  })
+
+  it('does not republish an identical shell surface', () => {
+    const service = new LayoutController()
+    const panels = fakePanels()
+    const notified = vi.fn()
+    service.attachPanels(panels)
+    service.subscribe(notified)
+
+    service.openSurface({ id: 'taskboard', context: 'workspace-1' })
+    service.openSurface({ id: 'taskboard', context: 'workspace-1' })
+
+    expect(notified).toHaveBeenCalledTimes(1)
+    expect(panels.closeDetails).toHaveBeenCalledTimes(1)
+  })
+
+  it('contains surface observer failures and keeps notifying subscribers', () => {
+    const service = new LayoutController()
+    const panels = fakePanels()
+    const notified = vi.fn()
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    service.attachPanels(panels)
+    service.subscribe(() => { throw new Error('surface observer') })
+    service.subscribe(notified)
+
+    expect(() => { service.openSurface({ id: 'taskboard', context: 'workspace-1' }) }).not.toThrow()
+
+    expect(notified).toHaveBeenCalledOnce()
+    expect(log).toHaveBeenCalledWith('[ui-layout] surface listener threw:', expect.any(Error))
+    log.mockRestore()
+  })
 })
