@@ -14,7 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { assertUsableApiKey, LlmError, resolveRetryPolicy, RetryPolicySchema } from '@deepseek-ai/dsh-llm'
-import type { RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
+import type { AdapterRegistrationHandle, RetryPolicyConfig } from '@deepseek-ai/dsh-llm'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { launchEnvironmentOf, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { deepEqualJson, installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
@@ -60,6 +60,8 @@ const DEFAULT_MODELS: DeepSeekCatalogModel[] = [
  * reasoning effort resolves to `high`.
  */
 export interface Config {
+  /** Whether this provider route registers (default `true`). */
+  enabled?: boolean
   /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
   apiKeyEnv?: string
   /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
@@ -89,6 +91,7 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 })
 
 export const Config: z<Config> = z.object({
+  enabled: z.boolean().default(true),
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string(),
   thinking: z.union(['enabled', 'disabled']),
@@ -107,12 +110,15 @@ export const PUBLIC_BASE_URL = 'https://api.deepseek.com'
 const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
 
 /**
- * One resolution's complete request facts. Connection and credential facts
- * are one value on purpose: a snapshot the resolver rejects keeps the whole
- * previous generation, so a request can never pair a stale endpoint with a
- * newer key.
+ * One resolution's complete route and request facts. Activation, connection,
+ * and credential facts are one value on purpose: a snapshot the resolver
+ * rejects keeps the whole previous generation, so it cannot change route
+ * registration or pair a stale endpoint with a newer key.
  */
-export type ResolvedDeepSeekOptions = DeepSeekConnectionOptions
+export interface ResolvedDeepSeekOptions extends DeepSeekConnectionOptions {
+  /** Whether the provider route registers. */
+  enabled: boolean
+}
 
 /** Resolve, validate, and detach the advisory model catalog. */
 function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): DeepSeekCatalogModel[] {
@@ -181,6 +187,7 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
     )
   }
   return {
+    enabled: config.enabled ?? true,
     apiKeyEnv: credentialRef(config.apiKeyEnv ?? DEFAULT_API_KEY_ENV),
     baseURL: config.baseURL
       ?? environment?.get(BASE_URL_ENV)?.value
@@ -222,7 +229,7 @@ export function apply(ctx: Context, config: Config): void {
   }
   options()
 
-  const resolveApiKey = async (connection: ResolvedDeepSeekOptions): Promise<string> => {
+  const resolveApiKey = async (connection: DeepSeekConnectionOptions): Promise<string> => {
     // Every credential fact comes from the caller's snapshot, so a rejected
     // settings generation cannot leak its key onto the previous endpoint.
     const ref = connection.apiKeyEnv
@@ -249,15 +256,34 @@ export function apply(ctx: Context, config: Config): void {
   const resolveUserId = (): AnonymousUserId => userId ??= getOrCreateAnonymousUserId()
   const adapter = new DeepSeekAdapter({ options, resolveApiKey, resolveUserId })
   ctx.llm.registerConfigurableProviders([
-    { provider: PROVIDER, displayName: 'DeepSeek', settingsNs: NS, settingsPath: [] },
+    {
+      provider: PROVIDER,
+      displayName: 'DeepSeek',
+      settingsNs: NS,
+      settingsPath: [],
+      enabledPath: ['enabled'],
+    },
   ])
   // Route effects bind to this apply fiber via the stable `ctx` reference,
-  // even when a swap runs inside the scoped settings callback below.
-  const registration = ctx.llm.registerAdapter([PROVIDER], adapter)
-  let registeredPolicy = options().retryPolicy
+  // even when a settings callback disables and later re-enables the route.
+  let registration: AdapterRegistrationHandle | undefined
+  let registeredPolicy: ResolvedDeepSeekOptions['retryPolicy'] | undefined
   const ensureRegistrationFacts = (): void => {
-    const policy = options().retryPolicy
-    if (deepEqualJson(policy, registeredPolicy)) return
+    const facts = options()
+    if (!facts.enabled) {
+      if (registeredPolicy !== undefined) {
+        registration?.replace([])
+        registeredPolicy = undefined
+      }
+      return
+    }
+    const policy = facts.retryPolicy
+    if (registration === undefined) {
+      registration = ctx.llm.registerAdapter([PROVIDER], adapter)
+      registeredPolicy = policy
+      return
+    }
+    if (registeredPolicy !== undefined && deepEqualJson(policy, registeredPolicy)) return
     // The registry captures the retry policy at registration, so it is the one
     // fact per-request resolution cannot refresh. `replace` re-reads it in one
     // synchronous registry section: disposing and re-registering instead would
@@ -266,6 +292,7 @@ export function apply(ctx: Context, config: Config): void {
     registration.replace([PROVIDER])
     registeredPolicy = policy
   }
+  ensureRegistrationFacts()
 
   installSettingsSection(ctx, NS, Config, config, {
     setSource: (source) => {

@@ -1,0 +1,16 @@
+- list "Token 用量":
+  - listitem:
+    - strong: "2760"
+    - text: 累计 Token 数
+  - listitem:
+    - strong: "2500"
+    - text: 峰值 Token 数
+  - listitem:
+    - strong: {{duration}}
+    - text: 最长工作时间
+  - listitem:
+    - strong: 3 天
+    - text: 当前连续天数
+  - listitem:
+    - strong: 3 天
+    - text: 最长连续天数

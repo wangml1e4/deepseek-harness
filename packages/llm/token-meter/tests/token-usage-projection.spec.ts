@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ProjectionCheckpoint } from '@deepseek-ai/dsh-session-projection'
 import { Context } from '@deepseek-ai/cordis'
 import { createMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
@@ -227,12 +228,15 @@ describe('tokenUsage session projection', () => {
     const { ctx, session, meterFiber } = await harness()
     startStep(session, 1, 1)
     usageChunk(session, { inputTokens: 8, outputTokens: 2, cacheReadTokens: 5 }, 1, 1)
-    const checkpoint = JSON.parse(JSON.stringify(
+    const encoded: unknown = JSON.parse(JSON.stringify(
       ctx.sessionProjections.checkpoint(session),
-    )) as ReturnType<typeof ctx.sessionProjections.checkpoint>
+    ))
+    if (encoded === null || typeof encoded !== 'object') throw new Error('checkpoint JSON is not an object')
+    const checkpoint = encoded as ProjectionCheckpoint
 
     await meterFiber.dispose()
     expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('tokenUsage')
+    expect(ctx.sessionProjections.snapshot(session).values).not.toHaveProperty('tokenActivity')
 
     await ctx.plugin(TokenMeter)
     expect(ctx.sessionProjections.viewCheckpoint(checkpoint).tokenUsage).toEqual({
@@ -241,6 +245,16 @@ describe('tokenUsage session projection', () => {
       cacheReadTokens: 5,
       cacheWriteTokens: 0,
     })
+    const restoredActivity = ctx.sessionProjections.viewCheckpoint(checkpoint).tokenActivity
+    if (restoredActivity === undefined) throw new Error('tokenActivity checkpoint did not restore')
+    expect(restoredActivity.days).toHaveLength(1)
+    expect(restoredActivity.days[0]).toMatchObject({
+      uncachedInputTokens: 8,
+      outputTokens: 2,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 0,
+    })
+    expect(restoredActivity.longestCompletedTurnMs).toBe(0)
   })
 })
 

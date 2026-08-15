@@ -1737,6 +1737,109 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'taskboard',
+    summary: 'Durable Workspace Taskboard service implemented by a configured Provider.',
+    description: 'Durable Workspace Taskboard service implemented by a configured Provider.',
+    methods: [
+      {
+        signature: 'abstract ensureWorkspace(input: EnsureWorkspaceInput): Promise<WorkspaceTaskboard>',
+        description: 'Ensure one Workspace\'s implicit Taskboard exists.',
+        parameters: [{ name: 'input', description: 'Workspace identity and current title.' }],
+        returns: 'the existing or newly durable Taskboard metadata.',
+      },
+      {
+        signature: 'abstract getWorkspace(workspaceId: EnsureWorkspaceInput[\'workspaceId\']): Promise<WorkspaceTaskboard | undefined>',
+        description: 'Look up one Workspace\'s implicit Taskboard.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace identity.' }],
+        returns: 'the Taskboard metadata, or undefined when it has not been ensured.',
+      },
+      {
+        signature: 'abstract setWorkspacePrefix(input: SetWorkspacePrefixInput): Promise<WorkspaceTaskboard>',
+        description: 'Change a Taskboard prefix before its first Issue is created.',
+        parameters: [{ name: 'input', description: 'Workspace, new prefix, and caller-observed version.' }],
+        returns: 'the updated Taskboard metadata.',
+      },
+      {
+        signature: 'abstract createIssue(input: CreateIssueInput): Promise<Issue>',
+        description: 'Create one Issue in a Workspace Taskboard.',
+        parameters: [{ name: 'input', description: 'Workspace and Issue title.' }],
+        returns: 'the durable Issue with defaults resolved.',
+      },
+      {
+        signature: 'abstract listIssues(input: ListIssuesInput): Promise<readonly Issue[]>',
+        description: 'List active Issues in their user-controlled order.',
+        parameters: [{ name: 'input', description: 'Workspace and optional status filter.' }],
+        returns: 'matching Issues ordered within their status columns.',
+      },
+      {
+        signature: 'abstract updateIssue(input: UpdateIssueInput): Promise<Issue>',
+        description: 'Update one Issue when the caller still holds its current version.',
+        parameters: [{ name: 'input', description: 'Issue lookup, replacement status, and caller-observed version.' }],
+        returns: 'the updated Issue.',
+      },
+      {
+        signature: 'abstract archiveIssue(input: VersionedIssueInput): Promise<Issue>',
+        description: 'Hide one Issue from active views without deleting it.',
+        parameters: [{ name: 'input', description: 'Issue lookup and caller-observed version.' }],
+        returns: 'the archived Issue.',
+      },
+      {
+        signature: 'abstract restoreIssue(input: VersionedIssueInput): Promise<Issue>',
+        description: 'Restore one archived Issue to active views.',
+        parameters: [{ name: 'input', description: 'Issue lookup and caller-observed version.' }],
+        returns: 'the restored Issue.',
+      },
+      {
+        signature: 'abstract moveIssue(input: MoveIssueInput): Promise<Issue>',
+        description: 'Transfer one Issue to another Workspace without changing its identity; the current Workspace is a no-op.',
+        parameters: [{ name: 'input', description: 'Issue lookup, destination Workspace, and caller-observed version.' }],
+        returns: 'the moved Issue.',
+      },
+      {
+        signature: 'abstract addComment(input: AddCommentInput): Promise<Comment>',
+        description: 'Append one attributed Comment to an Issue.',
+        parameters: [{ name: 'input', description: 'Issue lookup, body, and author.' }],
+        returns: 'the durable Comment.',
+      },
+      {
+        signature: 'abstract listComments(reference: IssueReference): Promise<readonly Comment[]>',
+        description: 'List one Issue\'s Comments in append order.',
+        parameters: [{ name: 'reference', description: 'Stable Issue lookup.' }],
+        returns: 'append-only Comments in chronological order.',
+      },
+      {
+        signature: 'abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>',
+        description: 'List one Issue\'s Activity entries in append order.',
+        parameters: [{ name: 'reference', description: 'Stable Issue lookup.' }],
+        returns: 'append-only field changes in chronological order.',
+      },
+      {
+        signature: 'abstract addRelation(input: AddIssueRelationInput): Promise<IssueRelationMutation>',
+        description: 'Add one directed dependency between two Issues.',
+        parameters: [{ name: 'input', description: 'Anchor, direction, related Issue, version, and actor.' }],
+        returns: 'the updated anchor Issue and relation view.',
+      },
+      {
+        signature: 'abstract listRelations(reference: IssueReference): Promise<readonly IssueRelation[]>',
+        description: 'List dependency relations from one Issue\'s perspective.',
+        parameters: [{ name: 'reference', description: 'Stable Issue lookup.' }],
+        returns: 'relation views in append order.',
+      },
+      {
+        signature: 'abstract removeRelation(input: RemoveIssueRelationInput): Promise<Issue>',
+        description: 'Remove one dependency while retaining its Activity history.',
+        parameters: [{ name: 'input', description: 'Anchor Issue, relation id, version, and actor.' }],
+        returns: 'the updated anchor Issue.',
+      },
+      {
+        signature: 'abstract getIssue(reference: IssueReference): Promise<Issue | undefined>',
+        description: 'Look up one Issue by opaque id or human-readable identifier.',
+        parameters: [{ name: 'reference', description: 'Stable Issue reference.' }],
+        returns: 'the Issue, or undefined when absent.',
+      },
+    ],
+  },
+  {
     key: 'terminals',
     summary: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
     description: 'In-process registry for replaceable PTY backends and exact-Agent sessions.',
@@ -2610,8 +2713,32 @@ export const EVENT_API: readonly EventApiEntry[] = [
 /** Shapes of every exported type the Service and Event signatures reference (transitively), sorted by name. */
 export const TYPE_API: readonly TypeApiEntry[] = [
   {
+    name: 'Activity',
+    declaration: 'export interface Activity {\n    readonly id: ActivityId;\n    readonly issueId: IssueId;\n    readonly actor: TaskboardActor;\n    readonly changes: readonly ActivityChange[];\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'ActivityChange',
+    declaration: 'export interface ActivityChange {\n    readonly field: string;\n    readonly before: ActivityValue;\n    readonly after: ActivityValue;\n}',
+  },
+  {
+    name: 'ActivityId',
+    declaration: 'export type ActivityId = Branded<\'ActivityId\'>;',
+  },
+  {
+    name: 'ActivityValue',
+    declaration: 'export type ActivityValue = null | boolean | number | string | readonly ActivityValue[] | {\n    readonly [key: string]: ActivityValue;\n};',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
+  },
+  {
+    name: 'AddCommentInput',
+    declaration: 'export interface AddCommentInput {\n    readonly reference: IssueReference;\n    readonly body: string;\n    readonly actor: TaskboardActor;\n}',
+  },
+  {
+    name: 'AddIssueRelationInput',
+    declaration: 'export interface AddIssueRelationInput extends VersionedIssueInput {\n    readonly type: IssueRelationType;\n    readonly relatedReference: IssueReference;\n}',
   },
   {
     name: 'Agent',
@@ -2806,6 +2933,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type CommandResult = {\n    readonly kind: \'success\';\n    readonly text?: string;\n    readonly sourceEventSeq?: number;\n} | {\n    readonly kind: \'error\';\n    readonly text: string;\n};',
   },
   {
+    name: 'Comment',
+    declaration: 'export interface Comment {\n    readonly id: CommentId;\n    readonly issueId: IssueId;\n    readonly body: string;\n    readonly actor: TaskboardActor;\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'CommentId',
+    declaration: 'export type CommentId = Branded<\'CommentId\'>;',
+  },
+  {
     name: 'CompactionAgentContext',
     declaration: 'export interface CompactionAgentContext {\n    session: Session;\n    options: {\n        provider?: string;\n        model?: string;\n    };\n}',
   },
@@ -2908,6 +3043,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CreateGoalResult',
     declaration: 'export interface CreateGoalResult {\n    readonly ref: GoalRef;\n}',
+  },
+  {
+    name: 'CreateIssueInput',
+    declaration: 'export interface CreateIssueInput {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n    readonly description?: string;\n    readonly status?: IssueStatus;\n    readonly priority?: IssuePriority;\n    readonly labels?: readonly string[];\n    readonly assignee?: IssueAssignee;\n    readonly startDate?: string;\n    readonly dueDate?: string;\n}',
   },
   {
     name: 'CreateSessionOptions',
@@ -3024,6 +3163,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'EditGoalRequest',
     declaration: 'export interface EditGoalRequest {\n    readonly objective?: string;\n    readonly maxGoalRounds?: number;\n}',
+  },
+  {
+    name: 'EnsureWorkspaceInput',
+    declaration: 'export interface EnsureWorkspaceInput {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n}',
   },
   {
     name: 'EpochHeader',
@@ -3182,6 +3325,46 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface InvokeRemoteRequest {\n    readonly namespace: string;\n    readonly method: string;\n    readonly args: Readonly<Record<string, unknown>>;\n    readonly signal?: AbortSignal;\n}',
   },
   {
+    name: 'Issue',
+    declaration: 'export interface Issue {\n    readonly id: IssueId;\n    readonly identifier: IssueIdentifier;\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n    readonly description: string;\n    readonly status: IssueStatus;\n    readonly priority: IssuePriority;\n    readonly labels: readonly string[];\n    readonly assignee: IssueAssignee;\n    readonly startDate: string | null;\n    readonly dueDate: string | null;\n    readonly sortOrder: number;\n    readonly version: number;\n    readonly archivedAt: string | null;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'IssueAssignee',
+    declaration: 'export type IssueAssignee = \'unassigned\' | \'user\' | \'patrol_agent\';',
+  },
+  {
+    name: 'IssueId',
+    declaration: 'export type IssueId = Branded<\'IssueId\'>;',
+  },
+  {
+    name: 'IssueIdentifier',
+    declaration: 'export type IssueIdentifier = Branded<\'IssueIdentifier\'>;',
+  },
+  {
+    name: 'IssuePriority',
+    declaration: 'export type IssuePriority = \'none\' | \'urgent\' | \'high\' | \'medium\' | \'low\';',
+  },
+  {
+    name: 'IssueReference',
+    declaration: 'export type IssueReference = IssueId | IssueIdentifier;',
+  },
+  {
+    name: 'IssueRelation',
+    declaration: 'export interface IssueRelation {\n    readonly id: RelationId;\n    readonly type: IssueRelationType;\n    readonly issueId: IssueId;\n    readonly relatedIssueId: IssueId;\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'IssueRelationMutation',
+    declaration: 'export interface IssueRelationMutation {\n    readonly issue: Issue;\n    readonly relation: IssueRelation;\n}',
+  },
+  {
+    name: 'IssueRelationType',
+    declaration: 'export type IssueRelationType = \'blocks\' | \'blocked_by\';',
+  },
+  {
+    name: 'IssueStatus',
+    declaration: 'export type IssueStatus = \'backlog\' | \'todo\' | \'in_progress\' | \'in_review\' | \'blocked\' | \'done\' | \'canceled\';',
+  },
+  {
     name: 'JobDoneListener',
     declaration: 'export type JobDoneListener = (snapshot: JobSnapshot, owner: Agent | undefined) => void | PromiseLike<void>;',
   },
@@ -3262,6 +3445,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface KvUnitDescriptor {\n    readonly name: string;\n    readonly version: number;\n    readonly tables: readonly string[];\n    readonly hasGlobal: boolean;\n}',
   },
   {
+    name: 'ListIssuesInput',
+    declaration: 'export interface ListIssuesInput {\n    readonly workspaceId: WorkspaceId;\n    readonly status?: IssueStatus;\n    readonly priority?: IssuePriority;\n    readonly label?: string;\n    readonly assignee?: IssueAssignee;\n    readonly startDate?: string;\n    readonly dueDate?: string;\n    readonly query?: string;\n    readonly archived?: \'exclude\' | \'only\' | \'include\';\n}',
+  },
+  {
     name: 'LlmAdapter',
     declaration: 'export abstract class LlmAdapter {\n    providerInfo(provider: string): LlmProviderInfo;\n    providerRetryPolicy(_provider: string): ResolvedRetryPolicy | undefined;\n    listModels(_provider: string): Promise<readonly LlmModelInfo[]>;\n    resolveModel(provider: string, model: string, _signal?: AbortSignal): Promise<LlmResolvedModelInfo>;\n    abstract stream(options: GenerateOptions): AsyncIterable<StreamChunk>;\n}',
   },
@@ -3275,7 +3462,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'LlmConfigurableProvider',
-    declaration: 'export interface LlmConfigurableProvider {\n    provider: string;\n    displayName: string;\n    settingsNs: string;\n    settingsPath: readonly string[];\n    declared?: boolean;\n}',
+    declaration: 'export interface LlmConfigurableProvider {\n    provider: string;\n    displayName: string;\n    settingsNs: string;\n    settingsPath: readonly string[];\n    enabledPath?: readonly string[];\n    declared?: boolean;\n}',
   },
   {
     name: 'LlmDiscoveredModel',
@@ -3466,6 +3653,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ModelModalityMap {\n    text: \'text\';\n    image: \'image\';\n}',
   },
   {
+    name: 'MoveIssueInput',
+    declaration: 'export interface MoveIssueInput extends VersionedIssueInput {\n    readonly targetWorkspaceId: WorkspaceId;\n}',
+  },
+  {
     name: 'ObjectJsonSchema',
     declaration: 'export type ObjectJsonSchema = JsonSchemaNode & {\n    type: \'object\';\n};',
   },
@@ -3576,6 +3767,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RedactedSecret',
     declaration: 'export interface RedactedSecret {\n    path: string[];\n    set: boolean;\n}',
+  },
+  {
+    name: 'RelationId',
+    declaration: 'export type RelationId = Branded<\'RelationId\'>;',
+  },
+  {
+    name: 'RemoveIssueRelationInput',
+    declaration: 'export interface RemoveIssueRelationInput extends VersionedIssueInput {\n    readonly relationId: RelationId;\n}',
   },
   {
     name: 'RequestContext',
@@ -3982,6 +4181,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SettingsUpdateSource = \'update\' | \'provider\';',
   },
   {
+    name: 'SetWorkspacePrefixInput',
+    declaration: 'export interface SetWorkspacePrefixInput {\n    readonly workspaceId: WorkspaceId;\n    readonly prefix: string;\n    readonly expectedVersion: number;\n}',
+  },
+  {
     name: 'ShellExecRequest',
     declaration: 'export interface ShellExecRequest {\n    command: string;\n    workdir?: string | undefined;\n    timeoutMs?: number | undefined;\n    stdoutMaxBytes?: number | undefined;\n    signal?: AbortSignal | undefined;\n    stdin?: string | undefined;\n    env?: Record<string, string> | undefined;\n    dshEnv?: DshEnvironment | undefined;\n    sandboxPolicy?: SandboxExecutionPolicy | undefined;\n}',
   },
@@ -4240,6 +4443,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TableValueOf',
     declaration: 'export type TableValueOf<S extends DomainSpec, N extends keyof S[\'tables\']> = S[\'tables\'][N] extends DomainTableSpec<string, infer V> ? V : never;',
+  },
+  {
+    name: 'TaskboardActor',
+    declaration: 'export interface TaskboardActor {\n    readonly type: \'user\' | \'patrol_agent\' | \'reviewer\' | \'system\';\n    readonly id: TaskboardActorId;\n    readonly name: string;\n    readonly avatarUrl?: string;\n}',
+  },
+  {
+    name: 'TaskboardActorId',
+    declaration: 'export type TaskboardActorId = Branded<\'TaskboardActorId\'>;',
   },
   {
     name: 'TerminalBackend',
@@ -4522,12 +4733,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TypertTypeModel {\n    readonly name: string;\n    readonly declaration: string;\n}',
   },
   {
+    name: 'UpdateIssueInput',
+    declaration: 'export interface UpdateIssueInput {\n    readonly reference: IssueReference;\n    readonly title?: string;\n    readonly description?: string;\n    readonly status?: IssueStatus;\n    readonly priority?: IssuePriority;\n    readonly labels?: readonly string[];\n    readonly assignee?: IssueAssignee;\n    readonly startDate?: string | null;\n    readonly dueDate?: string | null;\n    readonly sortOrder?: number;\n    readonly expectedVersion: number;\n    readonly reason?: string;\n    readonly actor: TaskboardActor;\n}',
+  },
+  {
     name: 'UserMessage',
     declaration: 'export interface UserMessage extends Message {\n    readonly role: \'user\';\n}',
   },
   {
     name: 'UserQuestionProvider',
     declaration: 'export interface UserQuestionProvider {\n    ask(request: AskUserQuestionRequest): Promise<AskUserQuestionAnswer>;\n}',
+  },
+  {
+    name: 'VersionedIssueInput',
+    declaration: 'export interface VersionedIssueInput {\n    readonly reference: IssueReference;\n    readonly expectedVersion: number;\n    readonly actor: TaskboardActor;\n}',
   },
   {
     name: 'WebBootEntry',
@@ -4644,6 +4863,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkflowStopReason',
     declaration: 'export type WorkflowStopReason = \'completed\' | \'cancelled\' | \'error\';',
+  },
+  {
+    name: 'WorkspaceTaskboard',
+    declaration: 'export interface WorkspaceTaskboard {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n    readonly prefix: string;\n    readonly version: number;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
 ]
 

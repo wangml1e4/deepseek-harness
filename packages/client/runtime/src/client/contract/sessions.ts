@@ -11,6 +11,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {
   RpcResult, SessionId, SubagentAddress,
 } from '@deepseek-ai/dsh-api-remotes/client'
+import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import type { HostObservable, SessionMaybeProvideInfo } from '@deepseek-ai/dsh-client-ui-slots'
 import type { AgentContext } from '../agents/scope.ts'
 import type { SessionSearchResultItem } from '../sessions/manager.ts'
@@ -84,6 +85,21 @@ export interface ISessions {
     query: string,
     signal: AbortSignal,
   ): Promise<RpcResult<{ items: SessionSearchResultItem[]; hasMore: boolean }>>
+  /**
+   * Refresh one projection key for every listed Session named by the caller
+   * from the Host's exact projection-only tail baseline, even when the list
+   * cache already carried that key. Calls are serialized and seed the shared
+   * higher-seq-wins stores without unbounded persistence I/O.
+   * @param key - registered projection key the consumer needs.
+   * @param sessionIds - visible list identities to refresh, de-duplicated by the service.
+   * @param signal - optional cancellation when the consuming surface unmounts.
+   * @returns listed identities that still lack the requested key after loading.
+   */
+  hydrateProjection(
+    key: Extract<keyof SessionProjectionMap, string>,
+    sessionIds: readonly SessionId[],
+    signal?: AbortSignal,
+  ): Promise<{ failed: readonly SessionId[] }>
   /**
    * Fork a session from a completed-turn prefix of the source; on resolution
    * the child is in the list store and `open()` can target it.

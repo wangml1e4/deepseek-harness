@@ -21,7 +21,7 @@ import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import type { MuxFrame, RpcRequest } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { RpcId } from '@deepseek-ai/dsh-host-apiproxy/api/rpc'
-import { createApiProxy } from '@deepseek-ai/dsh-host-apiproxy'
+import { createApiProxy, toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 
 declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
@@ -72,6 +72,87 @@ function seedMessages(session: Session, count: number): void {
 const api = (ctx: Context) => createApiProxy(ctx, { defaultModelSelection: () => ({ provider: 'p', model: 'm' }), cwd: '/tmp' })
 
 describe('session.history projections block', () => {
+  it('serves an attached projection-only cut without transcript events', async () => {
+    const { ctx, session } = await harness(true)
+    ctx.sessionProjections.register(lastUserUnit())
+    seedMessages(session, 2)
+    const response = await api(ctx).sessions.history(request({
+      sessionId: session.id,
+      projectionsOnly: true,
+    }))
+    if (!response.result.ok) throw new Error('projection-only history failed')
+    expect(response.result.value.events).toEqual([])
+    expect(response.result.value.hasMore).toBe(false)
+    expect(response.result.value.projections?.values['test/last-user']).toEqual({ text: 'm1' })
+  })
+
+  it('uses the cold projection-cache ladder for a projection-only cut', async () => {
+    const { ctx } = await harness(true)
+    const coldId = SessionId('projection-only-cold')
+    const coldSnapshot = vi.fn(async () => ({
+      asOfSeq: 9,
+      values: { 'test/last-user': { text: 'cold exact' } },
+    }))
+    ctx.provide('sessionProjectionCache', { coldSnapshot } as never)
+    const response = await api(ctx).sessions.history(request({
+      sessionId: coldId,
+      projectionsOnly: true,
+    }))
+    if (!response.result.ok) throw new Error('cold projection-only history failed')
+    expect(coldSnapshot).toHaveBeenCalledWith(coldId, undefined)
+    expect(response.result.value).toEqual({
+      events: [],
+      hasMore: false,
+      projections: { asOfSeq: 9, values: { 'test/last-user': { text: 'cold exact' } } },
+    })
+  })
+
+  it('forwards Fetch cancellation to the projection-only cold read', async () => {
+    const { ctx } = await harness(true)
+    const coldId = SessionId('projection-only-cancelled')
+    const started = Promise.withResolvers<AbortSignal | undefined>()
+    ctx.provide('sessionProjectionCache', {
+      coldSnapshot: (_sessionId: SessionId, signal?: AbortSignal) => {
+        started.resolve(signal)
+        if (signal === undefined) {
+          return Promise.resolve({ asOfSeq: 0, values: {} })
+        }
+        return new Promise((_resolve, reject) => {
+          const reason = (): Error => signal.reason instanceof Error
+            ? signal.reason
+            : new Error('request aborted')
+          if (signal.aborted) reject(reason())
+          else signal.addEventListener('abort', () => { reject(reason()) }, { once: true })
+        })
+      },
+    } as never)
+    const controller = new AbortController()
+    const pending = toFetchHandler(api(ctx)).fetch(new Request(
+      'http://dsh.internal/api/session.history',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: 'projection-only-cancelled',
+          method: 'session.history',
+          payload: { sessionId: coldId, projectionsOnly: true },
+        }),
+        signal: controller.signal,
+      },
+    ))
+    const handlerSignal = await started.promise
+
+    controller.abort(new Error('settings page closed'))
+    const response = await pending
+
+    expect(handlerSignal).toBeInstanceOf(AbortSignal)
+    expect(handlerSignal?.aborted).toBe(true)
+    expect(await response.json()).toMatchObject({
+      result: { ok: false, error: { code: 'cancelled' } },
+    })
+  })
+
   it('serves the unit value on the tail page with asOfSeq = last event seq', async () => {
     const { ctx, session } = await harness(true)
     ctx.sessionProjections.register(lastUserUnit())

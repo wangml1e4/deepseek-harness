@@ -17,6 +17,20 @@ export interface TokenUsageProjection {
   cacheWriteTokens: number
 }
 
+/** Provider-reported usage assigned to one deterministic natural-day key. */
+export interface TokenActivityDay extends TokenUsageProjection {
+  /** Calendar day in the admitting direct user's recorded zone, `YYYY-MM-DD`. */
+  date: string
+}
+
+/** Full-log token calendar and the longest durably successful turn. */
+export interface TokenActivityProjection {
+  /** Sparse non-zero daily usage rows in ascending calendar order. */
+  days: TokenActivityDay[]
+  /** Maximum matching `turn/start` → successful `turn/end` elapsed milliseconds. */
+  longestCompletedTurnMs: number
+}
+
 /**
  * Approximate context occupancy for a status display.
  *
@@ -69,6 +83,8 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   interface SessionProjectionMap {
     /** Provider-reported usage accumulated across the complete durable log. */
     tokenUsage: TokenUsageProjection
+    /** Provider usage by recorded natural day plus longest completed-turn duration. */
+    tokenActivity: TokenActivityProjection
     /** Newest request pressure paired with the newest known route capacity. */
     contextPressure: ContextPressureProjection
     /** Heuristic system/tools/message composition of the next request. */

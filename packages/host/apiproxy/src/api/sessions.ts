@@ -277,9 +277,22 @@ export interface SessionsApi {
    * loadOlder (the only beforeSeq path) is the only path that never needs one.
    * A deployment without the registry serves histories without the block.
    * Reading history uses an attached Session or persistence inspection and
-   * never resumes or publishes an Agent.
+   * never resumes or publishes an Agent. `projectionsOnly: true` is the
+   * explicit baseline-only path: it returns no events, reads an attached
+   * registry cut or the cold projection-cache ladder, and writes a rebuilt
+   * cold checkpoint back. It gives root list consumers an exact baseline
+   * without opening every Session and cannot be combined with pagination
+   * fields. The signal cancels persistence-backed cold projection reads.
+   * @param request - session identity plus optional pagination or the exclusive projection-only flag.
+   * @param signal - optional cancellation for persistence-backed cold reads.
+   * @returns the selected history page and optional exact projection baseline.
    */
-  history(request: RpcRequest<{ sessionId: SessionId; beforeSeq?: number; maxMessages?: number }>):
+  history(request: RpcRequest<{
+    sessionId: SessionId
+    beforeSeq?: number
+    maxMessages?: number
+    projectionsOnly?: true
+  }>, signal?: AbortSignal):
   Promise<RpcResponse<{ events: HistoryEntry[]; hasMore: boolean; projections?: SessionProjectionsBlock }>>
 
   /**

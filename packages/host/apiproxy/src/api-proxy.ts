@@ -2239,9 +2239,23 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
         return ok(request, { sessionId, ...createdPreset === undefined ? {} : { agentPreset: createdPreset } })
       },
 
-      async history(request) {
-        const { sessionId, beforeSeq, maxMessages } = request.payload
+      async history(request, signal) {
+        const { sessionId, beforeSeq, maxMessages, projectionsOnly } = request.payload
         try {
+          if (projectionsOnly === true) {
+            const attached = ctx.sessions.get(sessionId)
+            const projections = attached === undefined
+              ? await ctx.get('sessionProjectionCache')?.coldSnapshot(sessionId, signal)
+              : projectionsFor(ctx, attached)
+            if (projections === undefined) {
+              return err(request, {
+                code: 'internal',
+                message: 'projection baseline is unavailable: this deployment does not mount the projection cache',
+                details: {},
+              })
+            }
+            return ok(request, { events: [], hasMore: false, projections })
+          }
           const source = await historySourceFor(sessionId)
           // Both awaits happen BEFORE the cut. Ensuring the recorded
           // composition's standing mount is what registers its projection
@@ -2258,6 +2272,13 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             ...cut.projections === undefined ? {} : { projections: cut.projections },
           })
         } catch (error: unknown) {
+          if (signal?.aborted === true) {
+            return err(request, {
+              code: 'cancelled',
+              message: 'session history read was cancelled',
+              details: {},
+            })
+          }
           if (error instanceof SessionNotFound) {
             return err(request, { code: 'session-not-found', message: error.message, details: { sessionId } })
           }
@@ -3378,6 +3399,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
           displayName: entry.displayName,
           settingsNs: entry.settingsNs,
           settingsPath: [...entry.settingsPath],
+          ...entry.enabledPath === undefined ? {} : { enabledPath: [...entry.enabledPath] },
           active: active.has(entry.provider),
           ...entry.declared === undefined ? {} : { declared: entry.declared },
         }))

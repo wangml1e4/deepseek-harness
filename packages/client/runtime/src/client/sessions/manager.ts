@@ -9,6 +9,7 @@ import type {
 // Value import from the inline-safe wire layer (not the connection plugin):
 // plugin-to-plugin value imports are a bundle purity error.
 import { transportError } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { SessionProjectionMap } from '@deepseek-ai/dsh-session-projection/types'
 import { mergeOrderedBaseline } from '../ordered-baseline.ts'
 import type { ConversationRuntime } from './conversation-assembler.ts'
 import type { SessionListEntry, TitledSessionSummary } from './lineage.ts'
@@ -133,6 +134,8 @@ export class SessionManager {
   private listPhase: SessionListPhase = 'pending'
   private listError: RpcError | null = null
   private listInflight: Promise<void> | null = null
+  /** Shared tail keeping explicit projection repair to one Host request chain at a time. */
+  private projectionHydrationTail: Promise<void> = Promise.resolve()
   /** Mutations arriving after a list request starts are replayed over its response. */
   private listMutations: SessionListMutation[] | null = null
   private readonly addresses = new Map<SessionId, SubagentAddress>()
@@ -524,6 +527,62 @@ export class SessionManager {
     } catch (error: unknown) {
       return transportError(error)
     }
+  }
+
+  /**
+   * Refresh one projection key for every explicitly named listed session from
+   * an exact Host baseline. Batches and their per-session requests are
+   * intentionally sequential: this path is explicit page-driven repair,
+   * never an unbounded extension of session.list.
+   * @param key - projection key that must be exact after hydration.
+   * @param sessionIds - visible session identities to refresh.
+   * @param signal - optional cancellation for a page that unmounts or retries.
+   * @returns the identities whose exact Host baseline could not supply the key.
+   */
+  hydrateProjection(
+    key: Extract<keyof SessionProjectionMap, string>,
+    sessionIds: readonly SessionId[],
+    signal?: AbortSignal,
+  ): Promise<{ failed: readonly SessionId[] }> {
+    const operation = this.projectionHydrationTail.then(() =>
+      this.hydrateProjectionNow(key, sessionIds, signal))
+    this.projectionHydrationTail = operation.then(() => undefined, () => undefined)
+    return operation
+  }
+
+  /** Execute one queued projection-refresh batch. */
+  private async hydrateProjectionNow(
+    key: Extract<keyof SessionProjectionMap, string>,
+    sessionIds: readonly SessionId[],
+    signal?: AbortSignal,
+  ): Promise<{ failed: readonly SessionId[] }> {
+    const failed: SessionId[] = []
+    const visible = new Set(this.summaries.map(summary => summary.sessionId))
+    for (const sessionId of new Set(sessionIds)) {
+      signal?.throwIfAborted()
+      if (!visible.has(sessionId)) continue
+      const store = this.projectionStore(sessionId)
+      try {
+        const { result } = await this.api.sessions.history(
+          { sessionId, projectionsOnly: true },
+          signal,
+        )
+        if (!result.ok || result.value.projections === undefined) {
+          failed.push(sessionId)
+          continue
+        }
+        const block = result.value.projections
+        const values = block.values as Record<string, unknown>
+        for (const projectionKey of Object.keys(values)) {
+          store.apply(projectionKey, values[projectionKey], block.asOfSeq)
+        }
+        if (store.get(key) === undefined) failed.push(sessionId)
+      } catch (error: unknown) {
+        if (signal?.aborted === true) throw error
+        failed.push(sessionId)
+      }
+    }
+    return { failed }
   }
 
   /**

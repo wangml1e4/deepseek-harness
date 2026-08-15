@@ -7,6 +7,9 @@
     - button "模型":
       - img
       - text: 模型
+    - button "Token 用量":
+      - img
+      - text: Token 用量
     - button "插件":
       - img
       - text: 插件
@@ -23,6 +26,7 @@
     - listitem:
       - text: DeepSeek
       - img "API 密钥已配置"
+      - switch "停用 DeepSeek (deepseek-official)" [checked]
       - button "编辑 DeepSeek (deepseek-official)": 编辑
       - text: DeepSeek deepseek-official API 密钥
       - textbox "API 密钥":

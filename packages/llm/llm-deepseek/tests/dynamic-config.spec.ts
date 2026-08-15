@@ -124,6 +124,23 @@ describe('request-level dynamic configuration', () => {
     ])
   })
 
+  it('unregisters and re-registers the route when settings toggle enabled', async () => {
+    const dir = await home()
+    const { ctx } = await boot(dir, { enabled: false, baseURL: 'http://127.0.0.1:1' })
+
+    expect(ctx.llm.listProviders()).toEqual([])
+    expect(ctx.llm.listConfigurableProviders()[0]?.enabledPath).toEqual(['enabled'])
+    await ctx.settings.update(NS, { enabled: true })
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
+    await ctx.settings.update(NS, { enabled: false })
+    expect(ctx.llm.listProviders()).toEqual([])
+    const disabled = await prompt(ctx)
+    expect(disabled.finish).toMatchObject({ kind: 'error', failure: { code: 'NO_ADAPTER' } })
+
+    await ctx.settings.update(NS, { enabled: true })
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
+  })
+
   it('re-registers the route in place when the captured retry policy changes, without an empty-registry window', async () => {
     const dir = await home()
     const { ctx } = await boot(dir, { baseURL: 'http://127.0.0.1:1' })
@@ -154,10 +171,18 @@ describe('request-level dynamic configuration', () => {
     const { ctx } = await boot(dir, { baseURL: 'http://127.0.0.1:1' })
 
     // Schema-valid but resolver-invalid: duplicate catalog ids pass the array
-    // schema and fail the explicit resolve step.
-    await ctx.settings.update(NS, { models: [{ id: 'dup' }, { id: 'dup' }] })
+    // schema and fail the explicit resolve step. The invalid generation cannot
+    // change registration independently of the request facts it failed to
+    // replace.
+    await ctx.settings.update(NS, { enabled: false, models: [{ id: 'dup' }, { id: 'dup' }] })
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
     await expect(ctx.llm.listModels('deepseek-official')).resolves.toHaveLength(2)
-    await ctx.settings.update(NS, { models: [{ id: 'recovered' }] })
+    await ctx.settings.update(NS, { enabled: false, models: [{ id: 'recovered' }] })
+    expect(ctx.llm.listProviders()).toEqual([])
+    await ctx.settings.update(NS, { enabled: true, models: [{ id: 'dup' }, { id: 'dup' }] })
+    expect(ctx.llm.listProviders()).toEqual([])
+    await ctx.settings.update(NS, { enabled: true, models: [{ id: 'recovered' }] })
+    expect(ctx.llm.listProviders()).toEqual([{ id: 'deepseek-official', name: 'DeepSeek' }])
     await expect(ctx.llm.listModels('deepseek-official')).resolves.toEqual([
       { provider: 'deepseek-official', id: 'recovered', name: 'recovered', inputModalities: ['text'] },
     ])

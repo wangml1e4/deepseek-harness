@@ -7,6 +7,9 @@
     - button "模型":
       - img
       - text: 模型
+    - button "Token 用量":
+      - img
+      - text: Token 用量
     - button "插件":
       - img
       - text: 插件
@@ -23,10 +26,12 @@
     - listitem:
       - text: minimax-cn
       - img "API 密钥已配置"
+      - switch "停用 minimax-cn" [checked]
       - button "编辑 minimax-cn": 编辑
       - button "删除 minimax-cn": 删除
     - listitem:
       - text: Acme Gateway 自定义
+      - switch "停用 Acme Gateway (acme-gateway)" [checked]
       - button "编辑 Acme Gateway (acme-gateway)": 编辑
       - button "删除 Acme Gateway (acme-gateway)": 删除
       - text: Acme Gateway acme-gateway API 密钥

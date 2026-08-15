@@ -18,6 +18,10 @@ Choose **Add provider**, select a provider such as Anthropic or OpenAI, enter it
 
 Providers with native authentication need their native credentials instead. Bedrock, Vertex, Azure, and Codex use AWS credentials and a region, an ADC project, an `api-version`, and OAuth respectively; filling only the API-key field does not configure them.
 
+## Enable or disable a provider
+
+Each configured provider row has a switch before **Edit**. Turn it off to remove that provider and its models from runtime selection without deleting its settings or credential. Turn it on to register the same configuration again. The switch reflects the resolved manual setting; if the write is refused, it stays in its previous position and the row shows the error.
+
 ## Add a custom provider
 
 Choose **Add a custom provider** for a company gateway, self-hosted server, or provider absent from the installed catalog. Supply a lowercase Provider ID, base URL, API protocol, credential, and at least one model.

@@ -7,6 +7,9 @@
     - button "模型":
       - img
       - text: 模型
+    - button "Token 用量":
+      - img
+      - text: Token 用量
     - button "插件":
       - img
       - text: 插件
@@ -24,6 +27,7 @@
     - listitem:
       - text: minimax-cn
       - img "API 密钥已配置"
+      - switch "停用 minimax-cn" [checked]
       - button "编辑 minimax-cn": 编辑
       - button "删除 minimax-cn": 删除
   - button "添加提供方":

@@ -176,6 +176,12 @@ export interface LlmConfigurableProvider {
    */
   settingsPath: readonly string[]
   /**
+   * Non-empty path from the settings namespace root to the boolean that
+   * controls whether this route registers. Absent when the adapter offers no
+   * manual activation control.
+   */
+  enabledPath?: readonly string[]
+  /**
    * Whether the owning adapter knows this route only because configuration
    * declared it — a gateway or self-hosted server it ships nothing about.
    * Absent means the adapter draws no such distinction; false means it does

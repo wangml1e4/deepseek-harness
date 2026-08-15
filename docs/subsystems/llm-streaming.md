@@ -355,7 +355,7 @@ interface LlmProviderInfo {
 }
 ```
 
-Adapter plugins additionally declare which routes *could* run through `registerConfigurableProviders()`, addressing each one's user-settings section, so configuration surfaces can offer dormant providers before any route registers.
+Adapter plugins additionally declare which routes *could* run through `registerConfigurableProviders()`, addressing each one's user-settings section and optionally its manual activation setting, so configuration surfaces can offer dormant providers before any route registers and switch only routes that support it.
 
 ```ts type-equiv
 /**
@@ -376,6 +376,12 @@ interface LlmConfigurableProvider {
    * object; empty when the whole section is the profile.
    */
   settingsPath: readonly string[]
+  /**
+   * Non-empty path from the settings namespace root to the boolean that
+   * controls whether this route registers. Absent when the adapter offers no
+   * manual activation control.
+   */
+  enabledPath?: readonly string[]
   /**
    * Whether the owning adapter knows this route only because configuration
    * declared it — a gateway or self-hosted server it ships nothing about.

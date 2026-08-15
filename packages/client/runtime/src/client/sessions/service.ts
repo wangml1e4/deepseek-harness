@@ -445,6 +445,15 @@ export class SessionRuntime implements ISessions {
     return this.manager.search(query, signal)
   }
 
+  /** Refresh one key for named listed rows from exact Host projection baselines. */
+  hydrateProjection(
+    key: Extract<keyof SessionProjectionMap, string>,
+    sessionIds: readonly SessionId[],
+    signal?: AbortSignal,
+  ): Promise<{ failed: readonly SessionId[] }> {
+    return this.manager.hydrateProjection(key, sessionIds, signal)
+  }
+
   /**
    * Route a mux stream envelope into the Session object layer.
    * @param envelope - validated mux stream envelope.

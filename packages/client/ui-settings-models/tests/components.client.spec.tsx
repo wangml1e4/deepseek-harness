@@ -38,6 +38,7 @@ function capacityInputs(label: string): HTMLInputElement[] {
 
 const PiAiConfig = Schema.object({
   providers: Schema.dict(Schema.object({
+    enabled: Schema.boolean().default(true),
     apiKeyEnv: Schema.string().role('credential-ref'),
     baseURL: Schema.string(),
     reasoning: Schema.union(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']),
@@ -46,6 +47,7 @@ const PiAiConfig = Schema.object({
 })
 
 const DeepSeekConfig = Schema.object({
+  enabled: Schema.boolean().default(true),
   apiKeyEnv: Schema.string().role('credential-ref'),
   baseURL: Schema.string().pattern(/^https:\/\//),
   reasoningEffort: Schema.union(['off', 'high', 'max']),
@@ -89,6 +91,7 @@ function wireNamespaces(): SettingsNamespaceView[] {
       ns: 'llm-deepseek',
       schema: JSON.parse(JSON.stringify(DeepSeekConfig.toJSON())) as unknown,
       value: {
+        enabled: true,
         apiKeyEnv: 'DEEPSEEK_API_KEY',
         baseURL: 'https://base',
         defaultContextWindow: 1_000_000,
@@ -114,7 +117,7 @@ function wireNamespaces(): SettingsNamespaceView[] {
     {
       ns: 'llm-pi-ai',
       schema: JSON.parse(JSON.stringify(PiAiConfig.toJSON())) as unknown,
-      value: { providers: { openai: { apiKeyEnv: 'OPENAI_API_KEY', baseURL: 'https://proxy', headers: { 'X-Team': 'a' } }, zombie: {} } },
+      value: { providers: { openai: { enabled: true, apiKeyEnv: 'OPENAI_API_KEY', baseURL: 'https://proxy', headers: { 'X-Team': 'a' } }, zombie: { enabled: true } } },
       user: { providers: { openai: { apiKeyEnv: 'OPENAI_API_KEY', baseURL: 'https://proxy', headers: { 'X-Team': 'a' } }, zombie: {} } },
       applies: 'live',
       secrets: [],
@@ -150,11 +153,11 @@ function scriptedFace(overrides: {
     llm: {
       providers: vi.fn(() => Promise.resolve(ok({
         providers: [
-          { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
-          { provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], active: true },
-          { provider: 'anthropic', displayName: 'anthropic', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'anthropic'], active: false },
-          { provider: 'zombie', displayName: 'zombie', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'zombie'], active: false },
-          { provider: 'broken', displayName: 'broken', settingsNs: 'llm-pi-ai', settingsPath: ['nope', 'x'], active: false },
+          { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], enabledPath: ['enabled'], active: true },
+          { provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], enabledPath: ['providers', 'openai', 'enabled'], active: true },
+          { provider: 'anthropic', displayName: 'anthropic', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'anthropic'], enabledPath: ['providers', 'anthropic', 'enabled'], active: false },
+          { provider: 'zombie', displayName: 'zombie', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'zombie'], enabledPath: ['providers', 'zombie', 'enabled'], active: false },
+          { provider: 'broken', displayName: 'broken', settingsNs: 'llm-pi-ai', settingsPath: ['nope', 'x'], enabledPath: ['nope', 'x', 'enabled'], active: false },
           { provider: 'plain', displayName: 'plain', settingsNs: 'llm-plain', settingsPath: ['profiles', 'plain'], active: false },
         ],
       }))),
@@ -1174,8 +1177,69 @@ describe('ModelsSection', () => {
       t={t}
     />)
     expect(screen.getByText(en.readOnly)).toBeTruthy()
+    expect(screen.getAllByRole<HTMLButtonElement>('switch').every(control => control.disabled)).toBe(true)
     expect(screen.getAllByText<HTMLButtonElement>(en.remove).every(button => button.disabled)).toBe(true)
     expect(screen.getByText<HTMLButtonElement>(en.add).disabled).toBe(true)
+  })
+
+  it('writes the adapter-declared enable path and follows refreshed route state', async () => {
+    let openaiEnabled = true
+    const mutate = vi.fn((payload: { ops: Array<{ value?: unknown }> }) => {
+      openaiEnabled = payload.ops[0]?.value === true
+      return Promise.resolve(ok(wireNamespaces()[2]!))
+    })
+    const scripted = scriptedFace({ mutate })
+    scripted.face.settings.describe.mockImplementation(() => {
+      const namespaces = wireNamespaces()
+      const profile = (namespaces[2]!.value as { providers: { openai: { enabled: boolean } } }).providers.openai
+      profile.enabled = openaiEnabled
+      return Promise.resolve(ok({ writable: true, hasDocument: false, namespaces }))
+    })
+    scripted.face.llm.providers.mockImplementation(() => Promise.resolve(ok({
+      providers: [
+        { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], enabledPath: ['enabled'], active: true },
+        // Deliberately remains live: the switch follows its own resolved
+        // setting rather than another adapter that may own the same route.
+        { provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], enabledPath: ['providers', 'openai', 'enabled'], active: true },
+      ],
+    })))
+    await mountFace(scripted)
+    const disable = screen.getByRole('switch', { name: openaiCopy(en.disableProvider) })
+    expect(disable.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(disable)
+    await screen.findByRole('switch', { name: openaiCopy(en.enableProvider) })
+    expect(mutate).toHaveBeenCalledWith({
+      ns: 'llm-pi-ai',
+      ops: [{ op: 'set', path: ['providers', 'openai', 'enabled'], value: false }],
+      expectedRevision: 0,
+    })
+  })
+
+  it('keeps the switch state and shows an inline failure when the write is refused', async () => {
+    await mountSection({ mutate: vi.fn(() => Promise.resolve(fail('settings are locked'))) })
+    fireEvent.click(screen.getByRole('switch', { name: openaiCopy(en.disableProvider) }))
+    await screen.findByText(`${openaiCopy(en.toggleFailed)}: settings are locked`)
+    expect(screen.getByRole('switch', { name: openaiCopy(en.disableProvider) }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('locks every provider switch while one revision-guarded write is pending', async () => {
+    let resolveToggle!: (response: RpcResponse<SettingsNamespaceView>) => void
+    const mutate = vi.fn(() => new Promise<RpcResponse<SettingsNamespaceView>>((resolve) => {
+      resolveToggle = resolve
+    }))
+    await mountSection({ mutate })
+    const openai = screen.getByRole<HTMLButtonElement>('switch', { name: openaiCopy(en.disableProvider) })
+    fireEvent.click(openai)
+    await waitFor(() => {
+      expect(screen.getAllByRole<HTMLButtonElement>('switch').every(control => control.disabled)).toBe(true)
+    })
+    expect(openai.getAttribute('aria-busy')).toBe('true')
+    fireEvent.click(screen.getByRole('switch', { name: deepSeekCopy(en.disableProvider) }))
+    expect(mutate).toHaveBeenCalledOnce()
+    await act(async () => { resolveToggle(ok(wireNamespaces()[2]!)) })
+    await waitFor(() => {
+      expect(screen.getAllByRole<HTMLButtonElement>('switch').every(control => !control.disabled)).toBe(true)
+    })
   })
 
   it('toggles the row editor closed on a second edit click and on cancel', async () => {

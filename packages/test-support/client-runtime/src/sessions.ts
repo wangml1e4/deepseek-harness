@@ -185,9 +185,26 @@ export class TestSessions implements ISessions {
   /** Calls observed on the service-level face, newest last. */
   readonly calls: {
     method: 'open' | 'openSubagent' | 'setSubagentCatalogOpen' | 'refreshSubagents'
-      | 'clear' | 'search' | 'fork'
+      | 'clear' | 'search' | 'hydrateProjection' | 'fork'
     args: unknown[]
   }[] = []
+
+  /**
+   * Test-runtime mirror of projection hydration. Fixture projections are
+   * already the only truth this double owns, so missing keys fail honestly
+   * instead of inventing Host data.
+   */
+  hydrateProjection(
+    key: Parameters<ISessions['hydrateProjection']>[0],
+    sessionIds: readonly SessionId[],
+  ): Promise<{ failed: readonly SessionId[] }> {
+    this.calls.push({ method: 'hydrateProjection', args: [key, sessionIds] })
+    const state = this.list.getSnapshot()
+    const failed = [...new Set(sessionIds)].filter(
+      id => state.byId[id]?.projectionValues?.[key] === undefined,
+    )
+    return Promise.resolve({ failed })
+  }
 
   /** The wire schema's `session.search` result bound (production parity). */
   readonly searchResultLimit = SESSION_SEARCH_RESULT_LIMIT

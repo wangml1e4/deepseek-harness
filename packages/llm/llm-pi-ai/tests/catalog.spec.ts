@@ -142,6 +142,7 @@ describe('hand-declared providers', () => {
       displayName: 'Acme Gateway',
       settingsNs: 'llm-pi-ai',
       settingsPath: ['providers', 'acme-gateway'],
+      enabledPath: ['providers', 'acme-gateway', 'enabled'],
       // Nothing in the installed catalog answers for this route, which is what
       // configuration surfaces mark as a route this deployment declared.
       declared: true,
@@ -965,6 +966,7 @@ describe('configurable-provider directory', () => {
       displayName: 'openai-codex',
       settingsNs: 'llm-pi-ai',
       settingsPath: ['providers', 'openai-codex'],
+      enabledPath: ['providers', 'openai-codex', 'enabled'],
       declared: false,
     })
   })
