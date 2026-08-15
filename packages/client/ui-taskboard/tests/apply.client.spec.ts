@@ -42,6 +42,14 @@ async function bench() {
       addComment: () => ok({}),
       addRelation: () => ok({ issue: one, relation: {} }),
       removeRelation: () => ok(one),
+      patrol: () => ok({
+        policy: { workspaceId: 'ws', enabled: false, interval: '1h', baseBranch: null, agentPreset: null, provider: null, model: null, reasoningEffort: null, permissionPreset: 'workspace-write', nextDueAt: null, version: 1, createdAt: '', updatedAt: '' },
+        defaults: { baseBranch: 'main', agentPreset: 'coding', provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: null, permissionPreset: 'workspace-write' },
+        branches: ['main'], agentPresets: [], providers: [], permissionPresets: [], runs: [],
+      }),
+      updatePatrol: () => ok({}),
+      runPatrol: () => ok({}),
+      patrolIssue: () => ok({ context: null, reviews: [] }),
     },
   }
   ctx.provide('layout', layout as never)
@@ -94,6 +102,10 @@ describe('ui-taskboard apply', () => {
     taskboard.close()
     expect(b.layout.closeDetails).toHaveBeenCalledOnce()
     expect(taskboard.hooks.taskboard.getSnapshot().selectedIssue).toBeNull()
+    taskboard.openPatrol()
+    expect(b.layout.openDetails).toHaveBeenCalledTimes(2)
+    expect(taskboard.hooks.taskboard.getSnapshot().detailPanel).toBe('patrol')
+    taskboard.close()
 
     await taskboard.activate('ws' as never)
     b.dispatchChanged('another')

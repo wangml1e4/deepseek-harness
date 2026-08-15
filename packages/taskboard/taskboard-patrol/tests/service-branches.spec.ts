@@ -6,6 +6,8 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { IssueId, IssueIdentifier, PatrolAttemptId, PatrolRunId } from '@deepseek-ai/dsh-taskboard'
 import type { Issue, PatrolAttempt, PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
 import { SessionId } from '@deepseek-ai/dsh-session'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import TaskboardPatrolService from '../src/index.ts'
 import type { PatrolGit, PatrolGitResult, PatrolWorktree } from '../src/git.ts'
@@ -145,6 +147,8 @@ async function mountHarness(): Promise<Harness> {
       ? Promise.resolve()
       : Promise.reject(harness.attachError),
   }
+  const systemPromptFiber = await ctx.plugin(SystemPrompt)
+  const toolsFiber = await ctx.plugin(ToolRuntime)
   const agentFiber = await ctx.plugin(AgentRegistry)
   ctx.provide('agentDefaultModel', {
     currentSelection: () => ({ provider: 'provider-default', model: 'model-default', reasoningEffort: 'high' }),
@@ -200,6 +204,7 @@ async function mountHarness(): Promise<Harness> {
   } as never)
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => id === workspaceId ? workspace : undefined,
+    list: () => [],
   } as never)
 
   const makeAgent = async (
@@ -276,6 +281,8 @@ async function mountHarness(): Promise<Harness> {
   disposers.push(async () => {
     await patrolFiber.dispose()
     await agentFiber.dispose()
+    await toolsFiber.dispose()
+    await systemPromptFiber.dispose()
   })
   return harness
 }

@@ -14,6 +14,7 @@
 - 每个 Taskboard 事务都会创建默认关闭、间隔为 `1h`、权限为 `workspace-write` 的 Patrol Policy。Policy 执行选项、固定节拍推进、全局活跃 Run 预留、定时重叠结果、按顺序排列的 Issue Attempt、Development Context 绑定与终态历史都在事务中完成，并在 Host 重启后继续保留。
 - Patrol Run 行没有删除操作。部分唯一索引保证即使多个调度调用方竞争，所有 Workspace 中仍最多只有一个活跃 Run。
 - 部分唯一索引会限制每个 Run 和每个 Issue 最多只有一个活跃 Attempt。领取、生命周期、阻塞 Comment、Activity、Session 绑定和结果 commit 写入会与其权威 Issue 变更处于同一个 SQLite 事务中。
+- 独立 Reviewer 证据仅可追加。唯一 Attempt 引用会阻止重复审查，外键则保留所属 Attempt、Issue 和 Reviewer Session 身份。
 
 该提供方供应 `TaskboardService`；消费方依赖 [`@deepseek-ai/dsh-taskboard`](../taskboard/README.md)，绝不依赖本包。
 

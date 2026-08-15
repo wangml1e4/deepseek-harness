@@ -42,6 +42,8 @@ import type {
   PatrolAttempt,
   PatrolDevelopmentContext,
   PatrolPolicy,
+  PatrolReview,
+  RecordPatrolReviewInput,
   PatrolRun,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
@@ -60,6 +62,7 @@ import {
   rowToPatrolAttempt,
   rowToPatrolDevelopmentContext,
   rowToPatrolRun,
+  rowToPatrolReview,
   rowToRelation,
   rowToWorkspace,
   type ActivityRow,
@@ -70,6 +73,7 @@ import {
   type PatrolAttemptRow,
   type PatrolDevelopmentContextRow,
   type PatrolRunRow,
+  type PatrolReviewRow,
   type RelationRow,
   type WorkspaceRow,
 } from './schema.ts'
@@ -1468,6 +1472,105 @@ export class SqliteTaskboard extends TaskboardService {
       rollback(db)
       throw error
     }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async recordPatrolReview(input: RecordPatrolReviewInput): Promise<PatrolReview> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const attempt = db.prepare(`
+        SELECT attempts.issue_id, attempts.state, issues.workspace_id, issues.status,
+               contexts.session_id AS implementation_session_id
+        FROM patrol_attempts AS attempts
+        JOIN issues ON issues.id = attempts.issue_id
+        LEFT JOIN patrol_development_contexts AS contexts ON contexts.issue_id = attempts.issue_id
+        WHERE attempts.id = ?
+      `).get(input.attemptId) as {
+        issue_id: string
+        state: PatrolAttempt['state']
+        workspace_id: string
+        status: Issue['status']
+        implementation_session_id: string | null
+      } | undefined
+      if (attempt === undefined || attempt.state !== 'active') {
+        throw new TaskboardError(
+          'patrol_attempt_not_active',
+          `Patrol Attempt '${input.attemptId}' is not active`,
+        )
+      }
+      if (attempt.status !== 'in_progress' || attempt.implementation_session_id === null) {
+        throw new TaskboardError(
+          'patrol_context_missing',
+          `Issue '${attempt.issue_id}' has no active implementation context`,
+        )
+      }
+      if (db.prepare('SELECT 1 FROM patrol_reviews WHERE attempt_id = ?').get(input.attemptId) !== undefined) {
+        throw new TaskboardError(
+          'patrol_review_exists',
+          `Patrol Attempt '${input.attemptId}' already has Reviewer evidence`,
+        )
+      }
+      const reviewerSessionId = String(input.sessionId).trim()
+      const reviewedCommit = input.reviewedCommit.trim()
+      const findings = input.findings.trim()
+      const verification = input.verification.map(value => value.trim())
+      const risks = input.risks.map(value => value.trim())
+      if (
+        reviewerSessionId === ''
+        || reviewerSessionId === attempt.implementation_session_id
+        || reviewedCommit === ''
+        || findings === ''
+        || verification.some(value => value === '')
+        || risks.some(value => value === '')
+      ) {
+        throw new TaskboardError('patrol_issue_ineligible', 'Reviewer evidence values must be non-empty and independent')
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        INSERT INTO patrol_reviews (
+          attempt_id, issue_id, session_id, reviewed_commit, verdict,
+          findings, verification, risks, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.attemptId,
+        attempt.issue_id,
+        reviewerSessionId,
+        reviewedCommit,
+        input.verdict,
+        findings,
+        JSON.stringify(verification),
+        JSON.stringify(risks),
+        timestamp,
+      )
+      db.exec('COMMIT')
+      const row = db.prepare(`
+        SELECT attempt_id, issue_id, session_id, reviewed_commit, verdict,
+               findings, verification, risks, created_at
+        FROM patrol_reviews
+        WHERE attempt_id = ?
+      `).get(input.attemptId) as PatrolReviewRow | undefined
+      const stored = requireStored(row === undefined ? undefined : rowToPatrolReview(row), 'Patrol Review')
+      this.notifyChanged(attempt.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listPatrolReviews(reference: IssueReference): Promise<readonly PatrolReview[]> {
+    const rows = this.database().prepare(`
+      SELECT reviews.attempt_id, reviews.issue_id, reviews.session_id,
+             reviews.reviewed_commit, reviews.verdict, reviews.findings,
+             reviews.verification, reviews.risks, reviews.created_at
+      FROM patrol_reviews AS reviews
+      JOIN issues ON issues.id = reviews.issue_id
+      WHERE issues.id = ? OR issues.identifier = ?
+      ORDER BY reviews.sequence
+    `).all(reference, reference) as unknown as PatrolReviewRow[]
+    return rows.map(rowToPatrolReview)
   }
 
   // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.

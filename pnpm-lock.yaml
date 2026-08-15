@@ -7705,6 +7705,9 @@ importers:
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:^
         version: link:../../interaction/permission-presets
+      '@deepseek-ai/dsh-sandbox-policy':
+        specifier: workspace:^
+        version: link:../../sandbox/sandbox-policy
       '@deepseek-ai/dsh-session':
         specifier: workspace:^
         version: link:../../core/session
@@ -7717,9 +7720,15 @@ importers:
       '@deepseek-ai/dsh-subprocess-local':
         specifier: workspace:^
         version: link:../../subprocess/subprocess-local
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
       '@deepseek-ai/dsh-taskboard':
         specifier: workspace:^
         version: link:../taskboard
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:^
         version: link:../../interaction/user-approval
@@ -7738,6 +7747,9 @@ importers:
       '@deepseek-ai/dsh-taskboard':
         specifier: workspace:^
         version: link:../taskboard
+      '@deepseek-ai/dsh-taskboard-patrol':
+        specifier: workspace:^
+        version: link:../taskboard-patrol
       '@deepseek-ai/dsh-taskboard-sqlite':
         specifier: workspace:^
         version: link:../taskboard-sqlite

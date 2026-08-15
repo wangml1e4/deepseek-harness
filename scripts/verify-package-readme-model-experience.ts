@@ -43,7 +43,6 @@ const NO_MODEL_EXPERIENCE_SECTION: Readonly<Record<string, string>> = {
  */
 const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/taskboard/taskboard': { kind: 'indirect', reason: 'The service delegates model context selection to Taskboard Consumers.' },
-  'packages/taskboard/taskboard-patrol': { kind: 'indirect', reason: 'The execution support prepares an Agent Session but leaves every model-visible prompt and turn to the Patrol coordinator.' },
   'packages/taskboard/taskboard-sqlite': { kind: 'indirect', reason: 'The persistence provider delegates model context selection to Taskboard Consumers.' },
   'packages/taskboard/taskboard-remote': { kind: 'none', reason: 'The Remote transports Taskboard operations without adding model-visible content.' },
   'packages/taskboard/taskctl': { kind: 'indirect', reason: 'The bundled manage-taskboard skill owns the model-facing CLI instructions.' },

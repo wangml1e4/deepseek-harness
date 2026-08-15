@@ -10,18 +10,58 @@ Host execution support for Workspace Taskboard Patrol. `ctx.taskboardPatrol` tur
 - A reserved Session id may be created after provisioning failed before its first persistence. Once first persistence is recorded, a cold Session resumes that exact id and a missing Session fails instead of creating a replacement. A live bound Session is borrowed only while idle and only when its cwd and Agent Preset still match.
 - New Sessions join the selected Agent Preset before publication, record their Permission Preset, retain logged model selection on resume, attach to the owning Workspace, and flush before execution begins.
 - Each execution lease answers every tool approval request with `rejected`, records the requested tool and reason, and cancels that turn. The Patrol coordinator owns the resulting Attempt and Issue writeback.
+- The coordinator schedules enabled Policies from their durable `nextDueAt`, scans only `todo` Issues in manual order, and skips User assignments, explicit waits, and dependencies whose `done` result commit is not integrated into the Issue's fixed Base Branch.
+- One Run ends after one reviewed Issue reaches `in_review`. Only an Attempt blocked by a tool approval may continue to another eligible `todo`; every other failure blocks the claimed Issue and ends the Run.
+- The implementation Agent must leave a clean committed Base Branch diff. A separate persistent Reviewer Session receives that committed diff, inherits the saved model composition, exposes only its structured review-submission tool, and always uses read-only sandboxing with approval policy `never`. The implementation Session then receives the durable findings for one correction and verification turn before human handoff.
+- `configuration()` discovers local branches, mountable Agent Presets, live provider/model/reasoning choices, and existing Permission Presets. `updatePolicy()` validates those Host-owned choices before the version-checked save. `trigger()` starts a manual Run without enabling the fixed schedule.
 
-This package does not schedule timers, scan or claim Issues, prompt an Agent, run the independent Reviewer, or change human-review status. Those orchestration operations are later Consumers over the durable Taskboard and this service.
+The scheduler is in-process: while the Host is stopped it cannot run. The Taskboard Policy retains cadence and the next startup consumes at most one overdue trigger.
 
 ## Model Experience
 
-Indirectly, through the later Patrol coordinator that prompts the prepared Agent Session. This package does not add model-visible content by itself.
+### Implementation assignment
+
+#### What the model sees
+
+The implementation Agent receives `Issue.identifier`, the title, description, lifecycle requirements, local Git restrictions, and review-handoff requirements as a plugin-authored user message.
+
+#### Token effect
+
+One retained user message adds the Issue content and fixed execution instructions to the existing implementation Session.
 
 #### KV Cache effect
 
-Independent of model requests because Session and Git preparation does not change a request prefix.
+Append-only after the implementation Session's reusable prefix.
+
+### Independent review assignment
+
+#### What the model sees
+
+The Reviewer receives the exact preliminary commit and its bounded Base Branch diff, then returns structured findings through `patrol_review_submit`, its only tool.
+
+#### Token effect
+
+One retained user message adds the Issue, commit, diff statistics, and bounded patch to the independent Reviewer Session.
+
+#### KV Cache effect
+
+Append-only after the Reviewer Session's reusable prefix.
+
+### Correction assignment
+
+#### What the model sees
+
+The implementation Session receives the durable verdict, findings, verification, and risks with instructions to correct, verify, and commit the result.
+
+#### Token effect
+
+One retained user message adds the structured review evidence to the existing implementation Session.
+
+#### KV Cache effect
+
+Append-only after the implementation Session's reusable prefix. Policy discovery and timer checks do not affect model requests.
 
 ## Known Limitations and Deferred Work
 
-- This package does not yet own the timer, Issue eligibility scan, Agent prompt, independent Reviewer, or human-review controls.
+- Startup recovery of an unfinished Run is delivered by the recovery Consumer layer; a live-process Run is already durable but this package does not yet re-enter it after process loss.
 - It supports only local Git repositories and permanent local worktrees; remote fetch, push, pull-request, merge, and cleanup operations are deliberately absent.

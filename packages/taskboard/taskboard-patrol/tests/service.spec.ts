@@ -9,6 +9,8 @@ import { IssueId, IssueIdentifier, PatrolAttemptId, PatrolRunId } from '@deepsee
 import type { PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SessionStore from '@deepseek-ai/dsh-session'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import TaskboardPatrolService from '../src/index.ts'
 
@@ -55,6 +57,8 @@ describe('TaskboardPatrolService', () => {
       attachSession: (id: string) => { attached.push(id); return Promise.resolve() },
     }
     const ctx = new Context()
+    const systemPromptFiber = await ctx.plugin(SystemPrompt)
+    const toolsFiber = await ctx.plugin(ToolRuntime)
     const sessionFiber = await ctx.plugin(SessionStore)
     const agentFiber = await ctx.plugin(AgentRegistry)
     const subprocessFiber = await ctx.plugin(LocalSubprocessRuntime)
@@ -104,6 +108,7 @@ describe('TaskboardPatrolService', () => {
     } as never)
     ctx.provide('workspaceRegistry', {
       get: (id: WorkspaceId) => id === workspaceId ? workspace : undefined,
+      list: () => [],
     } as never)
 
     let cancelled: unknown
@@ -257,6 +262,8 @@ describe('TaskboardPatrolService', () => {
       )
     } finally {
       await patrolFiber.dispose()
+      await toolsFiber.dispose()
+      await systemPromptFiber.dispose()
       await subprocessFiber.dispose()
       await agentFiber.dispose()
       await sessionFiber.dispose()

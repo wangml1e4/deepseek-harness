@@ -22,6 +22,8 @@ import type {
   PatrolAttempt,
   PatrolDevelopmentContext,
   PatrolPolicy,
+  PatrolReview,
+  RecordPatrolReviewInput,
   PatrolRun,
   PatrolRunId,
   RemoveIssueRelationInput,
@@ -83,6 +85,9 @@ export type {
   PatrolDevelopmentContext,
   PatrolInterval,
   PatrolPolicy,
+  PatrolReview,
+  PatrolReviewVerdict,
+  RecordPatrolReviewInput,
   PatrolRun,
   PatrolRunId as PatrolRunIdType,
   PatrolRunResult,
@@ -310,6 +315,20 @@ export abstract class TaskboardService extends Service {
    * @returns the terminal durable Attempt.
    */
   abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt>
+
+  /**
+   * Persist one independent Reviewer result for an active Attempt.
+   * @param input - Reviewer Session, preliminary commit, findings, verification, and risks.
+   * @returns durable structured review evidence.
+   */
+  abstract recordPatrolReview(input: RecordPatrolReviewInput): Promise<PatrolReview>
+
+  /**
+   * List every independent review retained for one Issue.
+   * @param reference - Issue whose review history is requested.
+   * @returns review evidence in completion order.
+   */
+  abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolReview[]>
 
   /**
    * List every Issue claim in one Run in claim order.

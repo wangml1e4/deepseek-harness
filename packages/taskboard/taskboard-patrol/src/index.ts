@@ -18,21 +18,27 @@ import type {
   PatrolAttempt,
   PatrolDevelopmentContext,
   PatrolPolicy,
+  PatrolRun,
+  UpdatePatrolPolicyInput,
 } from '@deepseek-ai/dsh-taskboard'
+import { TaskboardError } from '@deepseek-ai/dsh-taskboard'
 import type { Workspace, WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type {} from '@deepseek-ai/dsh-workspace'
+import { PatrolCoordinator, type TriggerPatrolRunInput } from './coordinator.ts'
 import { PatrolGit, patrolBranch, patrolWorktreePath } from './git.ts'
-import type { PatrolGitResult, PatrolWorktree } from './git.ts'
+import type { PatrolGitDiff, PatrolGitResult, PatrolWorktree } from './git.ts'
 
 export {
   PatrolGit,
   patrolBranch,
   patrolWorktreePath,
   type PatrolGitConfig,
+  type PatrolGitDiff,
   type PatrolGitResult,
   type PatrolRepository,
   type PatrolWorktree,
 } from './git.ts'
+export type { TriggerPatrolRunInput } from './coordinator.ts'
 
 /** Defaults applied to local Git subprocess calls. */
 const DEFAULT_GIT_GRACE_MS = 5000
@@ -60,6 +66,68 @@ export interface PatrolPolicyDefaults {
   readonly selection: ModelSelection
   /** Existing Permission Preset name. */
   readonly permissionPreset: string
+}
+
+/** One selectable Agent Preset for new Issue bindings. */
+export interface PatrolAgentPresetOption {
+  /** Stable preset id. */
+  readonly id: string
+  /** User-facing preset name. */
+  readonly name: string
+  /** Optional preset summary. */
+  readonly description?: string
+}
+
+/** One selectable reasoning effort for an exact provider/model route. */
+export interface PatrolReasoningOption {
+  /** Adapter-owned stable value. */
+  readonly id: string
+  /** User-facing effort name. */
+  readonly name: string
+}
+
+/** One selectable model and its adapter-owned reasoning choices. */
+export interface PatrolModelOption {
+  /** Model id sent to the provider. */
+  readonly id: string
+  /** User-facing model name. */
+  readonly name: string
+  /** Reasoning values accepted for this exact route. */
+  readonly reasoning: readonly PatrolReasoningOption[]
+}
+
+/** One live provider route and its advisory model catalog. */
+export interface PatrolProviderOption {
+  /** Stable provider route id. */
+  readonly id: string
+  /** User-facing provider name. */
+  readonly name: string
+  /** Adapter-advertised models. */
+  readonly models: readonly PatrolModelOption[]
+}
+
+/** One existing Permission Preset available to new Issue bindings. */
+export interface PatrolPermissionOption {
+  /** Stable Permission Preset name. */
+  readonly id: string
+  /** User-facing Permission Preset name. */
+  readonly name: string
+  /** Optional security summary. */
+  readonly description?: string
+}
+
+/** Host-resolved choices presented by Patrol configuration clients. */
+export interface PatrolConfiguration {
+  /** Current defaults used when a saved nullable choice follows the Host. */
+  readonly defaults: PatrolPolicyDefaults
+  /** Branches already present in the local Workspace repository. */
+  readonly branches: readonly string[]
+  /** Mountable Agent Presets. */
+  readonly agentPresets: readonly PatrolAgentPresetOption[]
+  /** Live provider routes with their model catalogs. */
+  readonly providers: readonly PatrolProviderOption[]
+  /** Existing Permission Presets. */
+  readonly permissionPresets: readonly PatrolPermissionOption[]
 }
 
 /** One tool approval rejected by the unattended Patrol owner. */
@@ -109,6 +177,7 @@ export class TaskboardPatrolService extends Service {
     'sessions',
     'subprocess',
     'taskboard',
+    'tools',
     'workspaceRegistry',
   ]
 
@@ -121,6 +190,7 @@ export class TaskboardPatrolService extends Service {
 
   private readonly resolved: ResolvedConfig
   private readonly git: PatrolGit
+  private readonly coordinator: PatrolCoordinator
 
   constructor(ctx: Context, readonly config: Config) {
     super(ctx, 'taskboardPatrol')
@@ -135,6 +205,8 @@ export class TaskboardPatrolService extends Service {
       graceMs: this.resolved.gitGraceMs,
       maxOutputBytes: this.resolved.gitOutputBytes,
     })
+    this.coordinator = new PatrolCoordinator(ctx, this)
+    ctx.effect(() => this.coordinator.start(), 'taskboardPatrol.coordinator')
   }
 
   /**
@@ -153,6 +225,105 @@ export class TaskboardPatrolService extends Service {
       : this.ctx.permissionPresets.defaultPreset
     this.ctx.permissionPresets.resolve(permissionPreset)
     return { baseBranch, agentPreset, selection, permissionPreset }
+  }
+
+  /**
+   * Discover all choices needed by the Patrol settings sidebar.
+   * @param workspaceId - registered Workspace whose local branches are listed.
+   * @returns current defaults and selectable Host configuration.
+   */
+  async configuration(workspaceId: WorkspaceId): Promise<PatrolConfiguration> {
+    const [defaults, branches, presets] = await Promise.all([
+      this.defaults(workspaceId),
+      this.localBranches(workspaceId),
+      this.ctx.agentPresets.list(),
+    ])
+    const providers = await Promise.all(this.ctx.llm.listProviders().map(async (provider) => {
+      const catalog = await this.ctx.llm.listModels(provider.id)
+      const models = await Promise.all(catalog.map(async (model) => {
+        const resolved = await this.ctx.llm.resolveModelInfo(provider.id, model.id)
+        return {
+          id: model.id,
+          name: model.name,
+          reasoning: resolved.reasoning?.efforts.map(effort => ({
+            id: effort.id,
+            name: effort.name,
+          })) ?? [],
+        }
+      }))
+      return { id: provider.id, name: provider.name, models }
+    }))
+    return {
+      defaults,
+      branches,
+      agentPresets: presets
+        .filter(preset => preset.broken === undefined)
+        .map(preset => ({
+          id: preset.id,
+          name: preset.name ?? preset.id,
+          ...preset.description === undefined ? {} : { description: preset.description },
+        })),
+      providers,
+      permissionPresets: this.ctx.permissionPresets.names.map((id) => {
+        const option = this.ctx.permissionPresets.optionOf(id)
+        return {
+          id,
+          name: option.name,
+          ...option.description === undefined ? {} : { description: option.description },
+        }
+      }),
+    }
+  }
+
+  /**
+   * Validate Host-owned choices before saving one version-checked policy.
+   * @param input - replacement policy fields.
+   * @returns updated durable policy.
+   */
+  async updatePolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy> {
+    this.requireWorkspace(input.workspaceId)
+    const current = await this.ctx.taskboard.getPatrolPolicy(input.workspaceId)
+    if (current === undefined) {
+      throw new TaskboardError('workspace_not_found', `Workspace "${input.workspaceId}" has no Taskboard Patrol Policy`)
+    }
+    const baseBranch = input.baseBranch === undefined ? current.baseBranch : input.baseBranch
+    if (baseBranch !== null && !(await this.localBranches(input.workspaceId)).includes(baseBranch)) {
+      throw new TaskboardError('patrol_policy_invalid', `Patrol Base Branch "${baseBranch}" is not a local branch`)
+    }
+    const agentPreset = input.agentPreset === undefined ? current.agentPreset : input.agentPreset
+    const permissionPreset = input.permissionPreset ?? current.permissionPreset
+    const provider = input.provider === undefined ? current.provider : input.provider
+    const model = input.model === undefined ? current.model : input.model
+    const reasoningEffort = input.reasoningEffort === undefined
+      ? current.reasoningEffort
+      : input.reasoningEffort
+    try {
+      if (agentPreset !== null) await this.ctx.agentPresets.resolve(agentPreset)
+      this.ctx.permissionPresets.resolve(permissionPreset)
+      const defaults = this.ctx.agentDefaultModel.currentSelection()
+      let route: ModelSelection
+      if (provider === null) {
+        if (model !== null) {
+          throw new TaskboardError('patrol_policy_invalid', 'Patrol provider and model must be configured together')
+        }
+        route = defaults
+      } else {
+        if (model === null) {
+          throw new TaskboardError('patrol_policy_invalid', 'Patrol provider and model must be configured together')
+        }
+        route = { provider, model }
+      }
+      await this.resolveSelection(reasoningEffort === null
+        ? route
+        : { ...route, reasoningEffort: ReasoningEffortId(reasoningEffort) })
+    } catch (error: unknown) {
+      if (error instanceof TaskboardError) throw error
+      throw new TaskboardError(
+        'patrol_policy_invalid',
+        `Patrol configuration is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    return await this.ctx.taskboard.updatePatrolPolicy(input)
   }
 
   /**
@@ -222,6 +393,25 @@ export class TaskboardPatrolService extends Service {
    */
   result(context: PatrolDevelopmentContext): Promise<PatrolGitResult> {
     return this.git.result(context)
+  }
+
+  /**
+   * Read one exact committed diff for an independent Reviewer.
+   * @param context - persistent Development Context.
+   * @param commit - exact preliminary implementation commit.
+   * @returns bounded patch and summary.
+   */
+  diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff> {
+    return this.git.diff(context, commit)
+  }
+
+  /**
+   * Start one manual background Run under Host-wide exclusivity.
+   * @param input - Workspace and optional exact todo Issue.
+   * @returns active durable Run accepted by the Taskboard Provider.
+   */
+  trigger(input: TriggerPatrolRunInput): Promise<PatrolRun> {
+    return this.coordinator.trigger(input)
   }
 
   /** Resolve and persist one new Issue's immutable execution choices. */

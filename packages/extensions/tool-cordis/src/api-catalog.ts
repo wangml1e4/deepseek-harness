@@ -1910,6 +1910,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the terminal durable Attempt.',
       },
       {
+        signature: 'abstract recordPatrolReview(input: RecordPatrolReviewInput): Promise<PatrolReview>',
+        description: 'Persist one independent Reviewer result for an active Attempt.',
+        parameters: [{ name: 'input', description: 'Reviewer Session, preliminary commit, findings, verification, and risks.' }],
+        returns: 'durable structured review evidence.',
+      },
+      {
+        signature: 'abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolReview[]>',
+        description: 'List every independent review retained for one Issue.',
+        parameters: [{ name: 'reference', description: 'Issue whose review history is requested.' }],
+        returns: 'review evidence in completion order.',
+      },
+      {
         signature: 'abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>',
         description: 'List every Issue claim in one Run in claim order.',
         parameters: [{ name: 'runId', description: 'Run whose Attempt history is requested.' }],
@@ -1927,6 +1939,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve the current new-Session defaults and checked-out local branch for a Workspace.',
         parameters: [{ name: 'workspaceId', description: 'Registered Workspace whose checkout supplies the branch.' }],
         returns: 'concrete values suitable for a Patrol Policy save.',
+      },
+      {
+        signature: 'async configuration(workspaceId: WorkspaceId): Promise<PatrolConfiguration>',
+        description: 'Discover all choices needed by the Patrol settings sidebar.',
+        parameters: [{ name: 'workspaceId', description: 'registered Workspace whose local branches are listed.' }],
+        returns: 'current defaults and selectable Host configuration.',
+      },
+      {
+        signature: 'async updatePolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>',
+        description: 'Validate Host-owned choices before saving one version-checked policy.',
+        parameters: [{ name: 'input', description: 'replacement policy fields.' }],
+        returns: 'updated durable policy.',
       },
       {
         signature: 'localBranches(workspaceId: WorkspaceId): Promise<readonly string[]>',
@@ -1951,6 +1975,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read commit, cleanliness, and Base Branch diff evidence from a bound Issue worktree.',
         parameters: [{ name: 'context', description: 'persistent Development Context.' }],
         returns: 'current local Git evidence.',
+      },
+      {
+        signature: 'diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff>',
+        description: 'Read one exact committed diff for an independent Reviewer.',
+        parameters: [{ name: 'context', description: 'persistent Development Context.' }, { name: 'commit', description: 'exact preliminary implementation commit.' }],
+        returns: 'bounded patch and summary.',
+      },
+      {
+        signature: 'trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>',
+        description: 'Start one manual background Run under Host-wide exclusivity.',
+        parameters: [{ name: 'input', description: 'Workspace and optional exact todo Issue.' }],
+        returns: 'active durable Run accepted by the Taskboard Provider.',
       },
     ],
   },
@@ -2054,6 +2090,30 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Remove one Issue dependency without deleting its Activity.',
         parameters: [{ name: 'input', description: 'Anchor, relation id, observed version, and actor.' }],
         returns: 'updated Issue or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'patrol\') patrol(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardPatrolValue>>',
+        description: 'Read Patrol settings choices and permanent Run history for one Workspace.',
+        parameters: [{ name: 'workspaceId', description: 'authoritative Workspace identity.' }],
+        returns: 'current policy, Host choices, and Run/Attempt history.',
+      },
+      {
+        signature: '@Remote(\'updatePatrol\') updatePatrol(input: UpdatePatrolPolicyInput): Promise<TaskboardRemoteResult<PatrolPolicy>>',
+        description: 'Validate and save one Patrol Policy version.',
+        parameters: [{ name: 'input', description: 'Workspace policy replacements and optimistic version.' }],
+        returns: 'updated durable policy.',
+      },
+      {
+        signature: '@Remote(\'runPatrol\') runPatrol(input: TaskboardPatrolTriggerInput): Promise<TaskboardRemoteResult<PatrolRun>>',
+        description: 'Start one manual background Patrol Run.',
+        parameters: [{ name: 'input', description: 'Workspace and optional exact todo Issue.' }],
+        returns: 'accepted active Run.',
+      },
+      {
+        signature: '@Remote(\'patrolIssue\') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>',
+        description: 'Read one Issue\'s persistent implementation binding and Reviewer evidence.',
+        parameters: [{ name: 'reference', description: 'opaque id or human-readable identifier.' }],
+        returns: 'explicit nullable binding and append-only reviews.',
       },
     ],
   },
@@ -3915,6 +3975,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PatrolAgentLease {\n    readonly agent: Agent;\n    readonly context: PatrolDevelopmentContext;\n    readonly worktree: PatrolWorktree;\n    readonly rejectedApprovals: readonly RejectedPatrolApproval[];\n    release(): Promise<void>;\n}',
   },
   {
+    name: 'PatrolAgentPresetOption',
+    declaration: 'export interface PatrolAgentPresetOption {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
     name: 'PatrolAttempt',
     declaration: 'export interface PatrolAttempt {\n    readonly id: PatrolAttemptId;\n    readonly runId: PatrolRunId;\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolAttemptResult | null;\n    readonly error: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
   },
@@ -3927,8 +3991,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PatrolAttemptResult = \'permission_blocked\' | \'blocked\' | \'review_handoff\' | \'failed\';',
   },
   {
+    name: 'PatrolConfiguration',
+    declaration: 'export interface PatrolConfiguration {\n    readonly defaults: PatrolPolicyDefaults;\n    readonly branches: readonly string[];\n    readonly agentPresets: readonly PatrolAgentPresetOption[];\n    readonly providers: readonly PatrolProviderOption[];\n    readonly permissionPresets: readonly PatrolPermissionOption[];\n}',
+  },
+  {
     name: 'PatrolDevelopmentContext',
     declaration: 'export interface PatrolDevelopmentContext {\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId;\n    readonly sessionStartedAt: string | null;\n    readonly baseBranch: string;\n    readonly branch: string;\n    readonly worktreePath: string;\n    readonly agentPreset: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n    readonly resultCommit: string | null;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'PatrolGitDiff',
+    declaration: 'export interface PatrolGitDiff {\n    readonly patch: string;\n    readonly stat: string;\n}',
   },
   {
     name: 'PatrolGitResult',
@@ -3939,12 +4011,36 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type PatrolInterval = \'5m\' | \'30m\' | \'1h\' | \'2h\' | \'6h\' | \'12h\' | \'24h\';',
   },
   {
+    name: 'PatrolModelOption',
+    declaration: 'export interface PatrolModelOption {\n    readonly id: string;\n    readonly name: string;\n    readonly reasoning: readonly PatrolReasoningOption[];\n}',
+  },
+  {
+    name: 'PatrolPermissionOption',
+    declaration: 'export interface PatrolPermissionOption {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
     name: 'PatrolPolicy',
     declaration: 'export interface PatrolPolicy {\n    readonly workspaceId: WorkspaceId;\n    readonly enabled: boolean;\n    readonly interval: PatrolInterval;\n    readonly baseBranch: string | null;\n    readonly agentPreset: string | null;\n    readonly provider: string | null;\n    readonly model: string | null;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n    readonly nextDueAt: string | null;\n    readonly version: number;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
   {
     name: 'PatrolPolicyDefaults',
     declaration: 'export interface PatrolPolicyDefaults {\n    readonly baseBranch: string;\n    readonly agentPreset: string;\n    readonly selection: ModelSelection;\n    readonly permissionPreset: string;\n}',
+  },
+  {
+    name: 'PatrolProviderOption',
+    declaration: 'export interface PatrolProviderOption {\n    readonly id: string;\n    readonly name: string;\n    readonly models: readonly PatrolModelOption[];\n}',
+  },
+  {
+    name: 'PatrolReasoningOption',
+    declaration: 'export interface PatrolReasoningOption {\n    readonly id: string;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'PatrolReview',
+    declaration: 'export interface PatrolReview {\n    readonly attemptId: PatrolAttemptId;\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId;\n    readonly reviewedCommit: string;\n    readonly verdict: PatrolReviewVerdict;\n    readonly findings: string;\n    readonly verification: readonly string[];\n    readonly risks: readonly string[];\n    readonly createdAt: string;\n}',
+  },
+  {
+    name: 'PatrolReviewVerdict',
+    declaration: 'export type PatrolReviewVerdict = \'approve\' | \'changes_requested\';',
   },
   {
     name: 'PatrolRun',
@@ -4065,6 +4161,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ReasoningEffortId',
     declaration: 'export type ReasoningEffortId = Branded<\'ReasoningEffortId\'>;',
+  },
+  {
+    name: 'RecordPatrolReviewInput',
+    declaration: 'export interface RecordPatrolReviewInput {\n    readonly attemptId: PatrolAttemptId;\n    readonly sessionId: SessionId;\n    readonly reviewedCommit: string;\n    readonly verdict: PatrolReviewVerdict;\n    readonly findings: string;\n    readonly verification: readonly string[];\n    readonly risks: readonly string[];\n}',
   },
   {
     name: 'RedactedSecret',
@@ -4768,7 +4868,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskboardErrorCode',
-    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_policy_invalid\';',
+    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_review_exists\' | \'patrol_policy_invalid\';',
   },
   {
     name: 'TaskboardIssueListValue',
@@ -4777,6 +4877,46 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskboardIssueValue',
     declaration: 'export interface TaskboardIssueValue {\n    readonly issue: Issue | null;\n}',
+  },
+  {
+    name: 'TaskboardPatrolAgentPresetOption',
+    declaration: 'export interface TaskboardPatrolAgentPresetOption {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'TaskboardPatrolDefaultsValue',
+    declaration: 'export interface TaskboardPatrolDefaultsValue {\n    readonly baseBranch: string;\n    readonly agentPreset: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n}',
+  },
+  {
+    name: 'TaskboardPatrolIssueValue',
+    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly reviews: readonly PatrolReview[];\n}',
+  },
+  {
+    name: 'TaskboardPatrolModelOption',
+    declaration: 'export interface TaskboardPatrolModelOption {\n    readonly id: string;\n    readonly name: string;\n    readonly reasoning: readonly TaskboardPatrolReasoningOption[];\n}',
+  },
+  {
+    name: 'TaskboardPatrolPermissionOption',
+    declaration: 'export interface TaskboardPatrolPermissionOption {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n}',
+  },
+  {
+    name: 'TaskboardPatrolProviderOption',
+    declaration: 'export interface TaskboardPatrolProviderOption {\n    readonly id: string;\n    readonly name: string;\n    readonly models: readonly TaskboardPatrolModelOption[];\n}',
+  },
+  {
+    name: 'TaskboardPatrolReasoningOption',
+    declaration: 'export interface TaskboardPatrolReasoningOption {\n    readonly id: string;\n    readonly name: string;\n}',
+  },
+  {
+    name: 'TaskboardPatrolRunValue',
+    declaration: 'export interface TaskboardPatrolRunValue {\n    readonly run: PatrolRun;\n    readonly attempts: readonly PatrolAttempt[];\n}',
+  },
+  {
+    name: 'TaskboardPatrolTriggerInput',
+    declaration: 'export interface TaskboardPatrolTriggerInput {\n    readonly workspaceId: WorkspaceId;\n    readonly issue?: IssueReference;\n}',
+  },
+  {
+    name: 'TaskboardPatrolValue',
+    declaration: 'export interface TaskboardPatrolValue {\n    readonly policy: PatrolPolicy;\n    readonly defaults: TaskboardPatrolDefaultsValue;\n    readonly branches: readonly string[];\n    readonly agentPresets: readonly TaskboardPatrolAgentPresetOption[];\n    readonly providers: readonly TaskboardPatrolProviderOption[];\n    readonly permissionPresets: readonly TaskboardPatrolPermissionOption[];\n    readonly runs: readonly TaskboardPatrolRunValue[];\n}',
   },
   {
     name: 'TaskboardRelationListValue',
@@ -5005,6 +5145,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ToolSchema',
     declaration: 'export interface ToolSchema {\n    name: string;\n    description: string;\n    parameters: Record<string, unknown>;\n}',
+  },
+  {
+    name: 'TriggerPatrolRunInput',
+    declaration: 'export interface TriggerPatrolRunInput {\n    readonly workspaceId: WorkspaceId;\n    readonly issue?: IssueReference;\n}',
   },
   {
     name: 'TurnEndCancelCause',

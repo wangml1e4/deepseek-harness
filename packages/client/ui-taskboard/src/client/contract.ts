@@ -2,7 +2,7 @@
 
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
-import type { CreateIssueInput, Issue, IssueReference, IssueRelation, UpdateIssueInput } from '@deepseek-ai/dsh-taskboard/types'
+import type { CreateIssueInput, Issue, IssueReference, IssueRelation, UpdateIssueInput, UpdatePatrolPolicyInput } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardActionResult, TaskboardSnapshot } from './controller.ts'
 import type { createTaskboardViewStore } from './store.ts'
 
@@ -13,6 +13,7 @@ export interface TaskboardInjected {
   refresh: () => Promise<TaskboardActionResult>
   createIssue: (input: Omit<CreateIssueInput, 'workspaceId'>) => Promise<TaskboardActionResult>
   openIssue: (reference: IssueReference) => void
+  openPatrol: () => void
   moveIssue: (
     issue: Issue,
     patch: Omit<UpdateIssueInput, 'reference' | 'expectedVersion' | 'actor'>,
@@ -25,6 +26,10 @@ export interface TaskboardInjected {
   addComment: (body: string) => Promise<TaskboardActionResult>
   addRelation: (type: IssueRelation['type'], reference: IssueReference) => Promise<TaskboardActionResult>
   removeRelation: (relation: IssueRelation) => Promise<TaskboardActionResult>
+  updatePatrol: (
+    patch: Omit<UpdatePatrolPolicyInput, 'workspaceId' | 'expectedVersion'>,
+  ) => Promise<TaskboardActionResult>
+  runPatrol: (issue?: IssueReference) => Promise<TaskboardActionResult>
   close: () => void
 }
 

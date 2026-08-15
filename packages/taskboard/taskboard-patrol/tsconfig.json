@@ -13,10 +13,12 @@
     { "path": "../../preset/agent-presets" },
     { "path": "../../llm/llm" },
     { "path": "../../interaction/permission-presets" },
+    { "path": "../../sandbox/sandbox-policy" },
     { "path": "../../core/session" },
     { "path": "../../session/session-persistence" },
     { "path": "../../subprocess/subprocess" },
     { "path": "../taskboard" },
+    { "path": "../../core/tools" },
     { "path": "../../interaction/user-approval" },
     { "path": "../../workspace/workspace" },
     { "path": "../../runtime-diagnostics/invariants" }

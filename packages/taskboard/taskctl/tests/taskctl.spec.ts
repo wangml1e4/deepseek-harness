@@ -298,10 +298,61 @@ describe('taskctl', () => {
     ])
   })
 
+  it('reads, updates, starts, and inspects Patrol through the same Remote', async () => {
+    const calls: RpcRequestBody[] = []
+    const fetchImplementation = capturingFetch(calls)
+    for (const command of [
+      ['patrol', 'get', 'workspace-1'],
+      [
+        'patrol', 'update', 'workspace-1', '--enabled', 'true', '--interval', '30m',
+        '--base-branch', 'main', '--agent-preset', 'coding', '--provider', 'deepseek',
+        '--model', 'deepseek-chat', '--reasoning-effort', 'high',
+        '--permission-preset', 'workspace-write', '--if-version', '3',
+      ],
+      [
+        'patrol', 'update', 'workspace-1', '--enabled', 'false', '--base-branch=',
+        '--agent-preset=', '--provider=', '--model=', '--reasoning-effort=', '--if-version', '4',
+      ],
+      ['patrol', 'run', 'workspace-1', '--issue', 'TASK-7'],
+      ['patrol', 'run', 'workspace-1'],
+      ['patrol', 'issue', 'TASK-7'],
+    ]) {
+      expect((await run(command, fetchImplementation)).exitCode).toBe(0)
+    }
+    expect(calls.map(call => ({ method: call.method, args: call.payload.args }))).toEqual([
+      { method: 'taskboard/patrol', args: { workspaceId: 'workspace-1' } },
+      { method: 'taskboard/updatePatrol', args: { input: {
+        workspaceId: 'workspace-1',
+        enabled: true,
+        interval: '30m',
+        baseBranch: 'main',
+        agentPreset: 'coding',
+        provider: 'deepseek',
+        model: 'deepseek-chat',
+        reasoningEffort: 'high',
+        permissionPreset: 'workspace-write',
+        expectedVersion: 3,
+      } } },
+      { method: 'taskboard/updatePatrol', args: { input: {
+        workspaceId: 'workspace-1',
+        enabled: false,
+        baseBranch: null,
+        agentPreset: null,
+        provider: null,
+        model: null,
+        reasoningEffort: null,
+        expectedVersion: 4,
+      } } },
+      { method: 'taskboard/runPatrol', args: { input: { workspaceId: 'workspace-1', issue: 'TASK-7' } } },
+      { method: 'taskboard/runPatrol', args: { input: { workspaceId: 'workspace-1' } } },
+      { method: 'taskboard/patrolIssue', args: { reference: 'TASK-7' } },
+    ])
+  })
+
   it('returns stable JSON usage failures for invalid commands and values', async () => {
     const unreachableFetch: typeof fetch = () => Promise.reject(new Error('must not fetch'))
     for (const [argv, message] of [
-      [[], 'Expected workspace get/prefix'],
+      [[], 'Expected workspace'],
       [['issue', 'get', 'TASK-1', '--wat', 'value'], 'Option --wat is not valid'],
       [['issue', 'get'], 'Expected 1 operand'],
       [['issue', 'list', 'extra', '--workspace', 'workspace-1'], 'Expected 0 operands'],
@@ -314,6 +365,8 @@ describe('taskctl', () => {
       [['issue', 'update', 'TASK-1'], 'Option --if-version requires a positive integer'],
       [['issue', 'update', 'TASK-1', '--if-version', '1', '--actor-type', 'robot'], 'Invalid --actor-type'],
       [['relation', 'add', 'TASK-1', '--type', 'relates', '--issue', 'TASK-2', '--if-version', '1'], 'Invalid --type'],
+      [['patrol', 'update', 'workspace-1', '--enabled', 'yes', '--if-version', '1'], 'Invalid --enabled'],
+      [['patrol', 'update', 'workspace-1', '--interval', '10m', '--if-version', '1'], 'Invalid --interval'],
     ] as const) {
       const result = await run([...argv], unreachableFetch)
       expect(result.exitCode).toBe(2)

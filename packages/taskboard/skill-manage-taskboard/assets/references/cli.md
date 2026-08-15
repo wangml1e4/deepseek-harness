@@ -54,3 +54,14 @@ taskctl relation remove ISSUE_ID RELATION_ID --if-version N
 ```
 
 Relations stay within one Workspace. Self-relations, duplicates, and cycles are rejected.
+
+## Patrol
+
+```bash
+taskctl patrol get WORKSPACE_ID
+taskctl patrol update WORKSPACE_ID --if-version N [--enabled true|false] [--interval 5m|30m|1h|2h|6h|12h|24h] [--base-branch BRANCH] [--agent-preset PRESET] [--provider PROVIDER] [--model MODEL] [--reasoning-effort EFFORT] [--permission-preset PRESET]
+taskctl patrol run WORKSPACE_ID [--issue ISSUE_ID]
+taskctl patrol issue ISSUE_ID
+```
+
+An empty `--agent-preset=`, `--provider=`, `--model=`, or `--reasoning-effort=` restores the Host or model default for later unbound Issues. `patrol run` starts one manual Run without enabling the saved schedule. Critical eligibility, claim, Session binding, approval handling, review, and lifecycle writes remain Host-owned operations.

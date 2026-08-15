@@ -390,6 +390,32 @@ describe('SQLite Taskboard service', () => {
         { id: attempt.id, sessionId, state: 'active' },
       ])
 
+      const review = await mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: attempt.id,
+        sessionId: SessionId('session-patrol-reviewer-49'),
+        reviewedCommit: 'fedcba9876543210',
+        verdict: 'changes_requested',
+        findings: 'Handle the empty branch case before handoff.',
+        verification: ['pnpm test -- taskboard'],
+        risks: ['The integration branch is user-owned.'],
+      })
+      expect(review).toMatchObject({
+        issueId: issue.id,
+        reviewedCommit: 'fedcba9876543210',
+        verdict: 'changes_requested',
+        verification: ['pnpm test -- taskboard'],
+      })
+      await expect(mounted.ctx.taskboard.listPatrolReviews(issue.identifier)).resolves.toEqual([review])
+      await expect(mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: attempt.id,
+        sessionId: SessionId('another-reviewer'),
+        reviewedCommit: 'fedcba9876543210',
+        verdict: 'approve',
+        findings: 'No findings.',
+        verification: [],
+        risks: [],
+      })).rejects.toMatchObject({ code: 'patrol_review_exists' })
+
       const completed = await mounted.ctx.taskboard.completePatrolAttempt({
         attemptId: attempt.id,
         result: 'review_handoff',
@@ -416,6 +442,9 @@ describe('SQLite Taskboard service', () => {
         sessionId,
         resultCommit: '0123456789abcdef',
       })
+      await expect(reopened.ctx.taskboard.listPatrolReviews(issue.id)).resolves.toMatchObject([
+        { sessionId: 'session-patrol-reviewer-49', verdict: 'changes_requested' },
+      ])
     } finally {
       await reopened.dispose()
     }
@@ -700,6 +729,24 @@ describe('SQLite Taskboard service', () => {
         context: { ...validContext, agentPreset: ' ' },
       })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
       await mounted.ctx.taskboard.bindPatrolDevelopmentContext({ attemptId: claimed.id, context: validContext })
+      await expect(mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: claimed.id,
+        sessionId: validContext.sessionId,
+        reviewedCommit: 'commit',
+        verdict: 'approve',
+        findings: 'No findings.',
+        verification: [],
+        risks: [],
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
+      await expect(mounted.ctx.taskboard.recordPatrolReview({
+        attemptId: claimed.id,
+        sessionId: SessionId('reviewer-invalid'),
+        reviewedCommit: ' ',
+        verdict: 'approve',
+        findings: 'No findings.',
+        verification: [],
+        risks: [],
+      })).rejects.toMatchObject({ code: 'patrol_issue_ineligible' })
       await expect(mounted.ctx.taskboard.bindPatrolDevelopmentContext({
         attemptId: claimed.id,
         context: validContext,
@@ -934,7 +981,7 @@ describe('SQLite Taskboard service', () => {
 
     const foreignPath = await databasePath()
     const foreign = new DatabaseSync(foreignPath)
-    foreign.exec('PRAGMA user_version = 3; PRAGMA application_id = 1234')
+    foreign.exec('PRAGMA user_version = 4; PRAGMA application_id = 1234')
     foreign.close()
     await expect(mount(foreignPath)).rejects.toThrow('application id 1234')
   })

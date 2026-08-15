@@ -23,6 +23,7 @@ export type TaskboardErrorCode =
   | 'patrol_issue_ineligible'
   | 'patrol_context_exists'
   | 'patrol_context_missing'
+  | 'patrol_review_exists'
   | 'patrol_policy_invalid'
 
 /** Taskboard failure with a machine-readable code. */
