@@ -16,6 +16,9 @@ export type TaskboardErrorCode =
   | 'prefix_frozen'
   | 'invalid_prefix'
   | 'prefix_exists'
+  | 'patrol_busy'
+  | 'patrol_not_due'
+  | 'patrol_run_not_active'
 
 /** Taskboard failure with a machine-readable code. */
 export class TaskboardError extends Error {

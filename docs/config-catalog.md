@@ -2267,7 +2267,7 @@ export interface Config {
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 ```
 
-Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:65`](../packages/taskboard/taskboard-sqlite/src/index.ts)
+Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:78`](../packages/taskboard/taskboard-sqlite/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 

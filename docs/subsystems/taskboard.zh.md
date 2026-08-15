@@ -6,7 +6,7 @@ Taskboard 子系统记录注册 Workspace 所属的持久工作。[`@deepseek-ai
 
 ## 值与标识
 
-每个 Workspace 拥有一个隐式 `WorkspaceTaskboard`。其唯一前缀与单调分配的编号组成稳定的 `IssueIdentifier`；移动 Issue 不会改写该标识。`IssueId`、`CommentId`、`ActivityId`、`RelationId` 和 `TaskboardActorId` 都是品牌化的不透明标识。
+每个 Workspace 拥有一个隐式 `WorkspaceTaskboard`。其唯一前缀与单调分配的编号组成稳定的 `IssueIdentifier`；移动 Issue 不会改写该标识。`IssueId`、`CommentId`、`ActivityId`、`RelationId`、`PatrolRunId` 和 `TaskboardActorId` 都是品牌化的不透明标识。
 
 每个 Issue 恰有一种状态：`backlog`、`todo`、`in_progress`、`in_review`、`blocked`、`done` 或 `canceled`。优先级是 `none`、`urgent`、`high`、`medium` 或 `low`；它只是元数据，绝不改变手动看板顺序。活跃列表默认排除已归档 Issue。
 
@@ -20,6 +20,14 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 `TaskboardError.code` 可区分记录缺失、版本冲突、前缀冻结、无效归档转换、退回原因缺失和关系校验失败。提供方会在提交前拒绝操作并保留稳定错误码。
 
+## 巡检调度状态
+
+每个 Taskboard 会创建一项 `PatrolPolicy`，固定间隔调度默认关闭并选中 `1h`。支持的间隔词汇严格限定为 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 和 `24h`。启用或修改间隔会从保存时刻计算 `nextDueAt`；关闭则清除该时间，但不改变活跃 Run。
+
+定时触发会消费此前的到期时刻，并按固定节拍推进至当前时间之后的首个节点。因此 Host 重启后只产生一次过期触发，不会重放所有错过的间隔。手动触发不会启用已保存 Policy，即使调度关闭也可以启动。
+
+Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所有 Workspace 的其他活跃行。定时触发重叠会持久化已完成的 `skipped_global_busy` 结果，并推进该 Workspace 的节拍而不排队；手动触发重叠会被拒绝。Run 的终态结果不能覆写，也不存在删除 Run 的操作。
+
 ## 消费方与存储
 
 消费方依赖 Service Definition，而非 SQLite 提供方。提供方启用外键，通过有序 Issue-label 行存储可复用的 Workspace 标签，使用固定 application id 和单调 schema 版本，并在初始化时拒绝存在内容但未标版本的文件、外来 application id 或不受支持的版本。其写事务使 Issue 版本、顺序、标签、必需评论、关系和活动记录保持一致。
@@ -28,7 +36,7 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。附件、巡检调度、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
+当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Service 与 SQLite Provider 现已持有巡检调度状态和永久触发历史；Host timer、执行消费方、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -163,9 +171,50 @@ abstract removeRelation(input: RemoveIssueRelationInput): Promise<Issue>
  * @returns the Issue, or undefined when absent.
  */
 abstract getIssue(reference: IssueReference): Promise<Issue | undefined>
+
+/**
+ * Read one Workspace's durable Patrol Policy.
+ * @param workspaceId - Workspace whose policy is requested.
+ * @returns the policy created with the Taskboard, or undefined when the Taskboard is absent.
+ */
+abstract getPatrolPolicy( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<PatrolPolicy | undefined>
+
+/**
+ * Save Patrol enablement or interval and recalculate its next trigger.
+ * @param input - Workspace, replacements, and caller-observed policy version.
+ * @returns the updated durable policy.
+ */
+abstract updatePatrolPolicy(input: UpdatePatrolPolicyInput): Promise<PatrolPolicy>
+
+/**
+ * List enabled Patrol Policies whose next trigger has arrived.
+ * @returns due policies ordered by due instant and Workspace id.
+ */
+abstract listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]>
+
+/**
+ * Persist one trigger, atomically consuming a scheduled due instant and enforcing Host-wide exclusivity.
+ * @param input - Workspace and trigger origin.
+ * @returns an active Run, or a completed scheduled overlap record.
+ */
+abstract beginPatrolRun(input: BeginPatrolRunInput): Promise<PatrolRun>
+
+/**
+ * Complete one active Patrol Run exactly once.
+ * @param input - Run identity and terminal result.
+ * @returns the completed durable Run.
+ */
+abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
+
+/**
+ * List permanent Patrol Run history for one Workspace, newest first.
+ * @param workspaceId - Workspace whose Run history is requested.
+ * @returns every active and completed Run.
+ */
+abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:63`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:92`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -313,5 +362,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:303`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:403`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

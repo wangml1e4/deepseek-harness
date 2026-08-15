@@ -6,6 +6,7 @@ import {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolRunId,
   RelationId,
   TaskboardActorId,
 } from '@deepseek-ai/dsh-taskboard'
@@ -17,12 +18,16 @@ import type {
   IssuePriority,
   IssueRelation,
   IssueStatus,
+  PatrolPolicy,
+  PatrolRun,
+  PatrolRunResult,
+  PatrolRunTrigger,
   WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 
-/** Initial Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 1
+/** Current pre-release Taskboard SQLite layout version. */
+export const SCHEMA_VERSION = 2
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -90,6 +95,30 @@ export interface RelationRow {
   source_issue_id: string
   target_issue_id: string
   created_at: string
+}
+
+/** Stored Workspace Patrol Policy row. */
+export interface PatrolPolicyRow {
+  workspace_id: string
+  enabled: 0 | 1
+  interval: PatrolPolicy['interval']
+  next_due_at: string | null
+  version: number
+  created_at: string
+  updated_at: string
+}
+
+/** Stored durable Patrol trigger row. */
+export interface PatrolRunRow {
+  id: string
+  workspace_id: string
+  trigger: PatrolRunTrigger
+  scheduled_for: string | null
+  state: PatrolRun['state']
+  result: PatrolRunResult | null
+  error: string | null
+  started_at: string
+  ended_at: string | null
 }
 
 /**
@@ -238,6 +267,50 @@ export function openTaskboardDatabase(
 
       CREATE INDEX IF NOT EXISTS relations_target
         ON relations(target_issue_id, sequence);
+
+      CREATE TABLE IF NOT EXISTS patrol_policies (
+        workspace_id TEXT PRIMARY KEY REFERENCES taskboards(workspace_id),
+        enabled      INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+        interval     TEXT NOT NULL CHECK (interval IN ('5m', '30m', '1h', '2h', '6h', '12h', '24h')),
+        next_due_at  TEXT,
+        version      INTEGER NOT NULL CHECK (version > 0),
+        created_at   TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        CHECK ((enabled = 1 AND next_due_at IS NOT NULL) OR (enabled = 0 AND next_due_at IS NULL))
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS patrol_policies_due
+        ON patrol_policies(enabled, next_due_at, workspace_id);
+
+      CREATE TABLE IF NOT EXISTS patrol_runs (
+        sequence      INTEGER PRIMARY KEY AUTOINCREMENT,
+        id            TEXT NOT NULL UNIQUE,
+        workspace_id  TEXT NOT NULL REFERENCES taskboards(workspace_id),
+        trigger       TEXT NOT NULL CHECK (trigger IN ('scheduled', 'manual')),
+        scheduled_for TEXT,
+        state         TEXT NOT NULL CHECK (state IN ('active', 'completed')),
+        result        TEXT CHECK (result IS NULL OR result IN (
+          'no_eligible_issue', 'review_handoff', 'blocked', 'failed', 'skipped_global_busy'
+        )),
+        error         TEXT,
+        started_at    TEXT NOT NULL,
+        ended_at      TEXT,
+        CHECK (
+          (state = 'active' AND result IS NULL AND ended_at IS NULL) OR
+          (state = 'completed' AND result IS NOT NULL AND ended_at IS NOT NULL)
+        ),
+        CHECK (
+          (trigger = 'scheduled' AND scheduled_for IS NOT NULL) OR
+          (trigger = 'manual' AND scheduled_for IS NULL)
+        )
+      ) STRICT;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS patrol_runs_one_active
+        ON patrol_runs(state)
+        WHERE state = 'active';
+
+      CREATE INDEX IF NOT EXISTS patrol_runs_workspace_sequence
+        ON patrol_runs(workspace_id, sequence DESC);
     `)
     if (onDisk === 0) {
       db.exec(`PRAGMA application_id = ${TASKBOARD_SQLITE_APPLICATION_ID}`)
@@ -361,5 +434,41 @@ export function rowToRelation(row: RelationRow, issueId: IssueId): IssueRelation
     issueId,
     relatedIssueId: IssueId(blocks ? row.target_issue_id : row.source_issue_id),
     createdAt: row.created_at,
+  }
+}
+
+/**
+ * Convert a stored Patrol Policy row to its public value.
+ * @param row - SQLite Patrol Policy row.
+ * @returns public durable Patrol Policy.
+ */
+export function rowToPatrolPolicy(row: PatrolPolicyRow): PatrolPolicy {
+  return {
+    workspaceId: row.workspace_id as WorkspaceId,
+    enabled: row.enabled === 1,
+    interval: row.interval,
+    nextDueAt: row.next_due_at,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+/**
+ * Convert a stored Patrol Run row to its public value.
+ * @param row - SQLite Patrol Run row.
+ * @returns public durable Patrol Run.
+ */
+export function rowToPatrolRun(row: PatrolRunRow): PatrolRun {
+  return {
+    id: PatrolRunId(row.id),
+    workspaceId: row.workspace_id as WorkspaceId,
+    trigger: row.trigger,
+    scheduledFor: row.scheduled_for,
+    state: row.state,
+    result: row.result,
+    error: row.error,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
   }
 }

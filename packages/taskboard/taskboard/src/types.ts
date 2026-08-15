@@ -1,9 +1,25 @@
 /** Public Taskboard value types. @module @deepseek-ai/dsh-taskboard/types */
 
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
-import type { ActivityId, CommentId, IssueId, IssueIdentifier, RelationId, TaskboardActorId } from './brand.ts'
+import type {
+  ActivityId,
+  CommentId,
+  IssueId,
+  IssueIdentifier,
+  PatrolRunId,
+  RelationId,
+  TaskboardActorId,
+} from './brand.ts'
 
-export type { ActivityId, CommentId, IssueId, IssueIdentifier, RelationId, TaskboardActorId } from './brand.ts'
+export type {
+  ActivityId,
+  CommentId,
+  IssueId,
+  IssueIdentifier,
+  PatrolRunId,
+  RelationId,
+  TaskboardActorId,
+} from './brand.ts'
 
 /** Closed Issue lifecycle used by every Taskboard Consumer. */
 export type IssueStatus =
@@ -20,6 +36,90 @@ export type IssuePriority = 'none' | 'urgent' | 'high' | 'medium' | 'low'
 
 /** Closed first-release assignment choices. */
 export type IssueAssignee = 'unassigned' | 'user' | 'patrol_agent'
+
+/** Fixed intervals accepted by the first-release Patrol scheduler. */
+export type PatrolInterval = '5m' | '30m' | '1h' | '2h' | '6h' | '12h' | '24h'
+
+/** User-controlled durable schedule for one Workspace's Patrol Agent. */
+export interface PatrolPolicy {
+  /** Workspace whose Taskboard owns this policy. */
+  readonly workspaceId: WorkspaceId
+  /** Whether fixed-interval triggers are authorized. */
+  readonly enabled: boolean
+  /** Selected fixed interval. */
+  readonly interval: PatrolInterval
+  /** Next scheduled trigger instant, or null while disabled. */
+  readonly nextDueAt: string | null
+  /** Monotonic optimistic-concurrency version. */
+  readonly version: number
+  /** ISO-8601 creation instant. */
+  readonly createdAt: string
+  /** ISO-8601 last-save instant. */
+  readonly updatedAt: string
+}
+
+/** Origin of one durable Patrol Run. */
+export type PatrolRunTrigger = 'scheduled' | 'manual'
+
+/** Terminal result recorded by the scheduling layer. */
+export type PatrolRunResult =
+  | 'no_eligible_issue'
+  | 'review_handoff'
+  | 'blocked'
+  | 'failed'
+  | 'skipped_global_busy'
+
+/** One durable scheduled or manually requested Patrol execution. */
+export interface PatrolRun {
+  /** Stable opaque trigger identity. */
+  readonly id: PatrolRunId
+  /** Workspace whose policy snapshot initiated this Run. */
+  readonly workspaceId: WorkspaceId
+  /** Scheduled or one-off origin. */
+  readonly trigger: PatrolRunTrigger
+  /** Due instant consumed by a scheduled trigger, otherwise null. */
+  readonly scheduledFor: string | null
+  /** Current persistence state. */
+  readonly state: 'active' | 'completed'
+  /** Terminal result, or null while active. */
+  readonly result: PatrolRunResult | null
+  /** Human-readable failure detail, or null when none was recorded. */
+  readonly error: string | null
+  /** ISO-8601 trigger start instant. */
+  readonly startedAt: string
+  /** ISO-8601 terminal instant, or null while active. */
+  readonly endedAt: string | null
+}
+
+/** Version-checked Patrol Policy save. */
+export interface UpdatePatrolPolicyInput {
+  /** Workspace whose policy changes. */
+  readonly workspaceId: WorkspaceId
+  /** Replacement enablement when supplied. */
+  readonly enabled?: boolean
+  /** Replacement fixed interval when supplied. */
+  readonly interval?: PatrolInterval
+  /** Policy version observed by the caller. */
+  readonly expectedVersion: number
+}
+
+/** Input that persists one scheduled or manual trigger. */
+export interface BeginPatrolRunInput {
+  /** Workspace whose saved policy is used. */
+  readonly workspaceId: WorkspaceId
+  /** Scheduled or one-off trigger origin. */
+  readonly trigger: PatrolRunTrigger
+}
+
+/** Input that completes one active Patrol Run. */
+export interface CompletePatrolRunInput {
+  /** Active Run to complete. */
+  readonly runId: PatrolRunId
+  /** Terminal execution result. */
+  readonly result: Exclude<PatrolRunResult, 'skipped_global_busy'>
+  /** Human-readable failure detail, when any. */
+  readonly error?: string
+}
 
 /** Workspace-owned metadata for its implicit Taskboard. */
 export interface WorkspaceTaskboard {
