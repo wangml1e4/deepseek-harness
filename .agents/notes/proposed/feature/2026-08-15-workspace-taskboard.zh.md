@@ -104,6 +104,12 @@ Taskboard 是由宿主数据支持的永久 Workspace 产品界面，与拟议�
 
 实现交付会按以下顺序拆成可独立验证的 PR 或一组正式 stack：领域与 SQLite；Host Remote、CLI 与 skill；Dashboard、Board、List 与详情 UI；Gantt 与依赖；Patrol 调度；Git、Session 与权限；Reviewer 与人工审查；恢复、审计与最终验证。每个后续 PR 都会明确依赖前一层，在自身可合并点保持各 capability role 完整，并进入人工审查而不自动合并。
 
+## 当前实现
+
+前两个 stack 层现已提供 Workspace 所属 Taskboard Service Definition、本地 SQLite Provider、Host Typert Remote、JSON `taskctl` 命令行和内置 `manage-taskboard` skill。标准 Web Host 会把这些角色组装在一起，安装后的 `dsh` 包同时暴露 `dsh` 与 `taskctl` 可执行文件。Remote 与 CLI 覆盖 Workspace 元数据、Issue 生命周期与顺序、评论、活动记录和依赖关系；尚未暴露附件、Client 实时事件、Patrol 状态、开发上下文或审查证据。
+
+浏览器 Taskboard UI、Gantt 渲染器、Patrol 调度器、Git 与 Session 执行、独立 Reviewer、人工审查控件和恢复层仍处于提案状态。这些能力尚未交付，不会削弱当前 Service 的禁止删除、乐观版本、历史只追加和 Workspace 身份规则。
+
 ## 考虑过的替代方案
 
 **保留独立 Taskboard Project。**不采用，因为 Project 会重复 Workspace 身份，并要求用户和 agent 维护第二份指向同一目录及会话的映射。

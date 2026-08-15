@@ -73,6 +73,20 @@
     - id: workspace
       name: '@deepseek-ai/dsh-workspace'
 
+    # One implicit Taskboard per registered Workspace. The Provider owns the
+    # durable file; the Remote Consumer refuses ids absent from Workspace.
+    - id: taskboard-sqlite
+      name: '@deepseek-ai/dsh-taskboard-sqlite'
+      config:
+        path: !!js dshHomePath('taskboard.sqlite')
+
+    - id: taskboard-remote
+      name: '@deepseek-ai/dsh-taskboard-remote'
+
+    # Global bundled workflow instructions for interactive Taskboard work.
+    - id: skill-manage-taskboard
+      name: '@deepseek-ai/dsh-skill-manage-taskboard'
+
     - id: session-projection-cache
       name: '@deepseek-ai/dsh-session-projection-cache'
       config:

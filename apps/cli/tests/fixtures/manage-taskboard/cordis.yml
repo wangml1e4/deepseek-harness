@@ -1,0 +1,10 @@
+- insert:
+    - id: skill-manage-taskboard
+      name: '@deepseek-ai/dsh-skill-manage-taskboard'
+
+- id: skill-filesystem
+  config:
+    watch: false
+
+- id: session-telemetry-otel
+  disabled: true

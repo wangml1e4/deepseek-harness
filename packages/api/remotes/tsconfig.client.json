@@ -34,6 +34,9 @@
       "path": "../../feedback/message-feedback"
     },
     {
+      "path": "../../taskboard/taskboard-remote"
+    },
+    {
       "path": "../../host/plugin-inventory"
     },
     {

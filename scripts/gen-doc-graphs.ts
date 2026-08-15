@@ -102,7 +102,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Workspace Taskboard seam',
     mode: 'seam',
     implementations: ['taskboard-sqlite'],
+    consumers: ['taskboard-remote'],
     note: 'The Service Definition owns Workspace-scoped Issues and append-only history; the local Provider commits those records in one Host-owned SQLite database.',
+  },
+  {
+    key: 'taskboardRemote',
+    pkg: 'taskboard-remote',
+    title: 'Taskboard Host Remote',
+    mode: 'core',
+    note: 'Projects the Taskboard Service into typed request/response methods while preserving Workspace authority and stable domain failures.',
   },
   {
     key: 'attachments',

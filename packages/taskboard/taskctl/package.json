@@ -1,0 +1,32 @@
+{
+  "name": "@deepseek-ai/dsh-taskctl",
+  "description": "JSON CLI for the DeepSeek Harness Taskboard Host Remote",
+  "version": "0.1.0-rc.5",
+  "publishConfig": { "access": "public" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "packages/taskboard/taskctl"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "bin": { "taskctl": "lib/bin.js" },
+  "exports": {
+    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
+    "./bin": { "types": "./lib/types/bin.d.ts", "default": "./lib/bin.js" },
+    "./invariant": { "types": "./lib/types/invariant.d.ts", "default": "./lib/invariant.js" },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["lib/index.js", "lib/bin.js", "lib/invariant.js", "lib/types/**/*.d.ts", "licenses"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "workspace:^",
+    "@deepseek-ai/dsh-invariants": "workspace:^"
+  }
+}
