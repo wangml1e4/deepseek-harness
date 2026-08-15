@@ -2279,6 +2279,8 @@ Source: [`packages/taskboard/taskboard-patrol/src/index.ts:48`](../packages/task
 export interface Config {
   /** SQLite file path, or `:memory:` for an in-process store. */
   path: string
+  /** Managed attachment directory; file-backed databases default to `<path>.attachments`. */
+  attachmentsPath?: string
   /** Durable SQLite journal mode. */
   journalMode?: JournalMode
   /** Maximum wait for a concurrent SQLite writer. */
@@ -2289,7 +2291,7 @@ export interface Config {
 export type JournalMode = 'wal' | 'delete' | 'truncate' | 'persist'
 ```
 
-Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:93`](../packages/taskboard/taskboard-sqlite/src/index.ts)
+Source: [`packages/taskboard/taskboard-sqlite/src/index.ts:102`](../packages/taskboard/taskboard-sqlite/src/index.ts)
 
 <a id="deepseek-aidsh-terminal-bash"></a>
 

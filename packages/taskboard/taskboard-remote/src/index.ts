@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import {
+  MAX_ATTACHMENT_BYTES,
   TaskboardError,
 } from '@deepseek-ai/dsh-taskboard'
 import type {
@@ -9,6 +10,7 @@ import type {
   AddIssueRelationInput,
   Comment,
   CreateIssueInput,
+  DeleteAttachmentInput,
   Issue,
   IssueReference,
   IssueRelationMutation,
@@ -22,6 +24,7 @@ import type {
   UpdateIssueInput,
   VersionedIssueInput,
   WorkspaceTaskboard,
+  TaskboardAttachmentMutation,
 } from '@deepseek-ai/dsh-taskboard/types'
 import type {} from '@deepseek-ai/dsh-taskboard-patrol'
 import type {} from '@deepseek-ai/dsh-workspace'
@@ -29,6 +32,10 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   TaskboardActivityListValue,
+  TaskboardAttachmentContentValue,
+  TaskboardAttachmentListValue,
+  TaskboardAttachmentReadInput,
+  TaskboardAttachmentUploadInput,
   TaskboardCommentListValue,
   TaskboardIssueListValue,
   TaskboardIssueValue,
@@ -184,6 +191,52 @@ export class TaskboardRemote extends TypertRemoteService {
   }
 
   /**
+   * List one Issue's attachment metadata without exposing Host paths.
+   * @param reference - opaque id or human-readable identifier.
+   * @returns ordered metadata or a stable business failure.
+   */
+  @Remote('listAttachments')
+  listAttachments(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardAttachmentListValue>> {
+    return this.result(async () => ({ items: await this.ctx.taskboard.listAttachments(reference) }))
+  }
+
+  /**
+   * Decode and store one browser attachment through the Taskboard Service.
+   * @param input - metadata, canonical base64 bytes, optimistic version, and actor.
+   * @returns updated Issue and attachment metadata or a stable business failure.
+   */
+  @Remote('addAttachment')
+  addAttachment(input: TaskboardAttachmentUploadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentMutation>> {
+    return this.result(() => this.ctx.taskboard.addAttachment({
+      ...input,
+      data: decodeAttachment(input.data),
+    }))
+  }
+
+  /**
+   * Read one Issue-scoped attachment without exposing its Host storage path.
+   * @param input - owning Issue and attachment identities.
+   * @returns metadata and canonical base64 bytes or a stable business failure.
+   */
+  @Remote('readAttachment')
+  readAttachment(input: TaskboardAttachmentReadInput): Promise<TaskboardRemoteResult<TaskboardAttachmentContentValue>> {
+    return this.result(async () => {
+      const content = await this.ctx.taskboard.readAttachment(input)
+      return { attachment: content.attachment, data: Buffer.from(content.data).toString('base64') }
+    })
+  }
+
+  /**
+   * Permanently remove one attachment only after explicit confirmation.
+   * @param input - attachment identity, confirmation, optimistic version, and actor.
+   * @returns updated owning Issue or a stable business failure.
+   */
+  @Remote('deleteAttachment')
+  deleteAttachment(input: DeleteAttachmentInput): Promise<TaskboardRemoteResult<Issue>> {
+    return this.result(() => this.ctx.taskboard.deleteAttachment(input))
+  }
+
+  /**
    * List one Issue's append-only Activity.
    * @param reference - Opaque id or human-readable identifier.
    * @returns ordered Activity or a stable business failure.
@@ -325,6 +378,25 @@ export class TaskboardRemote extends TypertRemoteService {
       throw error
     }
   }
+}
+
+/** Decode canonical base64 without allowing a carrier to bypass the 25 MB limit. */
+function decodeAttachment(data: string): Uint8Array {
+  const maximumEncodedLength = Math.ceil(MAX_ATTACHMENT_BYTES / 3) * 4
+  if (data.length > maximumEncodedLength) {
+    throw new TaskboardError('attachment_too_large', `attachment exceeds the ${MAX_ATTACHMENT_BYTES}-byte maximum`)
+  }
+  if (data.length % 4 !== 0) {
+    throw new TaskboardError('attachment_invalid', 'attachment data must be canonical base64')
+  }
+  const decoded = Buffer.from(data, 'base64')
+  if (decoded.byteLength > MAX_ATTACHMENT_BYTES) {
+    throw new TaskboardError('attachment_too_large', `attachment exceeds the ${MAX_ATTACHMENT_BYTES}-byte maximum`)
+  }
+  if (decoded.toString('base64') !== data) {
+    throw new TaskboardError('attachment_invalid', 'attachment data must be canonical base64')
+  }
+  return new Uint8Array(decoded)
 }
 
 export default TaskboardRemote

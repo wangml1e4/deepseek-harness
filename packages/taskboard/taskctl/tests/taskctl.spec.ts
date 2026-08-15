@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { parseTaskctlArgs, runTaskctl, TASKCTL_SCHEMA_VERSION } from '../src/index.ts'
 
 interface RpcRequestBody {
@@ -6,6 +9,8 @@ interface RpcRequestBody {
   readonly method: string
   readonly payload: { readonly args: Record<string, unknown> }
 }
+
+const tempDirs: string[] = []
 
 function capture() {
   let value = ''
@@ -65,8 +70,9 @@ function capturingFetch(calls: RpcRequestBody[]): typeof fetch {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks()
+  await Promise.all(tempDirs.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
 describe('taskctl', () => {
@@ -298,6 +304,71 @@ describe('taskctl', () => {
     ])
   })
 
+  it('uploads, lists, downloads, and explicitly confirms attachment deletion', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-taskctl-attachments-'))
+    tempDirs.push(directory)
+    const source = join(directory, 'evidence.bin')
+    const output = join(directory, 'downloaded.bin')
+    await writeFile(source, Uint8Array.of(1, 2, 3))
+    const calls: RpcRequestBody[] = []
+    const resultValues = [
+      { items: [] },
+      { issue: { version: 2 }, attachment: { id: 'attachment-1', name: 'evidence.bin' } },
+      { attachment: { id: 'attachment-1', name: 'evidence.bin', mediaType: 'application/octet-stream' }, data: 'AQID' },
+      { version: 3 },
+    ]
+    const fetchImplementation: typeof fetch = async (_input, init) => {
+      const body = requestBody(init)
+      calls.push(body)
+      return rpcSuccess(body.rpcId, { ok: true, value: resultValues[calls.length - 1] })
+    }
+    for (const command of [
+      ['attachment', 'list', 'TASK-1'],
+      ['attachment', 'add', 'TASK-1', '--file', source, '--if-version', '1'],
+      ['attachment', 'download', 'TASK-1', 'attachment-1', '--output', output],
+      ['attachment', 'delete', 'TASK-1', 'attachment-1', '--if-version', '2', '--confirm'],
+    ]) {
+      expect((await run(command, fetchImplementation)).exitCode).toBe(0)
+    }
+    expect(calls.map(call => ({ method: call.method, args: call.payload.args }))).toEqual([
+      { method: 'taskboard/listAttachments', args: { reference: 'TASK-1' } },
+      { method: 'taskboard/addAttachment', args: { input: {
+        reference: 'TASK-1',
+        expectedVersion: 1,
+        name: 'evidence.bin',
+        mediaType: 'application/octet-stream',
+        data: 'AQID',
+        actor: { type: 'user', id: 'local-user', name: 'Local User' },
+      } } },
+      { method: 'taskboard/readAttachment', args: { input: {
+        reference: 'TASK-1', attachmentId: 'attachment-1',
+      } } },
+      { method: 'taskboard/deleteAttachment', args: { input: {
+        reference: 'TASK-1', attachmentId: 'attachment-1', expectedVersion: 2, confirmed: true,
+        actor: { type: 'user', id: 'local-user', name: 'Local User' },
+      } } },
+    ])
+    await expect(readFile(output)).resolves.toEqual(Buffer.from([1, 2, 3]))
+  })
+
+  it('rejects malformed attachment download payloads without creating output files', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-taskctl-invalid-attachments-'))
+    tempDirs.push(directory)
+    const values = [
+      { attachment: null, data: 'AQID' },
+      { attachment: { id: 'attachment-1', name: 'bad.bin', mediaType: 'application/octet-stream' }, data: 'AB==' },
+    ]
+    for (const [index, value] of values.entries()) {
+      const output = join(directory, `download-${index}.bin`)
+      const result = await run(
+        ['attachment', 'download', 'TASK-1', 'attachment-1', '--output', output],
+        () => Promise.resolve(rpcSuccess('taskctl-test', { ok: true, value })),
+      )
+      expect(result).toMatchObject({ exitCode: 4, stderr: { error: { code: 'invalid_response' } } })
+      await expect(readFile(output)).rejects.toMatchObject({ code: 'ENOENT' })
+    }
+  })
+
   it('reads, updates, starts, and inspects Patrol through the same Remote', async () => {
     const calls: RpcRequestBody[] = []
     const fetchImplementation = capturingFetch(calls)
@@ -363,6 +434,7 @@ describe('taskctl', () => {
       [['issue', 'update', 'TASK-1', '--if-version', '1.5'], 'Option --if-version requires an integer'],
       [['issue', 'update', 'TASK-1', '--if-version', '0'], 'Option --if-version requires a positive integer'],
       [['issue', 'update', 'TASK-1'], 'Option --if-version requires a positive integer'],
+      [['attachment', 'delete', 'TASK-1', 'attachment-1', '--if-version', '1'], 'Option --confirm is required'],
       [['issue', 'update', 'TASK-1', '--if-version', '1', '--actor-type', 'robot'], 'Invalid --actor-type'],
       [['relation', 'add', 'TASK-1', '--type', 'relates', '--issue', 'TASK-2', '--if-version', '1'], 'Invalid --type'],
       [['patrol', 'update', 'workspace-1', '--enabled', 'yes', '--if-version', '1'], 'Invalid --enabled'],

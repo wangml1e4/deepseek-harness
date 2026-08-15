@@ -6,7 +6,7 @@ English | [中文](README.zh.md)
 
 ## Commands and output
 
-The CLI covers Workspace metadata; Issue list, get, create, update, move, archive, and restore; append-only Comments and Activity; dependency relations; and Patrol policy, history, manual Run, and Issue evidence operations. Run `taskctl <resource> <action>` with the option reference bundled in [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md).
+The CLI covers Workspace metadata; Issue list, get, create, update, move, archive, and restore; append-only Comments and Activity; attachment upload, list, download, and confirmed deletion; dependency relations; and Patrol policy, history, manual Run, and Issue evidence operations. Run `taskctl <resource> <action>` with the option reference bundled in [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md).
 
 Each invocation writes exactly one JSON object. Success uses `{ "schemaVersion": 1, "result": ... }`; failure uses `{ "schemaVersion": 1, "error": { "code", "message" } }`.
 
@@ -37,5 +37,5 @@ Independent of model requests. Command results enter a Session only when a calli
 ## Known Limitations and Deferred Work
 
 - `taskctl` requires a running Web Host and does not launch one.
-- Attachments are not exposed. Patrol eligibility, claims, and lifecycle writeback remain Host-owned transactions rather than model-authored CLI steps.
+- Patrol eligibility, claims, and lifecycle writeback remain Host-owned transactions rather than model-authored CLI steps.
 - The CLI performs no GitHub Issue publication or synchronization.

@@ -6,7 +6,9 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 ## Remote 方法
 
-`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、活动记录、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。
+`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、活动记录、附件、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。
+
+附件元数据与字节分开列出。上传和读取方法通过受控 Host namespace 传输规范 base64，在持久化前执行 25 MB 上限，并把每次读取限定到所属 Issue，且绝不返回受管文件系统路径。删除操作把显式确认与乐观版本校验委托给 Taskboard Service。
 
 按 Workspace 划分的方法会在接触 Taskboard 状态前拒绝未知 Workspace id。需要隐式 Taskboard 的读取会根据当前已注册 Workspace 的标题确保其存在。移动 Issue 时也会校验并确保目标 Workspace 存在。
 
@@ -27,5 +29,4 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 ## 已知限制与暂缓事项
 
 - 浏览器 API 装配会转发 `taskboard/changed`，供当前 Workspace 缓存失效；该事件不携带 Issue 数据。
-- 附件尚未进入本协议层。
 - Remote 是 Host 本地应用 API；它不会发布或同步 GitHub Issue。

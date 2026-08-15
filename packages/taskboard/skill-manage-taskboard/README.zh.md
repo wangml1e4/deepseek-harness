@@ -6,7 +6,7 @@
 
 ## 工作流
 
-该 skill 指示 Agent 使用 `taskctl` 执行持久 Issue、评论、活动记录和关系操作。它要求 Agent 先读取 Issue 及其最新评论，只能通过移至 `in_progress` 认领 `todo` 工作；发生一次乐观冲突后，只有重新读取当前状态才能重试一次；同时保留无关工作，且绝不删除 Issue。
+该 skill 指示 Agent 使用 `taskctl` 执行持久 Issue、评论、活动记录、附件和关系操作。它要求 Agent 先读取 Issue 及其最新评论，只能通过移至 `in_progress` 认领 `todo` 工作；发生一次乐观冲突后，只有重新读取当前状态才能重试一次；同时保留无关工作，且绝不删除 Issue。
 
 CLI 参考也覆盖 Patrol 策略、Run 和 Issue 证据读取。只有用户明确要求时，该 skill 才允许修改 Patrol 设置或启动手工 Run；资格判定、认领、Session 绑定、审批处理、审查和生命周期回写仍由 Host 持有。
 
@@ -51,5 +51,4 @@ skill 目录可见时包含一个固定的名称与描述项。
 ## 已知限制与暂缓事项
 
 - 该 skill 需要内置 `taskctl` 可执行文件和已运行的 Web Host。
-- 附件仍不可用。
 - Patrol 启动恢复不属于该交互工作流，由 Host Patrol 消费方负责。

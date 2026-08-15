@@ -45,6 +45,17 @@ taskctl activity list ISSUE_ID
 
 Comments and Activity are append-only.
 
+## Attachments
+
+```bash
+taskctl attachment list ISSUE_ID
+taskctl attachment add ISSUE_ID --file PATH --if-version N [--name NAME] [--media-type TYPE]
+taskctl attachment download ISSUE_ID ATTACHMENT_ID --output PATH
+taskctl attachment delete ISSUE_ID ATTACHMENT_ID --if-version N --confirm
+```
+
+Uploads accept any file type up to 25 MB. Downloads refuse to overwrite an existing output path. Attachment deletion is permanent and requires the user's explicit request plus `--confirm`; this exception does not permit deleting an Issue, Comment, Activity entry, or Patrol history.
+
 ## Relations
 
 ```bash

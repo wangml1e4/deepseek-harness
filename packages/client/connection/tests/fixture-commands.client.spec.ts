@@ -159,6 +159,49 @@ describe('FixtureApiClient Taskboard Remote', () => {
     }])
     expect(typeof seededRelations.value.items[0]?.createdAt).toBe('string')
 
+    const attachments = await callRemote<{
+      ok: true
+      value: { items: { id: string; name: string; size: number }[] }
+    }>(rpc, 'taskboard/listAttachments', { reference: listed.value.items[0]!.id })
+    expect(attachments.value.items).toMatchObject([{ name: 'taskboard-preview.png', size: 247 }])
+    const content = await callRemote<{
+      ok: true
+      value: { attachment: { id: string }; data: string }
+    }>(rpc, 'taskboard/readAttachment', {
+      input: { reference: listed.value.items[0]!.id, attachmentId: attachments.value.items[0]!.id },
+    })
+    expect(content.value.attachment.id).toBe(attachments.value.items[0]!.id)
+    expect(content.value.data).toMatch(/^iVBOR/u)
+    const uploaded = await callRemote<{
+      ok: true
+      value: { issue: { version: number }; attachment: { id: string; name: string; size: number } }
+    }>(rpc, 'taskboard/addAttachment', {
+      input: {
+        reference: listed.value.items[0]!.id,
+        expectedVersion: 1,
+        name: 'evidence.bin',
+        mediaType: 'application/octet-stream',
+        data: 'AQID',
+        actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' },
+      },
+    })
+    expect(uploaded.value).toMatchObject({
+      issue: { version: 2 },
+      attachment: { name: 'evidence.bin', size: 3 },
+    })
+    const deleted = await callRemote<{ ok: true; value: { version: number } }>(
+      rpc,
+      'taskboard/deleteAttachment',
+      { input: {
+        reference: listed.value.items[0]!.id,
+        attachmentId: uploaded.value.attachment.id,
+        expectedVersion: uploaded.value.issue.version,
+        confirmed: true,
+        actor: { type: 'user', id: 'fixture-user', name: 'Fixture User' },
+      } },
+    )
+    expect(deleted.value.version).toBe(3)
+
     const created = await callRemote<{ ok: true; value: { id: string; version: number } }>(
       rpc, 'taskboard/createIssue', { input: { workspaceId: 'fx-ws-fixture', title: 'Exercise fixture' } })
     const updated = await callRemote<{ ok: true; value: { title: string; version: number } }>(

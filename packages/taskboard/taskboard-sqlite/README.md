@@ -7,6 +7,7 @@ The local SQLite Service Provider for `ctx.taskboard`. It stores every Workspace
 ## Configuration and durability
 
 - `path` is the SQLite filename or `:memory:` for tests. The provider creates parent directories with owner-only permissions and creates a missing database file as mode `0600`.
+- `attachmentsPath` selects the owner-only managed byte directory. A file-backed database defaults to `<path>.attachments`; `:memory:` requires this option before attachment operations are available. Opaque attachment ids are the only managed filenames, so original names never participate in path resolution.
 - `journalMode` defaults to `wal`; `busyTimeoutMs` defaults to 5000. Foreign keys remain enabled.
 - The database carries a fixed application id and monotonic schema version. A populated unversioned database, a foreign application id, or any unsupported version fails during service initialization.
 - Issue mutations, version updates, Activity entries, and required return Comments commit in the same transaction. Comment and Activity sequence columns preserve append order even when timestamps match.
@@ -15,6 +16,7 @@ The local SQLite Service Provider for `ctx.taskboard`. It stores every Workspace
 - Patrol Run rows have no deletion operation. A partial unique index enforces one active Run across every Workspace even if multiple scheduling callers race.
 - Partial unique indexes allow one active Attempt per Run and per Issue. Claim, lifecycle, blocker Comment, Activity, Session binding, and result-commit writes share the same SQLite transaction as their authoritative Issue mutation.
 - Independent Reviewer evidence is append-only. A unique Attempt reference prevents duplicate reviews, while foreign keys retain the owning Attempt, Issue, and Reviewer Session identities.
+- Attachment metadata is ordered and transactional in SQLite while bytes remain adjacent to the database, never in a Workspace. Upload uses an exclusive owner-only temporary file and atomic rename before committing metadata; confirmed deletion quarantines bytes before committing the metadata removal. Both operations advance the Issue version and retain Activity evidence.
 
 The provider supplies `TaskboardService`; Consumers depend on [`@deepseek-ai/dsh-taskboard`](../taskboard/README.md), never this package.
 

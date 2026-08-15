@@ -1,13 +1,13 @@
 /** SQLite Provider for the Workspace-owned Taskboard service. */
 
 import { randomUUID } from 'node:crypto'
-import { open } from 'node:fs/promises'
-import { mkdir } from 'node:fs/promises'
-import { dirname, resolve } from 'node:path'
+import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import {
   ActivityId,
+  TaskboardAttachmentId,
   CommentId,
   IssueId,
   IssueIdentifier,
@@ -16,6 +16,7 @@ import {
   RelationId,
   TaskboardError,
   TaskboardService,
+  MAX_ATTACHMENT_BYTES,
   DEFAULT_PATROL_INTERVAL,
   nextPatrolCadence,
   nextPatrolDueAfterSave,
@@ -23,6 +24,7 @@ import {
 import type {
   Activity,
   ActivityChange,
+  AddAttachmentInput,
   AddCommentInput,
   AddIssueRelationInput,
   BindPatrolDevelopmentContextInput,
@@ -32,12 +34,16 @@ import type {
   CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
+  DeleteAttachmentInput,
   EnsureWorkspaceInput,
   FailPatrolRecoveryInput,
   Issue,
   IssueReference,
   IssueRelation,
   IssueRelationMutation,
+  TaskboardAttachment,
+  TaskboardAttachmentContent,
+  TaskboardAttachmentMutation,
   ListIssuesInput,
   MoveIssueInput,
   PatrolAttempt,
@@ -46,6 +52,7 @@ import type {
   PatrolReview,
   RecordPatrolReviewInput,
   PatrolRun,
+  ReadAttachmentInput,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   UpdateIssueInput,
@@ -56,6 +63,7 @@ import type {
 } from '@deepseek-ai/dsh-taskboard'
 import {
   openTaskboardDatabase,
+  rowToAttachment,
   rowToActivity,
   rowToComment,
   rowToIssue,
@@ -67,6 +75,7 @@ import {
   rowToRelation,
   rowToWorkspace,
   type ActivityRow,
+  type AttachmentRow,
   type CommentRow,
   type IssueRow,
   type JournalMode,
@@ -93,6 +102,8 @@ export const MAX_ISSUE_PREFIX_LENGTH = 12
 export interface Config {
   /** SQLite file path, or `:memory:` for an in-process store. */
   path: string
+  /** Managed attachment directory; file-backed databases default to `<path>.attachments`. */
+  attachmentsPath?: string
   /** Durable SQLite journal mode. */
   journalMode?: JournalMode
   /** Maximum wait for a concurrent SQLite writer. */
@@ -101,6 +112,7 @@ export interface Config {
 
 interface ResolvedConfig {
   path: string
+  attachmentsPath: string | null
   journalMode: JournalMode
   busyTimeoutMs: number
 }
@@ -109,6 +121,9 @@ interface ResolvedConfig {
 function resolveConfig(config: Config): ResolvedConfig {
   return {
     path: config.path,
+    attachmentsPath: config.attachmentsPath === undefined
+      ? config.path === ':memory:' ? null : `${resolve(config.path)}.attachments`
+      : resolve(config.attachmentsPath),
     journalMode: config.journalMode ?? DEFAULT_JOURNAL_MODE,
     busyTimeoutMs: config.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
   }
@@ -172,6 +187,7 @@ function replaceLabels(
 export class SqliteTaskboard extends TaskboardService {
   static Config: z<Config> = z.object({
     path: z.string().required(),
+    attachmentsPath: z.string().pattern(/\S/u),
     journalMode: z.union(['wal', 'delete', 'truncate', 'persist'] as const).default(DEFAULT_JOURNAL_MODE),
     busyTimeoutMs: z.number().step(1).min(0).default(DEFAULT_BUSY_TIMEOUT_MS),
   })
@@ -192,6 +208,10 @@ export class SqliteTaskboard extends TaskboardService {
     if (actual !== ':memory:') {
       await mkdir(dirname(actual), { recursive: true, mode: 0o700 })
       await createDatabaseFile(actual)
+    }
+    if (this.resolvedConfig.attachmentsPath !== null) {
+      await mkdir(this.resolvedConfig.attachmentsPath, { recursive: true, mode: 0o700 })
+      await chmod(this.resolvedConfig.attachmentsPath, 0o700)
     }
     this.db = openTaskboardDatabase(
       actual,
@@ -727,6 +747,243 @@ export class SqliteTaskboard extends TaskboardService {
       ORDER BY sequence
     `).all(issueId) as unknown as ActivityRow[]
     return rows.map(rowToActivity)
+  }
+
+  async addAttachment(input: AddAttachmentInput): Promise<TaskboardAttachmentMutation> {
+    if (input.name.trim().length === 0) {
+      throw new TaskboardError('attachment_invalid', 'attachment filename must not be blank')
+    }
+    if (input.data.byteLength > MAX_ATTACHMENT_BYTES) {
+      throw new TaskboardError(
+        'attachment_too_large',
+        `attachment '${input.name}' is ${input.data.byteLength} bytes; maximum is ${MAX_ATTACHMENT_BYTES}`,
+      )
+    }
+    const root = this.attachmentRoot()
+    const initial = await this.getIssue(input.reference)
+    if (initial === undefined) {
+      throw new TaskboardError('issue_not_found', `cannot attach a file to missing Issue '${input.reference}'`)
+    }
+    if (initial.version !== input.expectedVersion) {
+      throw new TaskboardError(
+        'version_conflict',
+        `cannot attach a file to Issue '${input.reference}': expected version ${input.expectedVersion}, found ${initial.version}`,
+      )
+    }
+    const id = TaskboardAttachmentId(randomUUID())
+    const finalPath = join(root, id)
+    const temporaryPath = join(root, `.${id}.${randomUUID()}.tmp`)
+    try {
+      const handle = await open(temporaryPath, 'wx', 0o600)
+      try {
+        await handle.writeFile(input.data)
+        await handle.sync()
+      } finally {
+        await handle.close()
+      }
+      await rename(temporaryPath, finalPath)
+    } catch (error: unknown) {
+      await unlink(temporaryPath).catch(() => {
+        // An exclusive temporary file may not exist when opening it failed.
+      })
+      throw error
+    }
+
+    const db = this.database()
+    let committed = false
+    try {
+      db.exec('BEGIN IMMEDIATE')
+      const current = db.prepare(`
+        SELECT id, workspace_id, version
+        FROM issues
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        workspace_id: string
+        version: number
+      } | undefined
+      /* v8 ignore start -- Taskboard exposes no permanent Issue deletion between the preflight read and this transaction. */
+      if (current === undefined) {
+        throw new TaskboardError('issue_not_found', `cannot attach a file to missing Issue '${input.reference}'`)
+      }
+      /* v8 ignore stop */
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot attach a file to Issue '${input.reference}': expected version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      const timestamp = new Date().toISOString()
+      const mediaType = input.mediaType.trim() || 'application/octet-stream'
+      db.prepare(`
+        INSERT INTO attachments (
+          id, issue_id, name, media_type, size, actor_type, actor_id,
+          actor_name, actor_avatar_url, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        current.id,
+        input.name,
+        mediaType,
+        input.data.byteLength,
+        input.actor.type,
+        input.actor.id,
+        input.actor.name,
+        input.actor.avatarUrl ?? null,
+        timestamp,
+      )
+      db.prepare(`
+        UPDATE issues
+        SET version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(timestamp, current.id, input.expectedVersion)
+      this.recordActivity(IssueId(current.id), input.actor, [{
+        field: 'attachments',
+        before: null,
+        after: { id, name: input.name },
+      }], timestamp)
+      db.exec('COMMIT')
+      committed = true
+      const issue = requireStored(await this.getIssue(IssueId(current.id)), 'Issue')
+      const attachment = requireStored(this.findAttachment(IssueId(current.id), id), 'attachment')
+      this.notifyChanged(current.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return { issue, attachment }
+    } catch (error: unknown) {
+      rollback(db)
+      /* v8 ignore else -- entering this catch after COMMIT requires a post-commit SQLite corruption fault. */
+      if (!committed) {
+        await unlink(finalPath).catch(
+          /* v8 ignore next -- logging this path requires a second filesystem fault during rollback cleanup. */
+          (cleanupError: unknown) => {
+            this.ctx.logger.warn(`failed to remove uncommitted Taskboard attachment: ${String(cleanupError)}`)
+          },
+        )
+      }
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listAttachments(reference: IssueReference): Promise<readonly TaskboardAttachment[]> {
+    const issueId = this.requireIssueId(reference)
+    const rows = this.database().prepare(`
+      SELECT id, issue_id, name, media_type, size, actor_type, actor_id,
+             actor_name, actor_avatar_url, created_at
+      FROM attachments
+      WHERE issue_id = ?
+      ORDER BY sequence
+    `).all(issueId) as unknown as AttachmentRow[]
+    return rows.map(rowToAttachment)
+  }
+
+  async readAttachment(input: ReadAttachmentInput): Promise<TaskboardAttachmentContent> {
+    const issueId = this.requireIssueId(input.reference)
+    const attachment = this.findAttachment(issueId, input.attachmentId)
+    if (attachment === undefined) {
+      throw new TaskboardError(
+        'attachment_not_found',
+        `attachment '${input.attachmentId}' does not belong to Issue '${input.reference}'`,
+      )
+    }
+    const data = new Uint8Array(await readFile(join(this.attachmentRoot(), attachment.id)))
+    if (data.byteLength !== attachment.size) {
+      throw new Error(
+        `Taskboard attachment '${attachment.id}' contains ${data.byteLength} bytes; metadata records ${attachment.size}`,
+      )
+    }
+    return { attachment, data }
+  }
+
+  async deleteAttachment(input: DeleteAttachmentInput): Promise<Issue> {
+    if (!input.confirmed) {
+      throw new TaskboardError(
+        'attachment_confirmation_required',
+        `deleting attachment '${input.attachmentId}' requires explicit confirmation`,
+      )
+    }
+    const issueId = this.requireIssueId(input.reference)
+    const initial = requireStored(await this.getIssue(issueId), 'Issue')
+    if (initial.version !== input.expectedVersion) {
+      throw new TaskboardError(
+        'version_conflict',
+        `cannot delete an attachment from Issue '${input.reference}': expected version ${input.expectedVersion}, found ${initial.version}`,
+      )
+    }
+    const attachment = this.findAttachment(issueId, input.attachmentId)
+    if (attachment === undefined) {
+      throw new TaskboardError(
+        'attachment_not_found',
+        `attachment '${input.attachmentId}' does not belong to Issue '${input.reference}'`,
+      )
+    }
+    const root = this.attachmentRoot()
+    const finalPath = join(root, attachment.id)
+    const deletingPath = join(root, `.${attachment.id}.${randomUUID()}.deleting`)
+    await rename(finalPath, deletingPath)
+
+    const db = this.database()
+    let committed = false
+    try {
+      db.exec('BEGIN IMMEDIATE')
+      const current = db.prepare(`
+        SELECT id, workspace_id, version
+        FROM issues
+        WHERE id = ?
+      `).get(issueId) as { id: string; workspace_id: string; version: number } | undefined
+      /* v8 ignore start -- Taskboard exposes no permanent Issue deletion between the preflight read and this transaction. */
+      if (current === undefined) throw new TaskboardError('issue_not_found', `Issue '${input.reference}' does not exist`)
+      /* v8 ignore stop */
+      if (current.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot delete an attachment from Issue '${input.reference}': expected version ${input.expectedVersion}, found ${current.version}`,
+        )
+      }
+      const deleted = db.prepare('DELETE FROM attachments WHERE id = ? AND issue_id = ?')
+        .run(attachment.id, issueId)
+      /* v8 ignore start -- the exclusive quarantine rename prevents another deletion from reaching this transaction. */
+      if (deleted.changes !== 1) {
+        throw new TaskboardError(
+          'attachment_not_found',
+          `attachment '${input.attachmentId}' does not belong to Issue '${input.reference}'`,
+        )
+      }
+      /* v8 ignore stop */
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        UPDATE issues
+        SET version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(timestamp, issueId, input.expectedVersion)
+      this.recordActivity(issueId, input.actor, [{
+        field: 'attachments',
+        before: { id: attachment.id, name: attachment.name },
+        after: null,
+      }], timestamp)
+      db.exec('COMMIT')
+      committed = true
+      await unlink(deletingPath).catch(
+        /* v8 ignore next -- an OS-level unlink failure is logged after the authoritative deletion commits. */
+        (cleanupError: unknown) => {
+          this.ctx.logger.warn(`failed to remove deleted Taskboard attachment bytes: ${String(cleanupError)}`)
+        },
+      )
+      const stored = requireStored(await this.getIssue(issueId), 'Issue')
+      this.notifyChanged(current.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      /* v8 ignore else -- entering this catch after COMMIT requires a post-commit SQLite corruption fault. */
+      if (!committed) {
+        await rename(deletingPath, finalPath).catch(
+          /* v8 ignore next -- logging this path requires a second filesystem fault during rollback recovery. */
+          (restoreError: unknown) => {
+            this.ctx.logger.warn(`failed to restore Taskboard attachment after rollback: ${String(restoreError)}`)
+          },
+        )
+      }
+      throw error
+    }
   }
 
   async addRelation(input: AddIssueRelationInput): Promise<IssueRelationMutation> {
@@ -1693,6 +1950,29 @@ export class SqliteTaskboard extends TaskboardService {
   private database(): DatabaseSync {
     if (this.db === undefined) throw new Error('SQLite Taskboard is not initialized')
     return this.db
+  }
+
+  /** Return the configured managed attachment directory. */
+  private attachmentRoot(): string {
+    const root = this.resolvedConfig.attachmentsPath
+    if (root === null) {
+      throw new TaskboardError(
+        'attachment_storage_unavailable',
+        'Taskboard attachment storage requires attachmentsPath when SQLite uses :memory:',
+      )
+    }
+    return root
+  }
+
+  /** Read metadata only when an attachment belongs to the requested Issue. */
+  private findAttachment(issueId: IssueId, attachmentId: TaskboardAttachmentId): TaskboardAttachment | undefined {
+    const row = this.database().prepare(`
+      SELECT id, issue_id, name, media_type, size, actor_type, actor_id,
+             actor_name, actor_avatar_url, created_at
+      FROM attachments
+      WHERE id = ? AND issue_id = ?
+    `).get(attachmentId, issueId) as AttachmentRow | undefined
+    return row === undefined ? undefined : rowToAttachment(row)
   }
 
   /** Read one Patrol Run from the initialized database. */

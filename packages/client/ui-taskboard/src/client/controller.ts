@@ -4,10 +4,12 @@ import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   Activity,
+  TaskboardAttachment,
   AddCommentInput,
   AddIssueRelationInput,
   Comment,
   CreateIssueInput,
+  DeleteAttachmentInput,
   Issue,
   IssueReference,
   IssueRelation,
@@ -22,6 +24,10 @@ import type {
 } from '@deepseek-ai/dsh-taskboard/types'
 import type {
   TaskboardActivityListValue,
+  TaskboardAttachmentContentValue,
+  TaskboardAttachmentListValue,
+  TaskboardAttachmentReadInput,
+  TaskboardAttachmentUploadInput,
   TaskboardCommentListValue,
   TaskboardIssueListValue,
   TaskboardIssueValue,
@@ -33,6 +39,9 @@ import type {
 } from '@deepseek-ai/dsh-taskboard-remote/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 
+/** Browser preflight mirror of the Host-enforced Taskboard attachment protocol limit. */
+export const MAX_TASKBOARD_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
 /** Remote methods used by the Taskboard browser object layer. */
 export interface TaskboardClientRemote {
   workspace: (workspaceId: WorkspaceId) => Promise<RemoteResult<TaskboardRemoteResult<WorkspaceTaskboard>>>
@@ -43,6 +52,18 @@ export interface TaskboardClientRemote {
   archiveIssue: (input: VersionedIssueInput) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>
   listComments: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardCommentListValue>>>
   addComment: (input: AddCommentInput) => Promise<RemoteResult<TaskboardRemoteResult<Comment>>>
+  listAttachments: (
+    reference: IssueReference,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardAttachmentListValue>>>
+  addAttachment: (
+    input: TaskboardAttachmentUploadInput,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<{ issue: Issue; attachment: TaskboardAttachment }>>>
+  readAttachment: (
+    input: TaskboardAttachmentReadInput,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardAttachmentContentValue>>>
+  deleteAttachment: (
+    input: DeleteAttachmentInput,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>
   listActivities: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardActivityListValue>>>
   listWorkspaceRelations: (
     workspaceId: WorkspaceId,
@@ -73,6 +94,7 @@ export interface TaskboardSnapshot {
   readonly detailPanel: TaskboardDetailPanel
   readonly detailPhase: TaskboardDetailPhase
   readonly comments: readonly Comment[]
+  readonly attachments: readonly TaskboardAttachment[]
   readonly activities: readonly Activity[]
   readonly workspaceRelations: readonly IssueRelation[]
   readonly relations: readonly IssueRelation[]
@@ -86,6 +108,11 @@ export interface TaskboardSnapshot {
 /** Settled controller operation without exposing the Remote's nested envelope. */
 export type TaskboardActionResult =
   | { readonly ok: true }
+  | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
+
+/** Settled Issue-scoped attachment read for preview or download. */
+export type TaskboardAttachmentReadResult =
+  | { readonly ok: true; readonly value: TaskboardAttachmentContentValue }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string } }
 
 type ValueResult<T> =
@@ -102,6 +129,7 @@ const EMPTY: TaskboardSnapshot = Object.freeze({
   detailPanel: null,
   detailPhase: 'idle',
   comments: Object.freeze([]),
+  attachments: Object.freeze([]),
   activities: Object.freeze([]),
   workspaceRelations: Object.freeze([]),
   relations: Object.freeze([]),
@@ -248,6 +276,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       detailPanel: selected === null ? detailPanel === 'patrol' ? 'patrol' : null : 'issue',
       detailPhase: selected === null ? 'idle' : 'loading',
       comments: selected === null ? [] : this.snapshot.comments,
+      attachments: selected === null ? [] : this.snapshot.attachments,
       activities: selected === null ? [] : this.snapshot.activities,
       relations: selected === null ? [] : this.snapshot.relations,
       patrolIssue: selected === null ? null : this.snapshot.patrolIssue,
@@ -271,6 +300,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       detailPanel: 'issue',
       detailPhase: 'loading',
       comments: [],
+      attachments: [],
       activities: [],
       relations: [],
       patrolIssue: null,
@@ -294,9 +324,10 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       selectedIssue,
       detailPhase: 'ready',
       comments: result.value[1].items,
-      activities: result.value[2].items,
-      relations: result.value[3].items,
-      patrolIssue: result.value[4],
+      attachments: result.value[2].items,
+      activities: result.value[3].items,
+      relations: result.value[4].items,
+      patrolIssue: result.value[5],
       detailError: null,
     })
     return OK
@@ -311,6 +342,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       detailPanel: null,
       detailPhase: 'idle',
       comments: [],
+      attachments: [],
       activities: [],
       relations: [],
       patrolIssue: null,
@@ -328,6 +360,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       detailPanel: 'patrol',
       detailPhase: 'idle',
       comments: [],
+      attachments: [],
       activities: [],
       relations: [],
       patrolIssue: null,
@@ -457,6 +490,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
           detailPanel: closesSelection ? null : this.snapshot.detailPanel,
           detailPhase: closesSelection ? 'idle' : this.snapshot.detailPhase,
           comments: closesSelection ? [] : this.snapshot.comments,
+          attachments: closesSelection ? [] : this.snapshot.attachments,
           activities: closesSelection ? [] : this.snapshot.activities,
           relations: closesSelection ? [] : this.snapshot.relations,
           patrolIssue: closesSelection ? null : this.snapshot.patrolIssue,
@@ -480,6 +514,102 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       () => this.remote.addComment({ reference: selected.id, body, actor }),
       () => this.isSelectedIssue(generation),
       (comment) => { this.publish({ ...this.snapshot, comments: [...this.snapshot.comments, comment], actionError: null }) },
+    )
+  }
+
+  /**
+   * Upload one browser file to the selected Issue and advance its rendered version.
+   * @param file - browser-owned file selected by the user.
+   * @param actor - upload attribution.
+   * @returns settled mutation result.
+   */
+  async addAttachment(file: File, actor: TaskboardActor): Promise<TaskboardActionResult> {
+    const selected = this.snapshot.selectedIssue
+    if (selected === null) return this.fail('issue_not_found', 'No Issue is selected')
+    if (file.size > MAX_TASKBOARD_ATTACHMENT_BYTES) {
+      return this.fail(
+        'attachment_too_large',
+        `Attachment '${file.name}' is ${file.size} bytes; maximum is ${MAX_TASKBOARD_ATTACHMENT_BYTES}`,
+      )
+    }
+    const generation = this.detailLoad
+    let data: string
+    try {
+      data = bytesToBase64(new Uint8Array(await file.arrayBuffer()))
+    } catch (error: unknown) {
+      return this.fail('attachment_invalid', error instanceof Error ? error.message : String(error))
+    }
+    return await this.mutate(
+      () => this.remote.addAttachment({
+        reference: selected.id,
+        expectedVersion: selected.version,
+        name: file.name,
+        mediaType: file.type || 'application/octet-stream',
+        data,
+        actor,
+      }),
+      () => this.isSelectedIssue(generation),
+      (result) => {
+        this.replaceIssue(result.issue)
+        this.publish({
+          ...this.snapshot,
+          attachments: [...this.snapshot.attachments, result.attachment],
+          actionError: null,
+        })
+      },
+    )
+  }
+
+  /**
+   * Read selected attachment bytes through the controlled Remote operation.
+   * @param attachment - metadata observed in the selected details view.
+   * @returns metadata and canonical base64 bytes, or a normalized failure.
+   */
+  async readAttachment(attachment: TaskboardAttachment): Promise<TaskboardAttachmentReadResult> {
+    const selected = this.snapshot.selectedIssue
+    if (selected === null || attachment.issueId !== selected.id) {
+      return { ok: false, error: { code: 'attachment_not_found', message: 'Attachment is not in the selected Issue' } }
+    }
+    return await this.call(() => this.remote.readAttachment({
+      reference: selected.id,
+      attachmentId: attachment.id,
+    }))
+  }
+
+  /**
+   * Permanently delete one attachment after the UI records explicit confirmation.
+   * @param attachment - metadata observed in the selected details view.
+   * @param confirmed - explicit user confirmation.
+   * @param actor - deletion attribution.
+   * @returns settled mutation result.
+   */
+  async deleteAttachment(
+    attachment: TaskboardAttachment,
+    confirmed: boolean,
+    actor: TaskboardActor,
+  ): Promise<TaskboardActionResult> {
+    const selected = this.snapshot.selectedIssue
+    if (selected === null || attachment.issueId !== selected.id) {
+      return this.fail('attachment_not_found', 'Attachment is not in the selected Issue')
+    }
+    const generation = this.detailLoad
+    return await this.mutate(
+      () => this.remote.deleteAttachment({
+        reference: selected.id,
+        attachmentId: attachment.id,
+        expectedVersion: selected.version,
+        confirmed,
+        actor,
+      }),
+      () => this.isSelectedIssue(generation),
+      (issue) => {
+        this.replaceIssue(issue)
+        this.publish({
+          ...this.snapshot,
+          attachments: this.snapshot.attachments.filter(candidate => candidate.id !== attachment.id),
+          actionError: null,
+        })
+      },
     )
   }
 
@@ -586,6 +716,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
   private async readIssueDetails(reference: IssueReference): Promise<ValueResult<readonly [
     TaskboardIssueValue,
     TaskboardCommentListValue,
+    TaskboardAttachmentListValue,
     TaskboardActivityListValue,
     TaskboardRelationListValue,
     TaskboardPatrolIssueValue,
@@ -594,6 +725,7 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       const responses = await Promise.all([
         this.remote.getIssue(reference),
         this.remote.listComments(reference),
+        this.remote.listAttachments(reference),
         this.remote.listActivities(reference),
         this.remote.listRelations(reference),
         this.remote.patrolIssue(reference),
@@ -602,13 +734,15 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       if (!selected.ok) return selected
       const comments = unwrap(responses[1])
       if (!comments.ok) return comments
-      const activities = unwrap(responses[2])
+      const attachments = unwrap(responses[2])
+      if (!attachments.ok) return attachments
+      const activities = unwrap(responses[3])
       if (!activities.ok) return activities
-      const relations = unwrap(responses[3])
+      const relations = unwrap(responses[4])
       if (!relations.ok) return relations
-      const patrol = unwrap(responses[4])
+      const patrol = unwrap(responses[5])
       return patrol.ok
-        ? { ok: true, value: [selected.value, comments.value, activities.value, relations.value, patrol.value] }
+        ? { ok: true, value: [selected.value, comments.value, attachments.value, activities.value, relations.value, patrol.value] }
         : patrol
     } catch (error: unknown) {
       return rejected(error)
@@ -701,4 +835,13 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       }
     }
   }
+}
+
+/** Encode browser bytes without overflowing the JavaScript call stack. */
+function bytesToBase64(data: Uint8Array): string {
+  let binary = ''
+  for (let offset = 0; offset < data.length; offset += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
 }

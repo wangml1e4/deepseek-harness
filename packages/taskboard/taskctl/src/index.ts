@@ -7,6 +7,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
+import { readFile, writeFile } from 'node:fs/promises'
+import { basename, resolve } from 'node:path'
 
 /** Stable JSON output contract version. */
 export const TASKCTL_SCHEMA_VERSION = 1
@@ -21,7 +23,7 @@ const ISSUE_ASSIGNEES = new Set(['unassigned', 'user', 'patrol_agent'])
 const RELATION_TYPES = new Set(['blocks', 'blocked_by'])
 const ACTOR_TYPES = new Set(['user', 'patrol_agent', 'reviewer', 'system'])
 const PATROL_INTERVALS = new Set(['5m', '30m', '1h', '2h', '6h', '12h', '24h'])
-const BOOLEAN_OPTIONS = new Set(['json'])
+const BOOLEAN_OPTIONS = new Set(['json', 'confirm'])
 const ACTOR_OPTIONS = ['actor-type', 'actor-id', 'actor-name'] as const
 const COMMAND_OPTIONS = new Map<string, ReadonlySet<string>>([
   ['workspace get', new Set(['json'])],
@@ -36,6 +38,10 @@ const COMMAND_OPTIONS = new Map<string, ReadonlySet<string>>([
   ['comment list', new Set(['json'])],
   ['comment add', new Set(['body', 'json', ...ACTOR_OPTIONS])],
   ['activity list', new Set(['json'])],
+  ['attachment list', new Set(['json'])],
+  ['attachment add', new Set(['file', 'name', 'media-type', 'if-version', 'json', ...ACTOR_OPTIONS])],
+  ['attachment download', new Set(['output', 'json'])],
+  ['attachment delete', new Set(['if-version', 'confirm', 'json', ...ACTOR_OPTIONS])],
   ['relation list', new Set(['json'])],
   ['relation add', new Set(['type', 'issue', 'if-version', 'json', ...ACTOR_OPTIONS])],
   ['relation remove', new Set(['if-version', 'json', ...ACTOR_OPTIONS])],
@@ -160,7 +166,7 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
   const command = `${parsed.resource ?? ''} ${parsed.action ?? ''}`.trim()
   const allowed = COMMAND_OPTIONS.get(command)
   if (allowed === undefined) {
-    throw usageError('Expected workspace, issue, comment, activity, relation, or patrol command')
+    throw usageError('Expected workspace, issue, comment, activity, attachment, relation, or patrol command')
   }
   validateOptions(parsed.options, allowed)
   const client = new TaskboardRpcClient(overrides)
@@ -249,6 +255,42 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
     case 'activity list':
       expectOperands(parsed, 1)
       return client.call('listActivities', { reference: parsed.operands[0] })
+    case 'attachment list':
+      expectOperands(parsed, 1)
+      return client.call('listAttachments', { reference: parsed.operands[0] })
+    case 'attachment add': {
+      expectOperands(parsed, 1)
+      const file = resolve(requiredOption(parsed, 'file'))
+      const data = await readFile(file)
+      return client.call('addAttachment', { input: {
+        reference: parsed.operands[0],
+        expectedVersion: requiredVersion(parsed),
+        name: stringOption(parsed, 'name') ?? basename(file),
+        mediaType: stringOption(parsed, 'media-type') ?? 'application/octet-stream',
+        data: data.toString('base64'),
+        actor: resolveActor(parsed, environment),
+      } })
+    }
+    case 'attachment download': {
+      expectOperands(parsed, 2)
+      const value = attachmentContent(await client.call('readAttachment', { input: {
+        reference: parsed.operands[0],
+        attachmentId: parsed.operands[1],
+      } }))
+      const output = resolve(requiredOption(parsed, 'output'))
+      await writeFile(output, Buffer.from(value.data, 'base64'), { flag: 'wx', mode: 0o600 })
+      return { attachment: value.attachment, output }
+    }
+    case 'attachment delete':
+      expectOperands(parsed, 2)
+      if (parsed.options.confirm !== true) throw usageError('Option --confirm is required')
+      return client.call('deleteAttachment', { input: {
+        reference: parsed.operands[0],
+        attachmentId: parsed.operands[1],
+        expectedVersion: requiredVersion(parsed),
+        confirmed: true,
+        actor: resolveActor(parsed, environment),
+      } })
     case 'relation list':
       expectOperands(parsed, 1)
       return client.call('listRelations', { reference: parsed.operands[0] })
@@ -298,6 +340,32 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
     /* v8 ignore next 2 -- COMMAND_OPTIONS rejects every command absent from the exhaustive switch. */
     default:
       throw new Error(`Unhandled taskctl command ${JSON.stringify(command)}`)
+  }
+}
+
+/** Validate the attachment content needed for a local download write. */
+function attachmentContent(value: unknown): {
+  attachment: { id: string; name: string; mediaType: string }
+  data: string
+} {
+  if (!isRecord(value) || !isRecord(value.attachment)
+    || typeof value.attachment.id !== 'string'
+    || typeof value.attachment.name !== 'string'
+    || typeof value.attachment.mediaType !== 'string'
+    || typeof value.data !== 'string') {
+    throw new TaskctlError('invalid_response', 'Taskboard Host returned invalid attachment content', 4)
+  }
+  const bytes = Buffer.from(value.data, 'base64')
+  if (bytes.toString('base64') !== value.data) {
+    throw new TaskctlError('invalid_response', 'Taskboard Host returned invalid attachment bytes', 4)
+  }
+  return {
+    attachment: {
+      id: value.attachment.id,
+      name: value.attachment.name,
+      mediaType: value.attachment.mediaType,
+    },
+    data: value.data,
   }
 }
 

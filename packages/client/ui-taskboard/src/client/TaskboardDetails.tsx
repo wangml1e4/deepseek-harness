@@ -5,9 +5,12 @@ import type { FormEvent } from 'react'
 import {
   IconArchiveOutline20,
   IconCloseOutline16,
+  IconDownloadOutline16,
   IconLinkOutline16,
+  IconPaperclipOutline16,
   IconPlayOutline16,
   IconSendOutline16,
+  IconTrashOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Issue, IssueAssignee, IssuePriority, IssueReference, IssueRelationType, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardDetailsProps as DetailsProps } from './contract.ts'
@@ -50,6 +53,9 @@ export function TaskboardDetails({
   updateIssue,
   archiveIssue,
   addComment,
+  addAttachment,
+  readAttachment,
+  deleteAttachment,
   addRelation,
   removeRelation,
   updatePatrol,
@@ -64,7 +70,13 @@ export function TaskboardDetails({
   const [relationType, setRelationType] = useState<IssueRelationType>('blocked_by')
   const [relationReference, setRelationReference] = useState('')
   const [reviewReason, setReviewReason] = useState('')
+  const [attachmentPreviews, setAttachmentPreviews] = useState<Readonly<Partial<Record<string, string>>>>({})
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
   useEffect(() => { setDraft(draftOf(issue)) }, [issue])
+  useEffect(() => {
+    setAttachmentPreviews({})
+    setAttachmentError(null)
+  }, [issue?.id])
   if (snapshot.detailPanel === 'patrol') {
     return <PatrolPanel useTaskboard={useTaskboard} updatePatrol={updatePatrol} runPatrol={runPatrol} close={close} t={t} />
   }
@@ -107,6 +119,97 @@ export function TaskboardDetails({
           {needsReason && <label>{t('field.reason')}<textarea rows={3} required value={draft.reason} onChange={(event) => { setDraft(value => ({ ...value, reason: event.target.value })) }} /></label>}
           <button type="submit" className={css.primaryButton} disabled={draft.title.trim() === ''}>{t('details.save')}</button>
         </form>
+
+        <section className={css.detailSection}>
+          <div className={css.attachmentHeading}>
+            <div><h2>{t('details.attachments')}</h2><p>{t('details.attachment.limit')}</p></div>
+            <label className={css.secondaryButton}>
+              <IconPaperclipOutline16 />{t('details.attachment.add')}
+              <input
+                className={css.hiddenFileInput}
+                type="file"
+                aria-label={t('details.attachment.add')}
+                onChange={(event) => {
+                  const input = event.currentTarget
+                  const file = input.files?.[0]
+                  if (file === undefined) return
+                  input.value = ''
+                  void addAttachment(file)
+                }}
+              />
+            </label>
+          </div>
+          {snapshot.attachments.length === 0
+            ? <p className={css.muted}>{t('details.attachment.empty')}</p>
+            : <div className={css.attachmentList}>{snapshot.attachments.map(attachment => (
+              <article className={css.attachmentRow} key={attachment.id}>
+                <div className={css.attachmentMetadata}>
+                  <strong>{attachment.name}</strong>
+                  <span>{attachment.mediaType} · {formatBytes(attachment.size)}</span>
+                </div>
+                <div className={css.attachmentActions}>
+                  {attachment.mediaType.startsWith('image/') && <button
+                    type="button"
+                    className={css.ghostButton}
+                    aria-label={t('details.attachment.previewLabel', { name: attachment.name })}
+                    onClick={() => {
+                      const existing = attachmentPreviews[attachment.id]
+                      if (existing !== undefined) {
+                        setAttachmentPreviews(current => ({ ...current, [attachment.id]: undefined }))
+                        return
+                      }
+                      void readAttachment(attachment).then((result) => {
+                        if (!result.ok) {
+                          setAttachmentError(result.error.message)
+                          return
+                        }
+                        setAttachmentError(null)
+                        setAttachmentPreviews(current => ({
+                          ...current,
+                          [attachment.id]: `data:${result.value.attachment.mediaType};base64,${result.value.data}`,
+                        }))
+                      })
+                    }}
+                  >{t('details.attachment.preview')}</button>}
+                  <button
+                    type="button"
+                    className={css.iconButton}
+                    aria-label={t('details.attachment.downloadLabel', { name: attachment.name })}
+                    onClick={() => {
+                      void readAttachment(attachment).then((result) => {
+                        if (!result.ok) {
+                          setAttachmentError(result.error.message)
+                          return
+                        }
+                        setAttachmentError(null)
+                        const link = document.createElement('a')
+                        link.href = `data:${result.value.attachment.mediaType};base64,${result.value.data}`
+                        link.download = result.value.attachment.name
+                        document.body.append(link)
+                        link.click()
+                        link.remove()
+                      })
+                    }}
+                  ><IconDownloadOutline16 /></button>
+                  <button
+                    type="button"
+                    className={css.iconButton}
+                    aria-label={t('details.attachment.deleteLabel', { name: attachment.name })}
+                    onClick={() => {
+                      if (!window.confirm(t('details.attachment.confirm', { name: attachment.name }))) return
+                      void deleteAttachment(attachment, true)
+                    }}
+                  ><IconTrashOutline16 /></button>
+                </div>
+                {attachmentPreviews[attachment.id] !== undefined && <img
+                  className={css.attachmentPreview}
+                  src={attachmentPreviews[attachment.id]}
+                  alt={attachment.name}
+                />}
+              </article>
+            ))}</div>}
+          {attachmentError !== null && <p className={css.inlineError} role="alert">{attachmentError}</p>}
+        </section>
 
         <section className={css.detailSection}>
           <h2>{t('details.comments')}</h2>
@@ -195,4 +298,11 @@ export function TaskboardDetails({
       </div>
     </aside>
   )
+}
+
+/** Format attachment sizes without implying decimal storage limits. */
+function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`
+  return `${(size / (1024 * 1024)).toFixed(1)} MiB`
 }
