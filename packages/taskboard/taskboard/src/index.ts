@@ -5,8 +5,11 @@ import type {
   AddIssueRelationInput,
   Activity,
   AddCommentInput,
+  BindPatrolDevelopmentContextInput,
   BeginPatrolRunInput,
+  ClaimPatrolIssueInput,
   Comment,
+  CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
@@ -16,8 +19,11 @@ import type {
   IssueRelationMutation,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolAttempt,
+  PatrolDevelopmentContext,
   PatrolPolicy,
   PatrolRun,
+  PatrolRunId,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   UpdateIssueInput,
@@ -31,6 +37,7 @@ export {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolAttemptId,
   PatrolRunId,
   RelationId,
   TaskboardActorId,
@@ -50,8 +57,11 @@ export type {
   ActivityChange,
   ActivityValue,
   AddCommentInput,
+  BindPatrolDevelopmentContextInput,
   BeginPatrolRunInput,
+  ClaimPatrolIssueInput,
   Comment,
+  CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
@@ -67,6 +77,10 @@ export type {
   IssueStatus,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolAttempt,
+  PatrolAttemptId as PatrolAttemptIdType,
+  PatrolAttemptResult,
+  PatrolDevelopmentContext,
   PatrolInterval,
   PatrolPolicy,
   PatrolRun,
@@ -257,6 +271,52 @@ export abstract class TaskboardService extends Service {
   abstract listPatrolRuns(
     workspaceId: EnsureWorkspaceInput['workspaceId'],
   ): Promise<readonly PatrolRun[]>
+
+  /**
+   * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.
+   * @param input - Run, Issue version, dependency evidence, and Patrol actor.
+   * @returns the durable active Attempt.
+   */
+  abstract claimPatrolIssue(input: ClaimPatrolIssueInput): Promise<PatrolAttempt>
+
+  /**
+   * Bind a newly claimed Issue to the exact Session, branch, and worktree it will always resume.
+   * @param input - Active Attempt and complete creation-time execution choices.
+   * @returns the immutable Issue Development Context.
+   */
+  abstract bindPatrolDevelopmentContext(
+    input: BindPatrolDevelopmentContextInput,
+  ): Promise<PatrolDevelopmentContext>
+
+  /**
+   * Read one Issue's persistent Session and Git binding.
+   * @param reference - Stable Issue lookup.
+   * @returns its Development Context, or undefined before binding.
+   */
+  abstract getPatrolDevelopmentContext(
+    reference: IssueReference,
+  ): Promise<PatrolDevelopmentContext | undefined>
+
+  /**
+   * Record that one bound Session has been persisted and must only be resumed afterward.
+   * @param attemptId - Active Attempt using the bound Session.
+   * @returns the updated Development Context.
+   */
+  abstract markPatrolSessionStarted(attemptId: PatrolAttempt['id']): Promise<PatrolDevelopmentContext>
+
+  /**
+   * Complete one active Attempt and atomically move its Issue to blocked or in_review.
+   * @param input - Attempt result, evidence, and responsible actor.
+   * @returns the terminal durable Attempt.
+   */
+  abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt>
+
+  /**
+   * List every Issue claim in one Run in claim order.
+   * @param runId - Run whose Attempt history is requested.
+   * @returns active and terminal Attempts in claim order.
+   */
+  abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 }
 
 export default TaskboardService

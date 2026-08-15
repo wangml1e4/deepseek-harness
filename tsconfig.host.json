@@ -159,6 +159,7 @@
     { "path": "./packages/workspace/workspace" },
     { "path": "./packages/taskboard/taskboard" },
     { "path": "./packages/taskboard/taskboard-sqlite" },
+    { "path": "./packages/taskboard/taskboard-patrol" },
     { "path": "./packages/taskboard/taskboard-remote" },
     { "path": "./packages/taskboard/taskctl" },
     { "path": "./packages/taskboard/skill-manage-taskboard" },

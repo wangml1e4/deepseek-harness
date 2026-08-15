@@ -6,7 +6,7 @@ Taskboard 子系统记录注册 Workspace 所属的持久工作。[`@deepseek-ai
 
 ## 值与标识
 
-每个 Workspace 拥有一个隐式 `WorkspaceTaskboard`。其唯一前缀与单调分配的编号组成稳定的 `IssueIdentifier`；移动 Issue 不会改写该标识。`IssueId`、`CommentId`、`ActivityId`、`RelationId`、`PatrolRunId` 和 `TaskboardActorId` 都是品牌化的不透明标识。
+每个 Workspace 拥有一个隐式 `WorkspaceTaskboard`。其唯一前缀与单调分配的编号组成稳定的 `IssueIdentifier`；移动 Issue 不会改写该标识。`IssueId`、`CommentId`、`ActivityId`、`RelationId`、`PatrolRunId`、`PatrolAttemptId` 和 `TaskboardActorId` 都是品牌化的不透明标识。
 
 每个 Issue 恰有一种状态：`backlog`、`todo`、`in_progress`、`in_review`、`blocked`、`done` 或 `canceled`。优先级是 `none`、`urgent`、`high`、`medium` 或 `low`；它只是元数据，绝不改变手动看板顺序。活跃列表默认排除已归档 Issue。
 
@@ -22,11 +22,19 @@ Issue 归档可逆。服务不提供永久删除 Issue、评论或活动记录�
 
 ## 巡检调度状态
 
-每个 Taskboard 会创建一项 `PatrolPolicy`，固定间隔调度默认关闭并选中 `1h`。支持的间隔词汇严格限定为 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 和 `24h`。启用或修改间隔会从保存时刻计算 `nextDueAt`；关闭则清除该时间，但不改变活跃 Run。
+每个 Taskboard 会创建一项 `PatrolPolicy`，固定间隔调度默认关闭并选中 `1h`，Agent 与模型选择采用 Host 默认值，Permission Preset 为 `workspace-write`。支持的间隔词汇严格限定为 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 和 `24h`。启用时必须指定本地 Base Branch。启用或修改间隔会从保存时刻计算 `nextDueAt`；关闭则清除该时间，但不改变活跃 Run。
 
 定时触发会消费此前的到期时刻，并按固定节拍推进至当前时间之后的首个节点。因此 Host 重启后只产生一次过期触发，不会重放所有错过的间隔。手动触发不会启用已保存 Policy，即使调度关闭也可以启动。
 
 Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所有 Workspace 的其他活跃行。定时触发重叠会持久化已完成的 `skipped_global_busy` 结果，并推进该 Workspace 的节拍而不排队；手动触发重叠会被拒绝。Run 的终态结果不能覆写，也不存在删除 Run 的操作。
+
+## 巡检认领与执行身份
+
+一个 Run 拥有按顺序排列且永久保留的 `PatrolAttempt` 记录。原子认领会校验活跃 Run、准确 Issue 版本、`todo` 状态、非用户分配，以及所有阻塞 Issue 已完成的结果 commit，随后才把 Issue 移至 `in_progress`。只有前一个 Attempt 以 `permission_blocked` 结束时，同一 Run 才能继续认领；其他任何终态 Attempt 都会耗尽该轮的认领名额。
+
+每个由 Patrol 执行的 Issue 最多拥有一个永久 `PatrolDevelopmentContext`。它会在 Issue 每次退回 `todo` 后继续固定准确 Session id、Base Branch、专属本地 `dsh-task/<issue>` 分支、持久 worktree、Agent Preset、模型选择、reasoning effort 和 Permission Preset。Provider 会区分已预留的 Session id 与已经持久化的 Session：首次持久化之前失败时可以重试同一个 id，已经启动但丢失的 Session 不能被替换。Review handoff 必须带有结果 commit 并把 Issue 移至 `in_review`；权限阻塞或其他执行失败会把 Issue 移至 `blocked` 并追加原因。
+
+`@deepseek-ai/dsh-taskboard-patrol` 会准备这些已存身份，但不会启动 timer 或 Agent turn。它通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。它会在启动后续跑准确 Session，挂载已保存的 Agent 与 Permission Preset，并安装 Agent 范围内的审批处理器：拒绝无人值守审批请求并取消该 turn，交由协调器分类。
 
 ## 消费方与存储
 
@@ -36,7 +44,7 @@ Patrol Run 预留在整个 Host 范围内持久化。一个活跃行会排除所
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Service 与 SQLite Provider 现已持有巡检调度状态和永久触发历史；Host timer、执行消费方、开发上下文绑定和审查证据仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
+当前消费层提供双语 Web 仪表盘、看板、列表、甘特图和 Issue 详情界面，并把 `taskboard/changed` 失效通知转发给当前 Workspace。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Service 与 SQLite Provider 现已持有巡检调度、Attempt、执行上下文和永久历史，执行消费方则提供准确 Session 与本地 Git 准备。Host timer、Issue 扫描、prompt、独立 Reviewer 和人工审查控件仍属于按顺序交付的 Taskboard PR stack 后续层。版本一不会发布或同步 GitHub Issue。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -212,9 +220,102 @@ abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
  * @returns every active and completed Run.
  */
 abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
+
+/**
+ * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.
+ * @param input - Run, Issue version, dependency evidence, and Patrol actor.
+ * @returns the durable active Attempt.
+ */
+abstract claimPatrolIssue(input: ClaimPatrolIssueInput): Promise<PatrolAttempt>
+
+/**
+ * Bind a newly claimed Issue to the exact Session, branch, and worktree it will always resume.
+ * @param input - Active Attempt and complete creation-time execution choices.
+ * @returns the immutable Issue Development Context.
+ */
+abstract bindPatrolDevelopmentContext( input: BindPatrolDevelopmentContextInput, ): Promise<PatrolDevelopmentContext>
+
+/**
+ * Read one Issue's persistent Session and Git binding.
+ * @param reference - Stable Issue lookup.
+ * @returns its Development Context, or undefined before binding.
+ */
+abstract getPatrolDevelopmentContext( reference: IssueReference, ): Promise<PatrolDevelopmentContext | undefined>
+
+/**
+ * Record that one bound Session has been persisted and must only be resumed afterward.
+ * @param attemptId - Active Attempt using the bound Session.
+ * @returns the updated Development Context.
+ */
+abstract markPatrolSessionStarted(attemptId: PatrolAttempt['id']): Promise<PatrolDevelopmentContext>
+
+/**
+ * Complete one active Attempt and atomically move its Issue to blocked or in_review.
+ * @param input - Attempt result, evidence, and responsible actor.
+ * @returns the terminal durable Attempt.
+ */
+abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt>
+
+/**
+ * List every Issue claim in one Run in claim order.
+ * @param runId - Run whose Attempt history is requested.
+ * @returns active and terminal Attempts in claim order.
+ */
+abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:92`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:106`](../../packages/taskboard/taskboard/src/index.ts)
+
+<a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
+
+### `ctx.taskboardPatrol` — `TaskboardPatrolService`
+
+Host Consumer that binds Patrol claims to local Git isolation and ordinary persistent Agents.
+
+```ts cordis-catalog
+/**
+ * Resolve the current new-Session defaults and checked-out local branch for a Workspace.
+ * @param workspaceId - Registered Workspace whose checkout supplies the branch.
+ * @returns concrete values suitable for a Patrol Policy save.
+ */
+async defaults(workspaceId: WorkspaceId): Promise<PatrolPolicyDefaults>
+
+/**
+ * List branches local to one registered Workspace repository.
+ * @param workspaceId - Workspace whose repository is inspected.
+ * @returns local branch names.
+ */
+localBranches(workspaceId: WorkspaceId): Promise<readonly string[]>
+
+/**
+ * Check dependency integration against an exact local Base Branch.
+ * @param workspaceId - Workspace whose repository is inspected.
+ * @param commit - predecessor result commit.
+ * @param baseBranch - local branch the successor will start from.
+ * @returns whether the commit is an ancestor of the branch.
+ */
+isAncestor(workspaceId: WorkspaceId, commit: string, baseBranch: string): Promise<boolean>
+
+/**
+ * Create or reuse one claim's permanent Development Context, worktree, and exact Session.
+ * @param attempt - active durable claim.
+ * @param issue - claimed Issue snapshot.
+ * @param policy - saved Workspace Patrol choices for an unbound Issue.
+ * @returns a live guarded Agent lease.
+ */
+async prepare( attempt: PatrolAttempt, issue: Issue, policy: PatrolPolicy, ): Promise<PatrolAgentLease>
+
+/**
+ * Read commit, cleanliness, and Base Branch diff evidence from a bound Issue worktree.
+ * @param context - persistent Development Context.
+ * @returns current local Git evidence.
+ */
+result(context: PatrolDevelopmentContext): Promise<PatrolGitResult>
+```
+
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:101`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -362,5 +463,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:403`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:530`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

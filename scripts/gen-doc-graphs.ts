@@ -102,8 +102,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     title: 'Workspace Taskboard seam',
     mode: 'seam',
     implementations: ['taskboard-sqlite'],
-    consumers: ['taskboard-remote'],
+    consumers: ['taskboard-remote', 'taskboard-patrol'],
     note: 'The Service Definition owns Workspace-scoped Issues and append-only history; the local Provider commits those records in one Host-owned SQLite database.',
+  },
+  {
+    key: 'taskboardPatrol',
+    pkg: 'taskboard-patrol',
+    title: 'Taskboard Patrol execution support',
+    mode: 'core',
+    note: 'Prepares permanent local Git isolation and the exact persistent Agent Session for an already claimed Patrol Attempt; scheduling and turn orchestration remain separate Consumers.',
   },
   {
     key: 'taskboardRemote',

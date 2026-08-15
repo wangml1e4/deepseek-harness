@@ -80,6 +80,13 @@
       config:
         path: !!js dshHomePath('taskboard.sqlite')
 
+    # Local-only Git/worktree and persistent Session execution support. This
+    # layer is side-effect free until a Patrol coordinator hands it a claim.
+    - id: taskboard-patrol
+      name: '@deepseek-ai/dsh-taskboard-patrol'
+      config:
+        worktreeRoot: !!js dshHomePath('taskboard-worktrees')
+
     - id: taskboard-remote
       name: '@deepseek-ai/dsh-taskboard-remote'
 

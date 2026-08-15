@@ -9,6 +9,7 @@ This family owns durable Workspace Issues, their manual board order, append-only
 | [`taskboard/`](taskboard/README.md) | Declares Taskboard values, failures, and the Service Definition | `ctx.taskboard` |
 | [`taskboard-sqlite/`](taskboard-sqlite/README.md) | Persists the service in one Host-owned SQLite database | provides `ctx.taskboard` |
 | [`taskboard-remote/`](taskboard-remote/README.md) | Exposes Taskboard operations through the Host Typert API | `ctx.taskboardRemote` |
+| [`taskboard-patrol/`](taskboard-patrol/README.md) | Binds durable Patrol claims to local Git worktrees and persistent Sessions | `ctx.taskboardPatrol` |
 | [`taskctl/`](taskctl/README.md) | Provides the machine-readable Taskboard command line | binary Consumer |
 | [`skill-manage-taskboard/`](skill-manage-taskboard/README.md) | Registers the bundled interactive Taskboard workflow | `ctx.skills` Provider |
 | [`../client/ui-taskboard/`](../client/ui-taskboard/README.md) | Presents Dashboard, Board, List, Gantt, and Issue details in the browser | UI Consumer |

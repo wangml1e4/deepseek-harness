@@ -6,7 +6,7 @@ import type {
   Issue,
   IssueRelation,
 } from '@deepseek-ai/dsh-taskboard/types'
-import type { TaskboardErrorCode } from '@deepseek-ai/dsh-taskboard/error'
+import type { TaskboardErrorCode } from '@deepseek-ai/dsh-taskboard'
 
 /** Stable business failure returned without collapsing it into a carrier error. */
 export interface TaskboardRemoteFailure {

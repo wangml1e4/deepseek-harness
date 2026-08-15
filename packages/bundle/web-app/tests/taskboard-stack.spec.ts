@@ -6,7 +6,7 @@ import * as yaml from 'js-yaml'
 import { entryListSchema } from '@deepseek-ai/cordis-plugin-include'
 
 describe('Web Taskboard stack', () => {
-  it('mounts durable storage, Remote, browser UI, and bundled skill in dependency order', () => {
+  it('mounts durable storage, Patrol execution, Remote, browser UI, and bundled skill in dependency order', () => {
     const root = fileURLToPath(new URL('..', import.meta.url))
     const manifest = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
       dependencies?: Record<string, string>
@@ -21,6 +21,7 @@ describe('Web Taskboard stack', () => {
         : [])
     const ids = rows.map(row => row.id)
     expect(ids.indexOf('workspace')).toBeLessThan(ids.indexOf('taskboard-sqlite'))
+    expect(ids.indexOf('taskboard-sqlite')).toBeLessThan(ids.indexOf('taskboard-patrol'))
     expect(ids.indexOf('taskboard-sqlite')).toBeLessThan(ids.indexOf('taskboard-remote'))
     expect(ids.indexOf('ui-workspace')).toBeLessThan(ids.indexOf('ui-taskboard'))
     expect(rows.find(row => row.id === 'taskboard-sqlite')).toMatchObject({
@@ -29,6 +30,10 @@ describe('Web Taskboard stack', () => {
     })
     expect(rows.find(row => row.id === 'taskboard-remote')).toMatchObject({
       name: '@deepseek-ai/dsh-taskboard-remote',
+    })
+    expect(rows.find(row => row.id === 'taskboard-patrol')).toMatchObject({
+      name: '@deepseek-ai/dsh-taskboard-patrol',
+      config: { worktreeRoot: { __jsExpr: "dshHomePath('taskboard-worktrees')" } },
     })
     expect(rows.find(row => row.id === 'ui-taskboard')).toMatchObject({
       name: '@deepseek-ai/dsh-client-ui-taskboard',
@@ -39,6 +44,7 @@ describe('Web Taskboard stack', () => {
     expect(manifest.dependencies).toMatchObject({
       '@deepseek-ai/dsh-taskboard-sqlite': 'workspace:^',
       '@deepseek-ai/dsh-taskboard-remote': 'workspace:^',
+      '@deepseek-ai/dsh-taskboard-patrol': 'workspace:^',
       '@deepseek-ai/dsh-client-ui-taskboard': 'workspace:^',
       '@deepseek-ai/dsh-skill-manage-taskboard': 'workspace:^',
     })

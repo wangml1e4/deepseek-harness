@@ -23,6 +23,9 @@ export type RelationId = Branded<'RelationId'>
 /** Stable opaque identity of one durable Patrol trigger. */
 export type PatrolRunId = Branded<'PatrolRunId'>
 
+/** Stable opaque identity of one Issue claim inside a Patrol Run. */
+export type PatrolAttemptId = Branded<'PatrolAttemptId'>
+
 /**
  * Brand a string as an {@link IssueId}.
  * @param value - Raw opaque identity.
@@ -84,4 +87,13 @@ export function RelationId(value: string): RelationId {
  */
 export function PatrolRunId(value: string): PatrolRunId {
   return value as PatrolRunId
+}
+
+/**
+ * Brand a string as a {@link PatrolAttemptId}.
+ * @param value - Raw opaque identity.
+ * @returns the same string with the Patrol Attempt id brand.
+ */
+export function PatrolAttemptId(value: string): PatrolAttemptId {
+  return value as PatrolAttemptId
 }

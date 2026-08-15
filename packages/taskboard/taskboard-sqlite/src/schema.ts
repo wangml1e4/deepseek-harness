@@ -6,6 +6,7 @@ import {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolAttemptId,
   PatrolRunId,
   RelationId,
   TaskboardActorId,
@@ -19,15 +20,19 @@ import type {
   IssueRelation,
   IssueStatus,
   PatrolPolicy,
+  PatrolAttempt,
+  PatrolAttemptResult,
+  PatrolDevelopmentContext,
   PatrolRun,
   PatrolRunResult,
   PatrolRunTrigger,
   WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Current pre-release Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -102,6 +107,12 @@ export interface PatrolPolicyRow {
   workspace_id: string
   enabled: 0 | 1
   interval: PatrolPolicy['interval']
+  base_branch: string | null
+  agent_preset: string | null
+  provider: string | null
+  model: string | null
+  reasoning_effort: string | null
+  permission_preset: string
   next_due_at: string | null
   version: number
   created_at: string
@@ -119,6 +130,37 @@ export interface PatrolRunRow {
   error: string | null
   started_at: string
   ended_at: string | null
+}
+
+/** Stored durable Patrol Issue claim row. */
+export interface PatrolAttemptRow {
+  id: string
+  run_id: string
+  issue_id: string
+  session_id: string | null
+  state: PatrolAttempt['state']
+  result: PatrolAttemptResult | null
+  error: string | null
+  started_at: string
+  ended_at: string | null
+}
+
+/** Stored persistent Session and Git binding row. */
+export interface PatrolDevelopmentContextRow {
+  issue_id: string
+  session_id: string
+  session_started_at: string | null
+  base_branch: string
+  branch: string
+  worktree_path: string
+  agent_preset: string
+  provider: string
+  model: string
+  reasoning_effort: string | null
+  permission_preset: string
+  result_commit: string | null
+  created_at: string
+  updated_at: string
 }
 
 /**
@@ -272,6 +314,12 @@ export function openTaskboardDatabase(
         workspace_id TEXT PRIMARY KEY REFERENCES taskboards(workspace_id),
         enabled      INTEGER NOT NULL CHECK (enabled IN (0, 1)),
         interval     TEXT NOT NULL CHECK (interval IN ('5m', '30m', '1h', '2h', '6h', '12h', '24h')),
+        base_branch  TEXT,
+        agent_preset TEXT,
+        provider     TEXT,
+        model        TEXT,
+        reasoning_effort TEXT,
+        permission_preset TEXT NOT NULL,
         next_due_at  TEXT,
         version      INTEGER NOT NULL CHECK (version > 0),
         created_at   TEXT NOT NULL,
@@ -311,6 +359,53 @@ export function openTaskboardDatabase(
 
       CREATE INDEX IF NOT EXISTS patrol_runs_workspace_sequence
         ON patrol_runs(workspace_id, sequence DESC);
+
+      CREATE TABLE IF NOT EXISTS patrol_development_contexts (
+        issue_id          TEXT PRIMARY KEY REFERENCES issues(id),
+        session_id        TEXT NOT NULL UNIQUE,
+        session_started_at TEXT,
+        base_branch       TEXT NOT NULL,
+        branch            TEXT NOT NULL UNIQUE,
+        worktree_path     TEXT NOT NULL UNIQUE,
+        agent_preset      TEXT NOT NULL,
+        provider          TEXT NOT NULL,
+        model             TEXT NOT NULL,
+        reasoning_effort  TEXT,
+        permission_preset TEXT NOT NULL,
+        result_commit     TEXT,
+        created_at        TEXT NOT NULL,
+        updated_at        TEXT NOT NULL
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS patrol_attempts (
+        sequence   INTEGER PRIMARY KEY AUTOINCREMENT,
+        id         TEXT NOT NULL UNIQUE,
+        run_id     TEXT NOT NULL REFERENCES patrol_runs(id),
+        issue_id   TEXT NOT NULL REFERENCES issues(id),
+        session_id TEXT,
+        state      TEXT NOT NULL CHECK (state IN ('active', 'completed')),
+        result     TEXT CHECK (result IS NULL OR result IN (
+          'permission_blocked', 'blocked', 'review_handoff', 'failed'
+        )),
+        error      TEXT,
+        started_at TEXT NOT NULL,
+        ended_at   TEXT,
+        CHECK (
+          (state = 'active' AND result IS NULL AND ended_at IS NULL) OR
+          (state = 'completed' AND result IS NOT NULL AND ended_at IS NOT NULL)
+        )
+      ) STRICT;
+
+      CREATE UNIQUE INDEX IF NOT EXISTS patrol_attempts_one_active_per_run
+        ON patrol_attempts(run_id)
+        WHERE state = 'active';
+
+      CREATE UNIQUE INDEX IF NOT EXISTS patrol_attempts_one_active_per_issue
+        ON patrol_attempts(issue_id)
+        WHERE state = 'active';
+
+      CREATE INDEX IF NOT EXISTS patrol_attempts_run_sequence
+        ON patrol_attempts(run_id, sequence);
     `)
     if (onDisk === 0) {
       db.exec(`PRAGMA application_id = ${TASKBOARD_SQLITE_APPLICATION_ID}`)
@@ -447,6 +542,12 @@ export function rowToPatrolPolicy(row: PatrolPolicyRow): PatrolPolicy {
     workspaceId: row.workspace_id as WorkspaceId,
     enabled: row.enabled === 1,
     interval: row.interval,
+    baseBranch: row.base_branch,
+    agentPreset: row.agent_preset,
+    provider: row.provider,
+    model: row.model,
+    reasoningEffort: row.reasoning_effort,
+    permissionPreset: row.permission_preset,
     nextDueAt: row.next_due_at,
     version: row.version,
     createdAt: row.created_at,
@@ -470,5 +571,50 @@ export function rowToPatrolRun(row: PatrolRunRow): PatrolRun {
     error: row.error,
     startedAt: row.started_at,
     endedAt: row.ended_at,
+  }
+}
+
+/**
+ * Convert a stored Patrol Attempt row to its public value.
+ * @param row - SQLite Patrol Attempt row.
+ * @returns public durable Patrol Attempt.
+ */
+export function rowToPatrolAttempt(row: PatrolAttemptRow): PatrolAttempt {
+  return {
+    id: PatrolAttemptId(row.id),
+    runId: PatrolRunId(row.run_id),
+    issueId: IssueId(row.issue_id),
+    sessionId: row.session_id as SessionId | null,
+    state: row.state,
+    result: row.result,
+    error: row.error,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+  }
+}
+
+/**
+ * Convert a stored Development Context row to its public value.
+ * @param row - SQLite Development Context row.
+ * @returns public persistent Session and Git binding.
+ */
+export function rowToPatrolDevelopmentContext(
+  row: PatrolDevelopmentContextRow,
+): PatrolDevelopmentContext {
+  return {
+    issueId: IssueId(row.issue_id),
+    sessionId: row.session_id as SessionId,
+    sessionStartedAt: row.session_started_at,
+    baseBranch: row.base_branch,
+    branch: row.branch,
+    worktreePath: row.worktree_path,
+    agentPreset: row.agent_preset,
+    provider: row.provider,
+    model: row.model,
+    reasoningEffort: row.reasoning_effort,
+    permissionPreset: row.permission_preset,
+    resultCommit: row.result_commit,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
 }

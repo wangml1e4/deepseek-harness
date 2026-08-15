@@ -1,11 +1,13 @@
 /** Public Taskboard value types. @module @deepseek-ai/dsh-taskboard/types */
 
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {
   ActivityId,
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolAttemptId,
   PatrolRunId,
   RelationId,
   TaskboardActorId,
@@ -16,6 +18,7 @@ export type {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolAttemptId,
   PatrolRunId,
   RelationId,
   TaskboardActorId,
@@ -48,6 +51,18 @@ export interface PatrolPolicy {
   readonly enabled: boolean
   /** Selected fixed interval. */
   readonly interval: PatrolInterval
+  /** Local branch whose tip seeds later unbound Issues. */
+  readonly baseBranch: string | null
+  /** Agent composition selected for later unbound Issues, or the Host default. */
+  readonly agentPreset: string | null
+  /** Provider route selected for later unbound Issues, or the Host default. */
+  readonly provider: string | null
+  /** Model selected for later unbound Issues, or the Host default. */
+  readonly model: string | null
+  /** Adapter-owned reasoning effort, or the selected model default. */
+  readonly reasoningEffort: string | null
+  /** Permission Preset selected for later unbound Issues. */
+  readonly permissionPreset: string
   /** Next scheduled trigger instant, or null while disabled. */
   readonly nextDueAt: string | null
   /** Monotonic optimistic-concurrency version. */
@@ -91,6 +106,67 @@ export interface PatrolRun {
   readonly endedAt: string | null
 }
 
+/** Terminal result of one claimed Issue inside a Patrol Run. */
+export type PatrolAttemptResult =
+  | 'permission_blocked'
+  | 'blocked'
+  | 'review_handoff'
+  | 'failed'
+
+/** One durable claim of an Issue by a Patrol Run. */
+export interface PatrolAttempt {
+  /** Stable opaque claim identity. */
+  readonly id: PatrolAttemptId
+  /** Run that owns the claim. */
+  readonly runId: PatrolRunId
+  /** Claimed Issue. */
+  readonly issueId: IssueId
+  /** Session already bound to the Issue, or null while an unbound claim is being provisioned. */
+  readonly sessionId: SessionId | null
+  /** Current persistence state. */
+  readonly state: 'active' | 'completed'
+  /** Terminal claim result, or null while active. */
+  readonly result: PatrolAttemptResult | null
+  /** Human-readable terminal detail, or null when none was recorded. */
+  readonly error: string | null
+  /** ISO-8601 claim instant. */
+  readonly startedAt: string
+  /** ISO-8601 terminal instant, or null while active. */
+  readonly endedAt: string | null
+}
+
+/** Persistent Git and Session identity reused whenever one Issue returns to todo. */
+export interface PatrolDevelopmentContext {
+  /** Issue that owns this binding. */
+  readonly issueId: IssueId
+  /** Exact durable Session resumed on every later execution. */
+  readonly sessionId: SessionId
+  /** ISO-8601 instant when the exact Session was first persisted, or null before creation succeeds. */
+  readonly sessionStartedAt: string | null
+  /** Local base branch fixed when the binding was created. */
+  readonly baseBranch: string
+  /** Dedicated local Issue branch. */
+  readonly branch: string
+  /** Dedicated persistent worktree path. */
+  readonly worktreePath: string
+  /** Concrete Agent composition resolved when the Session was created. */
+  readonly agentPreset: string
+  /** Provider route resolved when the Session was created. */
+  readonly provider: string
+  /** Model resolved when the Session was created. */
+  readonly model: string
+  /** Adapter-owned reasoning effort resolved at creation, or null. */
+  readonly reasoningEffort: string | null
+  /** Permission Preset resolved when the Session was created. */
+  readonly permissionPreset: string
+  /** Latest committed implementation result, or null before a handoff. */
+  readonly resultCommit: string | null
+  /** ISO-8601 binding instant. */
+  readonly createdAt: string
+  /** ISO-8601 last evidence update instant. */
+  readonly updatedAt: string
+}
+
 /** Version-checked Patrol Policy save. */
 export interface UpdatePatrolPolicyInput {
   /** Workspace whose policy changes. */
@@ -99,8 +175,59 @@ export interface UpdatePatrolPolicyInput {
   readonly enabled?: boolean
   /** Replacement fixed interval when supplied. */
   readonly interval?: PatrolInterval
+  /** Replacement local base branch; null clears it while disabled. */
+  readonly baseBranch?: string | null
+  /** Replacement Agent Preset; null follows the Host default. */
+  readonly agentPreset?: string | null
+  /** Replacement provider route; null follows the Host default. */
+  readonly provider?: string | null
+  /** Replacement model; null follows the Host default. */
+  readonly model?: string | null
+  /** Replacement reasoning effort; null follows the model default. */
+  readonly reasoningEffort?: string | null
+  /** Replacement Permission Preset. */
+  readonly permissionPreset?: string
   /** Policy version observed by the caller. */
   readonly expectedVersion: number
+}
+
+/** Atomically claim one structurally eligible todo Issue for an active Run. */
+export interface ClaimPatrolIssueInput {
+  /** Active Run that owns the claim. */
+  readonly runId: PatrolRunId
+  /** Exact Issue selected after external Git eligibility checks. */
+  readonly reference: IssueReference
+  /** Issue version observed by the scanner. */
+  readonly expectedVersion: number
+  /** Blocking Issue commit snapshots proven reachable from Base Branch. */
+  readonly dependencyCommits: Readonly<Record<string, string>>
+  /** Patrol actor recorded on the status and assignment mutation. */
+  readonly actor: TaskboardActor
+}
+
+/** Bind a newly claimed Issue to its durable Session and Git isolation. */
+export interface BindPatrolDevelopmentContextInput {
+  /** Active Attempt whose Issue receives the binding. */
+  readonly attemptId: PatrolAttemptId
+  /** Complete immutable creation choices and filesystem identities. */
+  readonly context: Omit<
+    PatrolDevelopmentContext,
+    'issueId' | 'sessionStartedAt' | 'resultCommit' | 'createdAt' | 'updatedAt'
+  >
+}
+
+/** Complete one active Attempt and apply its owned Issue lifecycle transition. */
+export interface CompletePatrolAttemptInput {
+  /** Active Attempt to finish. */
+  readonly attemptId: PatrolAttemptId
+  /** Terminal claim result. */
+  readonly result: PatrolAttemptResult
+  /** Human-readable blocker or failure detail. */
+  readonly error?: string
+  /** Result commit required for review handoff. */
+  readonly resultCommit?: string
+  /** Actor recorded on the lifecycle transition and optional blocker comment. */
+  readonly actor: TaskboardActor
 }
 
 /** Input that persists one scheduled or manual trigger. */

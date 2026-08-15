@@ -11,6 +11,8 @@ flowchart LR
   svc_taskboard["ctx.taskboard<br/>Workspace Taskboard seam"]
   pkg_taskboard_sqlite["taskboard-sqlite"]
   pkg_taskboard_remote["taskboard-remote"]
+  pkg_taskboard_patrol["taskboard-patrol"]
+  svc_taskboardPatrol["ctx.taskboardPatrol<br/>Taskboard Patrol execution support"]
   svc_taskboardRemote["ctx.taskboardRemote<br/>Taskboard Host Remote"]
   pkg_attachment["attachment"]
   svc_attachments["ctx.attachments<br/>Durable binary attachment storage"]
@@ -285,6 +287,7 @@ flowchart LR
   pkg_subprocess_local --> svc_subprocess
   pkg_system_prompt --> svc_systemPrompt
   pkg_taskboard --> svc_taskboard
+  pkg_taskboard_patrol --> svc_taskboardPatrol
   pkg_taskboard_remote --> svc_taskboardRemote
   pkg_taskboard_sqlite --> svc_taskboard
   pkg_terminal --> svc_terminals
@@ -391,6 +394,7 @@ flowchart LR
   svc_systemPrompt --> pkg_tool_terminal
   svc_systemPrompt --> pkg_tool_web
   svc_systemPrompt --> pkg_tools
+  svc_taskboard --> pkg_taskboard_patrol
   svc_taskboard --> pkg_taskboard_remote
   svc_terminals --> pkg_tool_terminal
   svc_tokenMeter --> pkg_compaction_basic
@@ -420,7 +424,8 @@ flowchart LR
 
 | ctx key | Role | Owner | Implementations | Direct consumers | Companion plugins | Note |
 | --- | --- | --- | --- | --- | --- | --- |
-| `ctx.taskboard` | `seam` | [`taskboard`](../packages/taskboard/taskboard) | [`taskboard-sqlite`](../packages/taskboard/taskboard-sqlite) | [`taskboard-remote`](../packages/taskboard/taskboard-remote) | - | The Service Definition owns Workspace-scoped Issues and append-only history; the local Provider commits those records in one Host-owned SQLite database. |
+| `ctx.taskboard` | `seam` | [`taskboard`](../packages/taskboard/taskboard) | [`taskboard-sqlite`](../packages/taskboard/taskboard-sqlite) | [`taskboard-remote`](../packages/taskboard/taskboard-remote), [`taskboard-patrol`](../packages/taskboard/taskboard-patrol) | - | The Service Definition owns Workspace-scoped Issues and append-only history; the local Provider commits those records in one Host-owned SQLite database. |
+| `ctx.taskboardPatrol` | `core` | [`taskboard-patrol`](../packages/taskboard/taskboard-patrol) | - | - | - | Prepares permanent local Git isolation and the exact persistent Agent Session for an already claimed Patrol Attempt; scheduling and turn orchestration remain separate Consumers. |
 | `ctx.taskboardRemote` | `core` | [`taskboard-remote`](../packages/taskboard/taskboard-remote) | - | - | - | Projects the Taskboard Service into typed request/response methods while preserving Workspace authority and stable domain failures. |
 | `ctx.attachments` | `seam` | [`attachment`](../packages/attachment/attachment) | [`attachment-local`](../packages/attachment/attachment-local) | `host-runtime`, [`llm-pi-ai`](../packages/llm/llm-pi-ai) | - | The host commits accepted images before session events; provider adapters resolve authorized durable references into provider-native content. |
 | `ctx.llm` | `seam` | [`llm`](../packages/llm/llm) | [`llm-deepseek`](../packages/llm/llm-deepseek), [`llm-pi-ai`](../packages/llm/llm-pi-ai), [`llm-replay`](../packages/test-support/llm-replay) | [`agent-loop`](../packages/core/agent-loop), [`compaction-basic`](../packages/compaction/compaction-basic) | - | Adapters register provider implementations; the loop and compaction call the provider-neutral stream service. |

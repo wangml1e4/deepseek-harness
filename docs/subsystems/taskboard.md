@@ -6,7 +6,7 @@ The Taskboard subsystem records durable work owned by a registered Workspace. [`
 
 ## Values and identity
 
-Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `CommentId`, `ActivityId`, `RelationId`, `PatrolRunId`, and `TaskboardActorId` are branded opaque identities.
+Each Workspace has one implicit `WorkspaceTaskboard`. Its unique prefix and monotonically allocated number form a stable `IssueIdentifier`; moving an Issue does not rewrite that identifier. `IssueId`, `CommentId`, `ActivityId`, `RelationId`, `PatrolRunId`, `PatrolAttemptId`, and `TaskboardActorId` are branded opaque identities.
 
 Every Issue has exactly one status: `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done`, or `canceled`. Priority is `none`, `urgent`, `high`, `medium`, or `low`; it is metadata and never changes manual board order. Active lists exclude archived Issues by default.
 
@@ -22,11 +22,19 @@ Issue archiving is reversible. The service has no permanent Issue, Comment, or A
 
 ## Patrol scheduling state
 
-Each Taskboard creates one `PatrolPolicy` with fixed-interval scheduling disabled and `1h` selected. The supported interval vocabulary is exactly `5m`, `30m`, `1h`, `2h`, `6h`, `12h`, and `24h`. Enabling or changing the interval calculates `nextDueAt` from the save instant; disabling clears it without changing an active Run.
+Each Taskboard creates one `PatrolPolicy` with fixed-interval scheduling disabled, `1h` selected, the Host default Agent and model choices, and the `workspace-write` Permission Preset. The supported interval vocabulary is exactly `5m`, `30m`, `1h`, `2h`, `6h`, `12h`, and `24h`. Enabling requires a local Base Branch. Enabling or changing the interval calculates `nextDueAt` from the save instant; disabling clears it without changing an active Run.
 
 A scheduled trigger consumes its prior due instant and advances by fixed cadence to the first point after the current time. An overdue Host restart therefore produces one trigger rather than replaying every elapsed interval. A manual trigger does not enable the saved policy and may start while it is disabled.
 
 Patrol Run reservation is Host-wide and durable. One active row excludes every other active row across Workspaces. Scheduled overlap persists a completed `skipped_global_busy` result and advances that Workspace's cadence without queueing; manual overlap rejects. Terminal Run results cannot be overwritten and no Run deletion operation exists.
+
+## Patrol claims and execution identity
+
+A Run owns an ordered sequence of permanent `PatrolAttempt` records. An atomic claim verifies the active Run, exact Issue version, `todo` status, non-User assignment, and every blocking Issue's completed result commit before moving the Issue to `in_progress`. A Run may claim again only after its preceding Attempt ended as `permission_blocked`; every other terminal Attempt ends its claim allowance.
+
+Each Patrol-owned Issue has at most one permanent `PatrolDevelopmentContext`. It fixes the exact Session id, Base Branch, dedicated local `dsh-task/<issue>` branch, persistent worktree, Agent Preset, model selection, reasoning effort, and Permission Preset across every later return to `todo`. The provider distinguishes a reserved Session id from a Session that has been persisted: failure before first persistence may retry the same id, while a started but missing Session cannot be replaced. Review handoff requires a result commit and moves the Issue to `in_review`; a permission block or other execution failure moves it to `blocked` and appends the reason.
+
+`@deepseek-ai/dsh-taskboard-patrol` prepares those stored identities without starting a timer or Agent turn. It uses the managed subprocess service for a fixed local-only Git command vocabulary, never runs fetch, pull, push, PR, merge, reset, branch deletion, or worktree removal, and preserves the Workspace-relative Session directory inside the Issue worktree. It resumes the exact Session after startup, mounts the saved Agent and Permission Presets, and installs an Agent-scoped approval handler that rejects unattended approval requests and cancels that turn for the coordinator to classify.
 
 ## Consumers and storage
 
@@ -36,7 +44,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The current Consumer layer exposes bilingual Web Dashboard, Board, List, Gantt, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. The Service and SQLite Provider now own Patrol scheduling state and permanent trigger history; the Host timer, execution Consumer, development-context bindings, and review evidence remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
+The current Consumer layer exposes bilingual Web Dashboard, Board, List, Gantt, and Issue-detail surfaces and forwards `taskboard/changed` invalidations to the active Workspace. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. The Service and SQLite Provider own Patrol scheduling, Attempts, execution contexts, and permanent history, while the execution Consumer provides exact Session and local Git preparation. The Host timer, issue scanner, prompts, independent Reviewer, and human-review controls remain later layers of the ordered Taskboard PR stack. Version one does not publish or synchronize GitHub Issues.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
@@ -212,9 +220,102 @@ abstract completePatrolRun(input: CompletePatrolRunInput): Promise<PatrolRun>
  * @returns every active and completed Run.
  */
 abstract listPatrolRuns( workspaceId: EnsureWorkspaceInput['workspaceId'], ): Promise<readonly PatrolRun[]>
+
+/**
+ * Atomically claim one todo Issue for an active Run after matching dependency commit snapshots.
+ * @param input - Run, Issue version, dependency evidence, and Patrol actor.
+ * @returns the durable active Attempt.
+ */
+abstract claimPatrolIssue(input: ClaimPatrolIssueInput): Promise<PatrolAttempt>
+
+/**
+ * Bind a newly claimed Issue to the exact Session, branch, and worktree it will always resume.
+ * @param input - Active Attempt and complete creation-time execution choices.
+ * @returns the immutable Issue Development Context.
+ */
+abstract bindPatrolDevelopmentContext( input: BindPatrolDevelopmentContextInput, ): Promise<PatrolDevelopmentContext>
+
+/**
+ * Read one Issue's persistent Session and Git binding.
+ * @param reference - Stable Issue lookup.
+ * @returns its Development Context, or undefined before binding.
+ */
+abstract getPatrolDevelopmentContext( reference: IssueReference, ): Promise<PatrolDevelopmentContext | undefined>
+
+/**
+ * Record that one bound Session has been persisted and must only be resumed afterward.
+ * @param attemptId - Active Attempt using the bound Session.
+ * @returns the updated Development Context.
+ */
+abstract markPatrolSessionStarted(attemptId: PatrolAttempt['id']): Promise<PatrolDevelopmentContext>
+
+/**
+ * Complete one active Attempt and atomically move its Issue to blocked or in_review.
+ * @param input - Attempt result, evidence, and responsible actor.
+ * @returns the terminal durable Attempt.
+ */
+abstract completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt>
+
+/**
+ * List every Issue claim in one Run in claim order.
+ * @param runId - Run whose Attempt history is requested.
+ * @returns active and terminal Attempts in claim order.
+ */
+abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:92`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:106`](../../packages/taskboard/taskboard/src/index.ts)
+
+<a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
+
+### `ctx.taskboardPatrol` — `TaskboardPatrolService`
+
+Host Consumer that binds Patrol claims to local Git isolation and ordinary persistent Agents.
+
+```ts cordis-catalog
+/**
+ * Resolve the current new-Session defaults and checked-out local branch for a Workspace.
+ * @param workspaceId - Registered Workspace whose checkout supplies the branch.
+ * @returns concrete values suitable for a Patrol Policy save.
+ */
+async defaults(workspaceId: WorkspaceId): Promise<PatrolPolicyDefaults>
+
+/**
+ * List branches local to one registered Workspace repository.
+ * @param workspaceId - Workspace whose repository is inspected.
+ * @returns local branch names.
+ */
+localBranches(workspaceId: WorkspaceId): Promise<readonly string[]>
+
+/**
+ * Check dependency integration against an exact local Base Branch.
+ * @param workspaceId - Workspace whose repository is inspected.
+ * @param commit - predecessor result commit.
+ * @param baseBranch - local branch the successor will start from.
+ * @returns whether the commit is an ancestor of the branch.
+ */
+isAncestor(workspaceId: WorkspaceId, commit: string, baseBranch: string): Promise<boolean>
+
+/**
+ * Create or reuse one claim's permanent Development Context, worktree, and exact Session.
+ * @param attempt - active durable claim.
+ * @param issue - claimed Issue snapshot.
+ * @param policy - saved Workspace Patrol choices for an unbound Issue.
+ * @returns a live guarded Agent lease.
+ */
+async prepare( attempt: PatrolAttempt, issue: Issue, policy: PatrolPolicy, ): Promise<PatrolAgentLease>
+
+/**
+ * Read commit, cleanliness, and Base Branch diff evidence from a bound Issue worktree.
+ * @param context - persistent Development Context.
+ * @returns current local Git evidence.
+ */
+result(context: PatrolDevelopmentContext): Promise<PatrolGitResult>
+```
+
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:101`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -362,5 +463,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:403`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:530`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

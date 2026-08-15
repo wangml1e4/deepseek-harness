@@ -11,6 +11,7 @@ import {
   CommentId,
   IssueId,
   IssueIdentifier,
+  PatrolAttemptId,
   PatrolRunId,
   RelationId,
   TaskboardError,
@@ -24,8 +25,11 @@ import type {
   ActivityChange,
   AddCommentInput,
   AddIssueRelationInput,
+  BindPatrolDevelopmentContextInput,
   BeginPatrolRunInput,
+  ClaimPatrolIssueInput,
   Comment,
+  CompletePatrolAttemptInput,
   CompletePatrolRunInput,
   CreateIssueInput,
   EnsureWorkspaceInput,
@@ -35,6 +39,8 @@ import type {
   IssueRelationMutation,
   ListIssuesInput,
   MoveIssueInput,
+  PatrolAttempt,
+  PatrolDevelopmentContext,
   PatrolPolicy,
   PatrolRun,
   RemoveIssueRelationInput,
@@ -51,6 +57,8 @@ import {
   rowToComment,
   rowToIssue,
   rowToPatrolPolicy,
+  rowToPatrolAttempt,
+  rowToPatrolDevelopmentContext,
   rowToPatrolRun,
   rowToRelation,
   rowToWorkspace,
@@ -59,6 +67,8 @@ import {
   type IssueRow,
   type JournalMode,
   type PatrolPolicyRow,
+  type PatrolAttemptRow,
+  type PatrolDevelopmentContextRow,
   type PatrolRunRow,
   type RelationRow,
   type WorkspaceRow,
@@ -211,8 +221,9 @@ export class SqliteTaskboard extends TaskboardService {
       `).run(input.workspaceId, input.title, prefix, timestamp, timestamp)
       db.prepare(`
         INSERT INTO patrol_policies (
-          workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
-        ) VALUES (?, 0, ?, NULL, 1, ?, ?)
+          workspace_id, enabled, interval, base_branch, agent_preset, provider,
+          model, reasoning_effort, permission_preset, next_due_at, version, created_at, updated_at
+        ) VALUES (?, 0, ?, NULL, NULL, NULL, NULL, NULL, 'workspace-write', NULL, 1, ?, ?)
       `).run(input.workspaceId, DEFAULT_PATROL_INTERVAL, timestamp, timestamp)
       db.exec('COMMIT')
       const stored = requireStored(await this.getWorkspace(input.workspaceId), 'Workspace Taskboard')
@@ -899,7 +910,8 @@ export class SqliteTaskboard extends TaskboardService {
     workspaceId: EnsureWorkspaceInput['workspaceId'],
   ): Promise<PatrolPolicy | undefined> {
     const row = this.database().prepare(`
-      SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+      SELECT workspace_id, enabled, interval, base_branch, agent_preset, provider,
+             model, reasoning_effort, permission_preset, next_due_at, version, created_at, updated_at
       FROM patrol_policies
       WHERE workspace_id = ?
     `).get(workspaceId) as PatrolPolicyRow | undefined
@@ -911,7 +923,8 @@ export class SqliteTaskboard extends TaskboardService {
     db.exec('BEGIN IMMEDIATE')
     try {
       const row = db.prepare(`
-        SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+        SELECT workspace_id, enabled, interval, base_branch, agent_preset, provider,
+               model, reasoning_effort, permission_preset, next_due_at, version, created_at, updated_at
         FROM patrol_policies
         WHERE workspace_id = ?
       `).get(input.workspaceId) as PatrolPolicyRow | undefined
@@ -929,7 +942,31 @@ export class SqliteTaskboard extends TaskboardService {
       }
       const enabled = input.enabled ?? row.enabled === 1
       const interval = input.interval ?? row.interval
-      if (enabled === (row.enabled === 1) && interval === row.interval) {
+      const baseBranch = input.baseBranch === undefined ? row.base_branch : input.baseBranch
+      const agentPreset = input.agentPreset === undefined ? row.agent_preset : input.agentPreset
+      const provider = input.provider === undefined ? row.provider : input.provider
+      const model = input.model === undefined ? row.model : input.model
+      const reasoningEffort = input.reasoningEffort === undefined ? row.reasoning_effort : input.reasoningEffort
+      const permissionPreset = input.permissionPreset ?? row.permission_preset
+      if (enabled && (baseBranch === null || baseBranch.trim() === '')) {
+        throw new TaskboardError('patrol_policy_invalid', 'cannot enable Patrol without a local Base Branch')
+      }
+      if (permissionPreset.trim() === '') {
+        throw new TaskboardError('patrol_policy_invalid', 'Patrol Permission Preset must be non-empty')
+      }
+      if ((provider === null) !== (model === null)) {
+        throw new TaskboardError('patrol_policy_invalid', 'Patrol provider and model must be configured together')
+      }
+      if (
+        enabled === (row.enabled === 1)
+        && interval === row.interval
+        && baseBranch === row.base_branch
+        && agentPreset === row.agent_preset
+        && provider === row.provider
+        && model === row.model
+        && reasoningEffort === row.reasoning_effort
+        && permissionPreset === row.permission_preset
+      ) {
         db.exec('COMMIT')
         return rowToPatrolPolicy(row)
       }
@@ -938,9 +975,24 @@ export class SqliteTaskboard extends TaskboardService {
       const nextDueAt = enabled ? nextPatrolDueAfterSave(savedAt, interval) : null
       db.prepare(`
         UPDATE patrol_policies
-        SET enabled = ?, interval = ?, next_due_at = ?, version = version + 1, updated_at = ?
+        SET enabled = ?, interval = ?, base_branch = ?, agent_preset = ?, provider = ?,
+            model = ?, reasoning_effort = ?, permission_preset = ?, next_due_at = ?,
+            version = version + 1, updated_at = ?
         WHERE workspace_id = ? AND version = ?
-      `).run(enabled ? 1 : 0, interval, nextDueAt, timestamp, input.workspaceId, input.expectedVersion)
+      `).run(
+        enabled ? 1 : 0,
+        interval,
+        baseBranch,
+        agentPreset,
+        provider,
+        model,
+        reasoningEffort,
+        permissionPreset,
+        nextDueAt,
+        timestamp,
+        input.workspaceId,
+        input.expectedVersion,
+      )
       db.exec('COMMIT')
       const stored = requireStored(await this.getPatrolPolicy(input.workspaceId), 'Patrol Policy')
       this.notifyChanged(input.workspaceId)
@@ -955,7 +1007,8 @@ export class SqliteTaskboard extends TaskboardService {
   async listDuePatrolPolicies(): Promise<readonly PatrolPolicy[]> {
     const timestamp = new Date().toISOString()
     const rows = this.database().prepare(`
-      SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+      SELECT workspace_id, enabled, interval, base_branch, agent_preset, provider,
+             model, reasoning_effort, permission_preset, next_due_at, version, created_at, updated_at
       FROM patrol_policies
       WHERE enabled = 1 AND next_due_at <= ?
       ORDER BY next_due_at, workspace_id
@@ -969,7 +1022,8 @@ export class SqliteTaskboard extends TaskboardService {
     db.exec('BEGIN IMMEDIATE')
     try {
       const policyRow = db.prepare(`
-        SELECT workspace_id, enabled, interval, next_due_at, version, created_at, updated_at
+        SELECT workspace_id, enabled, interval, base_branch, agent_preset, provider,
+               model, reasoning_effort, permission_preset, next_due_at, version, created_at, updated_at
         FROM patrol_policies
         WHERE workspace_id = ?
       `).get(input.workspaceId) as PatrolPolicyRow | undefined
@@ -1073,6 +1127,360 @@ export class SqliteTaskboard extends TaskboardService {
     return rows.map(rowToPatrolRun)
   }
 
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async claimPatrolIssue(input: ClaimPatrolIssueInput): Promise<PatrolAttempt> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const run = db.prepare(`
+        SELECT workspace_id, state
+        FROM patrol_runs
+        WHERE id = ?
+      `).get(input.runId) as { workspace_id: string; state: PatrolRun['state'] } | undefined
+      if (run === undefined || run.state !== 'active') {
+        throw new TaskboardError('patrol_run_not_active', `Patrol Run '${input.runId}' is not active`)
+      }
+      const latestAttempt = db.prepare(`
+        SELECT state, result
+        FROM patrol_attempts
+        WHERE run_id = ?
+        ORDER BY sequence DESC
+        LIMIT 1
+      `).get(input.runId) as Pick<PatrolAttempt, 'state' | 'result'> | undefined
+      if (latestAttempt?.state === 'active') {
+        throw new TaskboardError('patrol_issue_ineligible', `Patrol Run '${input.runId}' already has an active Attempt`)
+      }
+      if (latestAttempt !== undefined && latestAttempt.result !== 'permission_blocked') {
+        throw new TaskboardError(
+          'patrol_issue_ineligible',
+          `Patrol Run '${input.runId}' may continue only after a permission-blocked Attempt`,
+        )
+      }
+      const issue = db.prepare(`
+        SELECT id, workspace_id, status, assignee, version, archived_at
+        FROM issues
+        WHERE id = ? OR identifier = ?
+      `).get(input.reference, input.reference) as {
+        id: string
+        workspace_id: string
+        status: Issue['status']
+        assignee: Issue['assignee']
+        version: number
+        archived_at: string | null
+      } | undefined
+      if (issue === undefined) {
+        throw new TaskboardError('issue_not_found', `cannot claim missing Issue '${input.reference}'`)
+      }
+      if (issue.version !== input.expectedVersion) {
+        throw new TaskboardError(
+          'version_conflict',
+          `cannot claim Issue '${input.reference}': expected version ${input.expectedVersion}, found ${issue.version}`,
+        )
+      }
+      if (
+        issue.workspace_id !== run.workspace_id
+        || issue.archived_at !== null
+        || issue.status !== 'todo'
+        || issue.assignee === 'user'
+      ) {
+        throw new TaskboardError('patrol_issue_ineligible', `Issue '${input.reference}' is not eligible for Patrol`)
+      }
+      const blockers = db.prepare(`
+        SELECT source.id, source.status, context.result_commit
+        FROM relations
+        JOIN issues AS source ON source.id = relations.source_issue_id
+        LEFT JOIN patrol_development_contexts AS context ON context.issue_id = source.id
+        WHERE relations.target_issue_id = ?
+        ORDER BY relations.sequence
+      `).all(issue.id) as unknown as { id: string; status: Issue['status']; result_commit: string | null }[]
+      const snapshots = input.dependencyCommits
+      const dependenciesMatch = blockers.every(blocker =>
+        blocker.status === 'done'
+        && blocker.result_commit !== null
+        && snapshots[blocker.id] === blocker.result_commit)
+        && Object.keys(snapshots).length === blockers.length
+      if (!dependenciesMatch) {
+        throw new TaskboardError(
+          'patrol_issue_ineligible',
+          `Issue '${input.reference}' has an unsatisfied or changed dependency`,
+        )
+      }
+      const context = db.prepare(`
+        SELECT session_id FROM patrol_development_contexts WHERE issue_id = ?
+      `).get(issue.id) as { session_id: string } | undefined
+      const timestamp = new Date().toISOString()
+      const attemptId = PatrolAttemptId(randomUUID())
+      db.prepare(`
+        UPDATE issues
+        SET status = 'in_progress', assignee = 'patrol_agent', version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(timestamp, issue.id, input.expectedVersion)
+      const changes: ActivityChange[] = [
+        { field: 'status', before: 'todo', after: 'in_progress' },
+      ]
+      if (issue.assignee !== 'patrol_agent') {
+        changes.push({ field: 'assignee', before: issue.assignee, after: 'patrol_agent' })
+      }
+      this.recordActivity(IssueId(issue.id), input.actor, changes, timestamp)
+      db.prepare(`
+        INSERT INTO patrol_attempts (
+          id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
+        ) VALUES (?, ?, ?, ?, 'active', NULL, NULL, ?, NULL)
+      `).run(attemptId, input.runId, issue.id, context?.session_id ?? null, timestamp)
+      db.exec('COMMIT')
+      const stored = requireStored(this.findPatrolAttempt(attemptId), 'Patrol Attempt')
+      this.notifyChanged(run.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  async bindPatrolDevelopmentContext(
+    input: BindPatrolDevelopmentContextInput,
+  ): Promise<PatrolDevelopmentContext> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const attempt = db.prepare(`
+        SELECT attempts.issue_id, attempts.state, issues.workspace_id
+        FROM patrol_attempts AS attempts
+        JOIN issues ON issues.id = attempts.issue_id
+        WHERE attempts.id = ?
+      `).get(input.attemptId) as {
+        issue_id: string
+        state: PatrolAttempt['state']
+        workspace_id: string
+      } | undefined
+      if (attempt === undefined || attempt.state !== 'active') {
+        throw new TaskboardError(
+          'patrol_attempt_not_active',
+          `Patrol Attempt '${input.attemptId}' is not active`,
+        )
+      }
+      const existing = db.prepare(`
+        SELECT 1 FROM patrol_development_contexts WHERE issue_id = ?
+      `).get(attempt.issue_id)
+      if (existing !== undefined) {
+        throw new TaskboardError(
+          'patrol_context_exists',
+          `Issue '${attempt.issue_id}' already has a Development Context`,
+        )
+      }
+      const values = [
+        input.context.baseBranch,
+        input.context.branch,
+        input.context.worktreePath,
+        input.context.agentPreset,
+        input.context.provider,
+        input.context.model,
+        input.context.permissionPreset,
+      ]
+      if (values.some(value => value.trim() === '')) {
+        throw new TaskboardError('patrol_issue_ineligible', 'Development Context values must be non-empty')
+      }
+      const timestamp = new Date().toISOString()
+      db.prepare(`
+        INSERT INTO patrol_development_contexts (
+          issue_id, session_id, session_started_at, base_branch, branch, worktree_path, agent_preset,
+          provider, model, reasoning_effort, permission_preset, result_commit,
+          created_at, updated_at
+        ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `).run(
+        attempt.issue_id,
+        input.context.sessionId,
+        input.context.baseBranch,
+        input.context.branch,
+        input.context.worktreePath,
+        input.context.agentPreset,
+        input.context.provider,
+        input.context.model,
+        input.context.reasoningEffort,
+        input.context.permissionPreset,
+        timestamp,
+        timestamp,
+      )
+      db.prepare(`
+        UPDATE patrol_attempts SET session_id = ? WHERE id = ? AND state = 'active'
+      `).run(input.context.sessionId, input.attemptId)
+      db.exec('COMMIT')
+      const stored = requireStored(
+        await this.getPatrolDevelopmentContext(IssueId(attempt.issue_id)),
+        'Patrol Development Context',
+      )
+      this.notifyChanged(attempt.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async getPatrolDevelopmentContext(
+    reference: IssueReference,
+  ): Promise<PatrolDevelopmentContext | undefined> {
+    const row = this.database().prepare(`
+      SELECT context.issue_id, context.session_id, context.base_branch, context.branch,
+             context.worktree_path, context.agent_preset, context.provider, context.model,
+             context.reasoning_effort, context.permission_preset, context.result_commit,
+             context.session_started_at, context.created_at, context.updated_at
+      FROM patrol_development_contexts AS context
+      JOIN issues ON issues.id = context.issue_id
+      WHERE issues.id = ? OR issues.identifier = ?
+    `).get(reference, reference) as PatrolDevelopmentContextRow | undefined
+    return row === undefined ? undefined : rowToPatrolDevelopmentContext(row)
+  }
+
+  async markPatrolSessionStarted(attemptId: PatrolAttempt['id']): Promise<PatrolDevelopmentContext> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const attempt = db.prepare(`
+        SELECT attempts.issue_id, attempts.session_id, attempts.state, issues.workspace_id
+        FROM patrol_attempts AS attempts
+        JOIN issues ON issues.id = attempts.issue_id
+        WHERE attempts.id = ?
+      `).get(attemptId) as {
+        issue_id: string
+        session_id: string | null
+        state: PatrolAttempt['state']
+        workspace_id: string
+      } | undefined
+      if (attempt === undefined || attempt.state !== 'active') {
+        throw new TaskboardError('patrol_attempt_not_active', `Patrol Attempt '${attemptId}' is not active`)
+      }
+      if (attempt.session_id === null) {
+        throw new TaskboardError('patrol_context_missing', `Issue '${attempt.issue_id}' has no Development Context`)
+      }
+      const timestamp = new Date().toISOString()
+      const result = db.prepare(`
+        UPDATE patrol_development_contexts
+        SET session_started_at = COALESCE(session_started_at, ?), updated_at = ?
+        WHERE issue_id = ? AND session_id = ?
+      `).run(timestamp, timestamp, attempt.issue_id, attempt.session_id)
+      /* v8 ignore next 3 -- binding writes the Context and active Attempt Session in one transaction. */
+      if (result.changes !== 1) {
+        throw new TaskboardError('patrol_context_missing', `Issue '${attempt.issue_id}' has no matching Development Context`)
+      }
+      db.exec('COMMIT')
+      const stored = requireStored(
+        await this.getPatrolDevelopmentContext(IssueId(attempt.issue_id)),
+        'Patrol Development Context',
+      )
+      this.notifyChanged(attempt.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async completePatrolAttempt(input: CompletePatrolAttemptInput): Promise<PatrolAttempt> {
+    const db = this.database()
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      const attempt = db.prepare(`
+        SELECT attempts.id, attempts.issue_id, attempts.state, issues.workspace_id,
+               issues.status, issues.version, contexts.session_id
+        FROM patrol_attempts AS attempts
+        JOIN issues ON issues.id = attempts.issue_id
+        LEFT JOIN patrol_development_contexts AS contexts ON contexts.issue_id = attempts.issue_id
+        WHERE attempts.id = ?
+      `).get(input.attemptId) as {
+        id: string
+        issue_id: string
+        state: PatrolAttempt['state']
+        workspace_id: string
+        status: Issue['status']
+        version: number
+        session_id: string | null
+      } | undefined
+      if (attempt === undefined || attempt.state !== 'active') {
+        throw new TaskboardError(
+          'patrol_attempt_not_active',
+          `Patrol Attempt '${input.attemptId}' is not active`,
+        )
+      }
+      if (attempt.status !== 'in_progress') {
+        throw new TaskboardError(
+          'patrol_issue_ineligible',
+          `Issue '${attempt.issue_id}' is no longer in progress`,
+        )
+      }
+      const handoff = input.result === 'review_handoff'
+      const detail = input.error?.trim()
+      const resultCommit = input.resultCommit?.trim()
+      if (handoff) {
+        if (attempt.session_id === null) {
+          throw new TaskboardError('patrol_context_missing', `Issue '${attempt.issue_id}' has no Development Context`)
+        }
+        if (resultCommit === undefined || resultCommit === '') {
+          throw new TaskboardError('patrol_issue_ineligible', 'review handoff requires a result commit')
+        }
+      } else if (detail === undefined || detail === '') {
+        throw new TaskboardError('patrol_issue_ineligible', 'blocked Patrol Attempt requires a reason')
+      }
+      const timestamp = new Date().toISOString()
+      const nextStatus = handoff ? 'in_review' : 'blocked'
+      db.prepare(`
+        UPDATE issues
+        SET status = ?, version = version + 1, updated_at = ?
+        WHERE id = ? AND version = ?
+      `).run(nextStatus, timestamp, attempt.issue_id, attempt.version)
+      this.recordActivity(IssueId(attempt.issue_id), input.actor, [{
+        field: 'status', before: 'in_progress', after: nextStatus,
+      }], timestamp)
+      if (!handoff) {
+        db.prepare(`
+          INSERT INTO comments (
+            id, issue_id, body, actor_type, actor_id, actor_name, actor_avatar_url, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          CommentId(randomUUID()),
+          attempt.issue_id,
+          detail as string,
+          input.actor.type,
+          input.actor.id,
+          input.actor.name,
+          input.actor.avatarUrl ?? null,
+          timestamp,
+        )
+      } else {
+        db.prepare(`
+          UPDATE patrol_development_contexts
+          SET result_commit = ?, updated_at = ?
+          WHERE issue_id = ?
+        `).run(resultCommit as string, timestamp, attempt.issue_id)
+      }
+      db.prepare(`
+        UPDATE patrol_attempts
+        SET state = 'completed', result = ?, error = ?, ended_at = ?
+        WHERE id = ? AND state = 'active'
+      `).run(input.result, handoff ? null : detail as string, timestamp, input.attemptId)
+      db.exec('COMMIT')
+      const stored = requireStored(this.findPatrolAttempt(input.attemptId), 'Patrol Attempt')
+      this.notifyChanged(attempt.workspace_id as EnsureWorkspaceInput['workspaceId'])
+      return stored
+    } catch (error: unknown) {
+      rollback(db)
+      throw error
+    }
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]> {
+    const rows = this.database().prepare(`
+      SELECT id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
+      FROM patrol_attempts
+      WHERE run_id = ?
+      ORDER BY sequence
+    `).all(runId) as unknown as PatrolAttemptRow[]
+    return rows.map(rowToPatrolAttempt)
+  }
+
   /** Return the initialized database or fail if the Service lifecycle was bypassed. */
   private database(): DatabaseSync {
     if (this.db === undefined) throw new Error('SQLite Taskboard is not initialized')
@@ -1089,6 +1497,17 @@ export class SqliteTaskboard extends TaskboardService {
     `).get(runId) as PatrolRunRow | undefined
     /* v8 ignore next -- callers pass an id read or inserted in the same SQLite transaction. */
     return row === undefined ? undefined : rowToPatrolRun(row)
+  }
+
+  /** Read one Patrol Attempt from the initialized database. */
+  private findPatrolAttempt(attemptId: PatrolAttemptId): PatrolAttempt | undefined {
+    const row = this.database().prepare(`
+      SELECT id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
+      FROM patrol_attempts
+      WHERE id = ?
+    `).get(attemptId) as PatrolAttemptRow | undefined
+    /* v8 ignore next -- callers pass an id inserted or updated in the same SQLite transaction. */
+    return row === undefined ? undefined : rowToPatrolAttempt(row)
   }
 
   /** Resolve an Issue reference for child-record foreign keys. */

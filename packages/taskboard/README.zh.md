@@ -9,6 +9,7 @@
 | [`taskboard/`](taskboard/README.md) | 声明 Taskboard 值、失败类型和 Service Definition | `ctx.taskboard` |
 | [`taskboard-sqlite/`](taskboard-sqlite/README.md) | 在一份 Host 所属的 SQLite 数据库中持久化该服务 | 提供 `ctx.taskboard` |
 | [`taskboard-remote/`](taskboard-remote/README.md) | 通过 Host Typert API 暴露 Taskboard 操作 | `ctx.taskboardRemote` |
+| [`taskboard-patrol/`](taskboard-patrol/README.md) | 将持久 Patrol claim 绑定到本地 Git worktree 和持久 Session | `ctx.taskboardPatrol` |
 | [`taskctl/`](taskctl/README.md) | 提供机器可读的 Taskboard 命令行 | 二进制消费方 |
 | [`skill-manage-taskboard/`](skill-manage-taskboard/README.md) | 注册内置交互式 Taskboard 工作流 | `ctx.skills` 提供方 |
 | [`../client/ui-taskboard/`](../client/ui-taskboard/README.md) | 在浏览器中展示 Dashboard、Board、List、Gantt 和 Issue 详情 | UI 消费方 |
