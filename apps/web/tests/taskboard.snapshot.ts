@@ -22,11 +22,13 @@ describe('assembled Workspace Taskboard', () => {
       .find(node => node?.getAttribute('aria-expanded') !== null)
     if (workspaceRow === undefined || workspaceRow === null) throw new Error('fixture Workspace row missing')
     fireEvent.mouseEnter(workspaceRow)
-    fireEvent.click(await within(tree).findByRole(
+    const taskboardEntry = await within(tree).findByRole(
       'button',
-      { name: 'Open Taskboard for fixture' },
+      { name: 'Open Taskboard for fixture, todo: 1' },
       { timeout: 10_000 },
-    ))
+    )
+    const sidebar = `sidebar=${taskboardEntry.getAttribute('aria-label')}`
+    fireEvent.click(taskboardEntry)
 
     const surface = await screen.findByRole('main', undefined, { timeout: 10_000 })
     await within(surface).findByText('Ship Taskboard dashboard')
@@ -92,7 +94,8 @@ describe('assembled Workspace Taskboard', () => {
     const reviewPanel = reviewFinding.closest('aside')
     if (reviewPanel === null) throw new Error('Reviewer evidence must render in the right column')
     const review = [
-      `session=${within(reviewPanel).getByText('fx-beta').textContent}`,
+      `session=${within(reviewPanel).getByRole('button', { name: 'Open Session fx-beta' }).textContent}`,
+      `diff=${within(reviewPanel).getByText(/packages\/taskboard\/taskboard-sqlite\/src\/index\.ts \| 4 \+\+\+\+/).textContent}|patch=${reviewPanel.textContent?.includes('Keep the mutation and Activity write in one transaction.') ? 'visible' : '<absent>'}`,
       `review=${['Reviewer requested changes', 'Verification:', 'Remaining risks:'].filter(label => reviewPanel.textContent?.includes(label)).join('|')}`,
       `human=${['Return to todo', 'Mark done'].map(label => within(reviewPanel).getByRole('button', { name: label }).textContent).join('|')}`,
     ].join('\n')
@@ -124,7 +127,7 @@ describe('assembled Workspace Taskboard', () => {
     const deleteFailure = await within(deleteDialog).findByRole('alert')
     const workspaceDelete = `workspaceDelete=migration:${explainsMigration ? 'visible' : '<absent>'}|blocked:${deleteFailure.textContent?.includes('Move all 3 active or archived Taskboard Issues') ?? false ? 'taskboard-issues' : '<absent>'}`
 
-    const shape = `${dashboard}\n${board}\nlist=${list}\n${detail}\n${patrol}\n${review}\n${timeline}\n${workspaceDelete}\n`
+    const shape = `${sidebar}\n${dashboard}\n${board}\nlist=${list}\n${detail}\n${patrol}\n${review}\n${timeline}\n${workspaceDelete}\n`
     if (REFRESHING_GOLDEN) {
       mkdirSync(dirname(EXPECTED), { recursive: true })
       writeFileSync(EXPECTED, shape)

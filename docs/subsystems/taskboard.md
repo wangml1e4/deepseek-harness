@@ -50,11 +50,11 @@ An interrupted active Attempt can recover only through its stored Development Co
 
 Consumers depend on the Service Definition rather than the SQLite provider. The provider enables foreign keys, stores reusable Workspace Labels through ordered Issue-label rows, uses a fixed application id and monotonic schema version, and rejects an unversioned populated file, a foreign application id, or an unsupported version during initialization. Its write transactions keep Issue versions, order, labels, required Comments, relations, attachment metadata, and Activity consistent. Attachment bytes use opaque ids as owner-only filenames in an adjacent managed directory and never enter a Workspace repository.
 
-`@deepseek-ai/dsh-taskboard-remote` exposes the Service under the Typert `taskboard` namespace and validates Workspace identities against `ctx.workspaceRegistry`. Its Workspace Activity read returns newest-first Activity for active Issues without reloading each Issue independently. It also registers the `taskboard-issues` Workspace deletion guard: active and archived Issues keep the registration unchanged until every Issue moves to another Workspace. Issue creation and movement into a Workspace share the registry mutation queue with deletion, so guards cannot miss a concurrent Taskboard write. Domain failures remain typed business results while carrier validation and infrastructure failures remain distinct. The browser API assembly mounts its generated Client contribution.
+`@deepseek-ai/dsh-taskboard-remote` exposes the Service under the Typert `taskboard` namespace and validates Workspace identities against `ctx.workspaceRegistry`. Its Workspace Activity read returns newest-first Activity for active Issues without reloading each Issue independently, and its sidebar projection derives the current `todo` count without returning Issue records. Human-review evidence includes the bounded committed diff from the fixed Base Branch to the result commit. It also registers the `taskboard-issues` Workspace deletion guard: active and archived Issues keep the registration unchanged until every Issue moves to another Workspace. Issue creation and movement into a Workspace share the registry mutation queue with deletion, so guards cannot miss a concurrent Taskboard write. Domain failures remain typed business results while carrier validation and infrastructure failures remain distinct. The browser API assembly mounts its generated Client contribution.
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
 
 ## Post-version-one GitHub plan
 
@@ -460,6 +460,13 @@ Host Remote adapter that keeps Workspace identity authoritative.
 @Remote('listIssues') listIssues(input: ListIssuesInput): Promise<TaskboardRemoteResult<TaskboardIssueListValue>>
 
 /**
+ * Count current todo Issues for one registered Workspace sidebar row.
+ * @param workspaceId - Workspace whose manual Patrol queue is summarized.
+ * @returns current derived count or a stable business failure.
+ */
+@Remote('todoCount') todoCount(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardTodoCountValue>>
+
+/**
  * Look up one Issue.
  * @param reference - Opaque id or human-readable identifier.
  * @returns explicit nullable Issue result.
@@ -616,7 +623,7 @@ Host Remote adapter that keeps Workspace identity authoritative.
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-remote/src/index.ts:58`](../../packages/taskboard/taskboard-remote/src/index.ts)
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:59`](../../packages/taskboard/taskboard-remote/src/index.ts)
 
 <a id="taskboard-events"></a>
 

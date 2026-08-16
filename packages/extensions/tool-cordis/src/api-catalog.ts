@@ -2062,6 +2062,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'ordered Issues or a stable business failure.',
       },
       {
+        signature: '@Remote(\'todoCount\') todoCount(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardTodoCountValue>>',
+        description: 'Count current todo Issues for one registered Workspace sidebar row.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose manual Patrol queue is summarized.' }],
+        returns: 'current derived count or a stable business failure.',
+      },
+      {
         signature: '@Remote(\'getIssue\') getIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardIssueValue>>',
         description: 'Look up one Issue.',
         parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
@@ -5025,8 +5031,12 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TaskboardPatrolDefaultsValue {\n    readonly baseBranch: string;\n    readonly agentPreset: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n}',
   },
   {
+    name: 'TaskboardPatrolDiffValue',
+    declaration: 'export interface TaskboardPatrolDiffValue {\n    readonly patch: string;\n    readonly stat: string;\n}',
+  },
+  {
     name: 'TaskboardPatrolIssueValue',
-    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly reviews: readonly PatrolReview[];\n}',
+    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly diff: TaskboardPatrolDiffValue | null;\n    readonly reviews: readonly PatrolReview[];\n}',
   },
   {
     name: 'TaskboardPatrolModelOption',
@@ -5075,6 +5085,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskboardRemoteSuccess',
     declaration: 'export interface TaskboardRemoteSuccess<T> {\n    readonly ok: true;\n    readonly value: T;\n}',
+  },
+  {
+    name: 'TaskboardTodoCountValue',
+    declaration: 'export interface TaskboardTodoCountValue {\n    readonly count: number;\n}',
   },
   {
     name: 'TerminalBackend',

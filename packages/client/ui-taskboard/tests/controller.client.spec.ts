@@ -93,6 +93,7 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
   const one = issue()
   return {
     workspace: workspaceId => ok(taskboard(workspaceId)),
+    todoCount: () => ok({ count: 1 }),
     listIssues: () => ok({ items: [one] }),
     getIssue: () => ok({ issue: one }),
     createIssue: input => ok(issue({ title: input.title })),
@@ -162,7 +163,7 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       startedAt: '2026-08-16T00:00:00.000Z',
       endedAt: null,
     }),
-    patrolIssue: () => ok({ context: null, reviews: [] }),
+    patrolIssue: () => ok({ context: null, diff: null, reviews: [] }),
     ...overrides,
   }
 }

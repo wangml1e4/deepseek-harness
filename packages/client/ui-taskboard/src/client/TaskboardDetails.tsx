@@ -60,6 +60,7 @@ export function TaskboardDetails({
   removeRelation,
   updatePatrol,
   runPatrol,
+  openSession,
   close,
   t,
 }: DetailsProps) {
@@ -81,6 +82,7 @@ export function TaskboardDetails({
     return <PatrolPanel useTaskboard={useTaskboard} updatePatrol={updatePatrol} runPatrol={runPatrol} close={close} t={t} />
   }
   if (issue === null) return <aside className={css.detailsEmpty}>{t('details.noSelection')}</aside>
+  const patrolContext = snapshot.patrolIssue?.context ?? null
   const needsReason = draft.status === 'todo' && (issue.status === 'in_review' || issue.status === 'blocked' || issue.status === 'done')
   const save = (event: FormEvent): void => {
     event.preventDefault()
@@ -233,15 +235,24 @@ export function TaskboardDetails({
           </form>
         </section>
 
-        {snapshot.patrolIssue?.context !== null && snapshot.patrolIssue?.context !== undefined && (
+        {patrolContext !== null && snapshot.patrolIssue !== null && (
           <section className={css.detailSection}>
             <h2>{t('details.development')}</h2>
             <dl className={css.evidenceGrid}>
-              <div><dt>{t('details.session')}</dt><dd><code>{snapshot.patrolIssue.context.sessionId}</code></dd></div>
-              <div><dt>{t('details.branch')}</dt><dd><code>{snapshot.patrolIssue.context.branch}</code></dd></div>
-              <div><dt>{t('details.baseBranch')}</dt><dd><code>{snapshot.patrolIssue.context.baseBranch}</code></dd></div>
-              <div><dt>{t('details.commit')}</dt><dd><code>{snapshot.patrolIssue.context.resultCommit ?? t('details.commitPending')}</code></dd></div>
+              <div><dt>{t('details.session')}</dt><dd><button
+                type="button"
+                className={css.evidenceLink}
+                aria-label={t('details.session.open', { id: patrolContext.sessionId })}
+                onClick={() => { openSession(patrolContext.sessionId) }}
+              ><code>{patrolContext.sessionId}</code></button></dd></div>
+              <div><dt>{t('details.branch')}</dt><dd><code>{patrolContext.branch}</code></dd></div>
+              <div><dt>{t('details.baseBranch')}</dt><dd><code>{patrolContext.baseBranch}</code></dd></div>
+              <div><dt>{t('details.commit')}</dt><dd><code>{patrolContext.resultCommit ?? t('details.commitPending')}</code></dd></div>
             </dl>
+            {snapshot.patrolIssue.diff !== null && <details className={css.diffEvidence} open>
+              <summary>{t('details.diff')} · {snapshot.patrolIssue.diff.stat}</summary>
+              <pre>{snapshot.patrolIssue.diff.patch}</pre>
+            </details>}
             {snapshot.patrolIssue.reviews.map(review => <article className={css.reviewCard} key={review.attemptId}>
               <header><strong>{t(`details.review.${review.verdict}`)}</strong><time>{new Date(review.createdAt).toLocaleString()}</time></header>
               <p>{review.findings}</p>

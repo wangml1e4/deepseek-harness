@@ -1,6 +1,6 @@
 /** Browser assembly for the Workspace Taskboard shell surfaces. */
 
-import type { ClientContext, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { ClientContext, SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 // Type-only: generated Taskboard namespace and forwarded Host events.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 // Type-only: shell-chain and Workspace-row SlotMap declarations.
@@ -14,6 +14,7 @@ import { createTaskboardViewStore } from './store.ts'
 import { TaskboardSurface } from './TaskboardSurface.tsx'
 import { TaskboardDetails } from './TaskboardDetails.tsx'
 import { TaskboardSidebarAction, type TaskboardSidebarInjected } from './TaskboardSidebarAction.tsx'
+import { TaskboardTodoCountController } from './sidebar-counts.ts'
 import { en, zh, type TaskboardKey } from './locales.ts'
 
 export type {
@@ -38,7 +39,7 @@ const USER_ACTOR: TaskboardActor = Object.freeze({
 })
 
 /** Services used by Taskboard UI assembly. */
-export const inject = ['slots', 'layout', 'locale', 'remote', 'remote.taskboard']
+export const inject = ['slots', 'layout', 'sessions', 'locale', 'remote', 'remote.taskboard']
 
 /**
  * Register the Taskboard's Workspace entry point and paired shell-chain surfaces.
@@ -47,6 +48,7 @@ export const inject = ['slots', 'layout', 'locale', 'remote', 'remote.taskboard'
 export function apply(ctx: ClientContext): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'ui-taskboard: dictionaries')
   const controller = new TaskboardController(ctx.remote.taskboard)
+  const todoCounts = new TaskboardTodoCountController(ctx.remote.taskboard)
   const store = createTaskboardViewStore()
   const injected = (): TaskboardInjected => ({
     hooks: { taskboard: controller },
@@ -56,6 +58,10 @@ export function apply(ctx: ClientContext): void {
     openIssue: (reference: IssueReference) => {
       ctx.layout.openDetails()
       void controller.selectIssue(reference)
+    },
+    openSession: (sessionId: SessionId) => {
+      ctx.layout.showConversation()
+      ctx.sessions.open(sessionId)
     },
     openPatrol: () => {
       ctx.layout.openDetails()
@@ -78,6 +84,8 @@ export function apply(ctx: ClientContext): void {
     },
   })
   const sidebarInjected = (): TaskboardSidebarInjected => ({
+    hooks: { taskboardTodoCounts: todoCounts },
+    loadTodoCount: workspaceId => todoCounts.load(workspaceId),
     openTaskboard: (workspaceId: WorkspaceId) => {
       ctx.layout.openSurface({ id: 'taskboard', context: workspaceId })
     },
@@ -86,6 +94,7 @@ export function apply(ctx: ClientContext): void {
     surface?.id === 'taskboard' ? surface.context as WorkspaceId : null
 
   ctx.effect(() => ctx.remote.$on('taskboard/changed', (workspaceId) => {
+    void todoCounts.refresh(workspaceId)
     if (controller.getSnapshot().workspaceId !== workspaceId) return
     void controller.refresh()
   }), 'ui-taskboard: pushed invalidations')
@@ -114,4 +123,5 @@ export function apply(ctx: ClientContext): void {
     inject: injected,
   }, TaskboardDetails))
   ctx.effect(() => () => { controller.dispose() }, 'ui-taskboard: controller lifecycle')
+  ctx.effect(() => () => { todoCounts.dispose() }, 'ui-taskboard: sidebar count lifecycle')
 }

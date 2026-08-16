@@ -1,3 +1,4 @@
+sidebar=Open Taskboard for fixture, todo: 1
 title=fixture
 tabs=Dashboard:true|Board:false|List:false|Gantt:false
 metrics=Completion33%|All Issues3|Active1|Overdue1|Due soon1
@@ -16,6 +17,7 @@ permissions=Workspace Write|Full Access
 run=no_eligible_issue
 recovery=visible
 session=fx-beta
+diff=Base Branch diff ·  packages/taskboard/taskboard-sqlite/src/index.ts | 4 ++++|patch=visible
 review=Reviewer requested changes|Verification:|Remaining risks:
 human=Return to todo|Mark done
 gantt=week|mounted=true|styled=true|links=1

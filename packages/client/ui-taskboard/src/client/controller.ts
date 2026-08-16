@@ -36,6 +36,7 @@ import type {
   TaskboardPatrolValue,
   TaskboardRelationListValue,
   TaskboardRemoteResult,
+  TaskboardTodoCountValue,
 } from '@deepseek-ai/dsh-taskboard-remote/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 
@@ -45,6 +46,7 @@ export const MAX_TASKBOARD_ATTACHMENT_BYTES = 25 * 1024 * 1024
 /** Remote methods used by the Taskboard browser object layer. */
 export interface TaskboardClientRemote {
   workspace: (workspaceId: WorkspaceId) => Promise<RemoteResult<TaskboardRemoteResult<WorkspaceTaskboard>>>
+  todoCount: (workspaceId: WorkspaceId) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardTodoCountValue>>>
   listIssues: (input: ListIssuesInput) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardIssueListValue>>>
   getIssue: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardIssueValue>>>
   createIssue: (input: CreateIssueInput) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>

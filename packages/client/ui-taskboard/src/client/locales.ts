@@ -3,6 +3,7 @@
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
   'sidebar.open': '打开“{name}”的 Taskboard',
+  'sidebar.openTodo': '打开“{name}”的 Taskboard，{count} 个 todo Issue',
   'title': 'Taskboard',
   'view.dashboard': '概览',
   'view.board': '看板',
@@ -115,10 +116,12 @@ export const zh = {
   'details.noSelection': '选择一个 Issue 查看详情',
   'details.development': '开发与审查证据',
   'details.session': '实现 Session',
+  'details.session.open': '打开 Session {id}',
   'details.branch': 'Issue 分支',
   'details.baseBranch': '基础分支',
   'details.commit': '结果 Commit',
   'details.commitPending': '等待交付',
+  'details.diff': 'Base Branch Diff',
   'details.review.approve': 'Reviewer 通过',
   'details.review.changes_requested': 'Reviewer 要求修改',
   'details.verification': '验证记录：',
@@ -157,6 +160,7 @@ export type TaskboardKey = keyof typeof zh
 /** English dictionary checked against the Chinese key set. */
 export const en: { [Key in TaskboardKey]: string } = {
   'sidebar.open': 'Open Taskboard for {name}',
+  'sidebar.openTodo': 'Open Taskboard for {name}, todo: {count}',
   'title': 'Taskboard',
   'view.dashboard': 'Dashboard',
   'view.board': 'Board',
@@ -269,10 +273,12 @@ export const en: { [Key in TaskboardKey]: string } = {
   'details.noSelection': 'Select an Issue to inspect it',
   'details.development': 'Development and review evidence',
   'details.session': 'Implementation Session',
+  'details.session.open': 'Open Session {id}',
   'details.branch': 'Issue branch',
   'details.baseBranch': 'Base branch',
   'details.commit': 'Result commit',
   'details.commitPending': 'Pending handoff',
+  'details.diff': 'Base Branch diff',
   'details.review.approve': 'Reviewer approved',
   'details.review.changes_requested': 'Reviewer requested changes',
   'details.verification': 'Verification:',

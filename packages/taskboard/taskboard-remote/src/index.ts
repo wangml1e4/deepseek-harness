@@ -39,6 +39,7 @@ import type {
   TaskboardCommentListValue,
   TaskboardIssueListValue,
   TaskboardIssueValue,
+  TaskboardTodoCountValue,
   TaskboardRelationListValue,
   TaskboardPatrolIssueValue,
   TaskboardPatrolTriggerInput,
@@ -108,6 +109,20 @@ export class TaskboardRemote extends TypertRemoteService {
       const workspace = this.requireWorkspace(input.workspaceId)
       await this.ctx.taskboard.ensureWorkspace({ workspaceId: workspace.id, title: workspace.title })
       return { items: await this.ctx.taskboard.listIssues(input) }
+    })
+  }
+
+  /**
+   * Count current todo Issues for one registered Workspace sidebar row.
+   * @param workspaceId - Workspace whose manual Patrol queue is summarized.
+   * @returns current derived count or a stable business failure.
+   */
+  @Remote('todoCount')
+  todoCount(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardTodoCountValue>> {
+    return this.result(async () => {
+      const workspace = this.requireWorkspace(workspaceId)
+      await this.ctx.taskboard.ensureWorkspace({ workspaceId, title: workspace.title })
+      return { count: (await this.ctx.taskboard.listIssues({ workspaceId, status: 'todo' })).length }
     })
   }
 
@@ -372,10 +387,16 @@ export class TaskboardRemote extends TypertRemoteService {
    */
   @Remote('patrolIssue')
   patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>> {
-    return this.result(async () => ({
-      context: await this.ctx.taskboard.getPatrolDevelopmentContext(reference) ?? null,
-      reviews: await this.ctx.taskboard.listPatrolReviews(reference),
-    }))
+    return this.result(async () => {
+      const context = await this.ctx.taskboard.getPatrolDevelopmentContext(reference) ?? null
+      return {
+        context,
+        diff: context === null || context.resultCommit === null
+          ? null
+          : await this.ctx.taskboardPatrol.diff(context, context.resultCommit),
+        reviews: await this.ctx.taskboard.listPatrolReviews(reference),
+      }
+    })
   }
 
   /** Resolve one registered Workspace or return the shared Taskboard failure. */

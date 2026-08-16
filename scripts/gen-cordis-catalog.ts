@@ -541,6 +541,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   TaskboardPatrolTriggerInput: 'taskboard.md',
   TaskboardPatrolValue: 'taskboard.md',
   TaskboardRemoteResult: 'taskboard.md',
+  TaskboardTodoCountValue: 'taskboard.md',
   TriggerPatrolRunInput: 'taskboard.md',
   TypertContribution: 'invariants.md',
   TypertFace: 'invariants.md',

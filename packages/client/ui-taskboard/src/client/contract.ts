@@ -1,7 +1,7 @@
 /** Slot and injected-face contracts for the Taskboard UI registrations. */
 
 import type { HostObservable, InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId, WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { CreateIssueInput, Issue, IssueReference, IssueRelation, TaskboardAttachment, UpdateIssueInput, UpdatePatrolPolicyInput } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardActionResult, TaskboardAttachmentReadResult, TaskboardSnapshot } from './controller.ts'
 import type { createTaskboardViewStore } from './store.ts'
@@ -13,6 +13,7 @@ export interface TaskboardInjected {
   refresh: () => Promise<TaskboardActionResult>
   createIssue: (input: Omit<CreateIssueInput, 'workspaceId'>) => Promise<TaskboardActionResult>
   openIssue: (reference: IssueReference) => void
+  openSession: (sessionId: SessionId) => void
   openPatrol: () => void
   moveIssue: (
     issue: Issue,

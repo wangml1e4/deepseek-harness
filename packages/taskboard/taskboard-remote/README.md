@@ -6,7 +6,7 @@ The Host Remote Consumer for the Workspace-owned Taskboard capability. It expose
 
 ## Remote methods
 
-The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, per-Issue and Workspace Activity, attachments, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`. `listWorkspaceActivities` validates the registered Workspace before returning newest-first Activity for its active Issues.
+The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, per-Issue and Workspace Activity, attachments, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`. `todoCount` derives one Workspace's current `todo` count without returning Issue records, while `listWorkspaceActivities` validates the registered Workspace before returning newest-first Activity for its active Issues.
 
 Attachment metadata is listed separately from bytes. Upload and read methods carry canonical base64 through the controlled Host namespace, enforce the 25 MB limit before persistence, scope every read to its owning Issue, and never return the managed filesystem path. Deletion delegates explicit confirmation and optimistic version validation to the Taskboard Service.
 
@@ -16,7 +16,7 @@ While this Host Consumer is mounted, it registers a Workspace deletion guard. An
 
 Every method returns `TaskboardRemoteResult<T>`. Domain failures remain stable business results with `TaskboardError.code`; malformed requests fail in the generated Typert carrier, and infrastructure failures reject instead of being mislabeled as domain errors. `getIssue` uses an explicit nullable value so a missing Issue is distinct from a failed call.
 
-`patrol` combines the saved Policy, current Host choices, and permanent Run/Attempt history. `updatePatrol` delegates Host-owned selection validation to the Patrol Consumer, `runPatrol` starts one manual background Run, and `patrolIssue` returns the permanent Development Context and independent Reviewer evidence for the details sidebar.
+`patrol` combines the saved Policy, current Host choices, and permanent Run/Attempt history. `updatePatrol` delegates Host-owned selection validation to the Patrol Consumer, `runPatrol` starts one manual background Run, and `patrolIssue` returns the permanent Development Context, bounded Base Branch diff for its result commit, and independent Reviewer evidence for the details sidebar.
 
 The generated `./remote` entry is mounted by [`@deepseek-ai/dsh-api-remotes`](../../api/remotes/README.md) for browser Consumers. The Web Host mounts this package beside the Taskboard Service Definition and SQLite Provider.
 

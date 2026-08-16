@@ -269,18 +269,23 @@ describe('TaskboardSurface', () => {
 })
 
 describe('TaskboardSidebarAction', () => {
-  it('opens the implicit Taskboard without toggling the Workspace row', () => {
+  it('loads the todo count and opens the implicit Taskboard without toggling the Workspace row', async () => {
     const openTaskboard = vi.fn()
+    const loadTodoCount = vi.fn()
     const props = {
       workspaceId: 'ws',
       title: 'DeepSeek Harness',
       useSessions: staticHook({}),
       useWorkspaces: staticHook({}),
+      useTaskboardTodoCounts: staticHook({ ws: 3 }),
+      loadTodoCount,
       openTaskboard,
       t,
     } as unknown as TaskboardSidebarActionProps
     render(<TaskboardSidebarAction {...props} />)
-    fireEvent.click(screen.getByRole('button', { name: '打开“DeepSeek Harness”的 Taskboard' }))
+    await waitFor(() => { expect(loadTodoCount).toHaveBeenCalledWith('ws') })
+    fireEvent.click(screen.getByRole('button', { name: '打开“DeepSeek Harness”的 Taskboard，3 个 todo Issue' }))
+    expect(screen.getByText('3')).toBeTruthy()
     expect(openTaskboard).toHaveBeenCalledWith('ws')
   })
 })
@@ -301,6 +306,7 @@ function mountDetails(current: TaskboardSnapshot) {
     removeRelation: vi.fn(async () => ({ ok: true as const })),
     updatePatrol: vi.fn(async () => ({ ok: true as const })),
     runPatrol: vi.fn(async () => ({ ok: true as const })),
+    openSession: vi.fn(),
     close: vi.fn(),
     t,
   } as unknown as TaskboardDetailsProps
@@ -432,6 +438,10 @@ describe('TaskboardDetails', () => {
           createdAt: '2026-08-16T00:00:00.000Z',
           updatedAt: '2026-08-16T00:00:00.000Z',
         },
+        diff: {
+          stat: ' src/index.ts | 1 +',
+          patch: 'diff --git a/src/index.ts b/src/index.ts\n+export const ready = true',
+        },
         reviews: [{
           attemptId: 'attempt-1' as never,
           issueId: selected.id,
@@ -446,7 +456,10 @@ describe('TaskboardDetails', () => {
       },
     }))
 
-    expect(screen.getByText('session-implementation')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '打开 Session session-implementation' }))
+    expect(view.props.openSession).toHaveBeenCalledWith('session-implementation')
+    expect(screen.getByText(/src\/index\.ts \| 1 \+/)).toBeTruthy()
+    expect(screen.getByText(/export const ready = true/)).toBeTruthy()
     expect(screen.getByText('Add the missing regression test.')).toBeTruthy()
     expect(screen.getByText(/Inspected diff/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: '标记 done' }))
