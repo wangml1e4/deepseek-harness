@@ -1,0 +1,3 @@
+opened=true|tracks=0px minmax(0, 1fr) 800px
+closed=false|tracks=280px minmax(0, 1fr) 0px
+center=fixture

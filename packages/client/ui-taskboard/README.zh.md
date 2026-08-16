@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-每个 Workspace 固有 Taskboard 的浏览器消费方。每个真实 Workspace 行都有一个紧凑操作和实时 `todo` 徽标，可把 Taskboard 作为替代中间界面打开；选择 Issue 后，其可编辑记录会显示在现有右侧详情栏中。打开它已绑定的实现 Session 会恢复普通对话界面，并选中该持久 transcript。
+每个 Workspace 固有 Taskboard 的浏览器消费方。每个真实 Workspace 行都有一个紧凑操作和实时 `todo` 徽标，可把 Taskboard 作为替代中间界面打开；选择 Issue 后，其可编辑记录会显示在现有右侧详情栏中。在窄布局断点以下，同一 Issue 详情子树会占满 AppFrame；关闭详情会恢复仍处于挂载状态的 Taskboard 中间界面和侧边栏，且不会重置其状态。打开它已绑定的实现 Session 会恢复普通对话界面，并选中该持久 transcript。
 
 中间界面基于同一个 `TaskboardController` 快照提供 Dashboard、Board、List 和 Gantt 视图。Dashboard 从当前 Host 记录推导完成率、生命周期数量、逾期工作、14 天内到期工作以及最新五条 Workspace 活动记录；每项摘要都能打开对应的筛选 List。Board 渲染七个生命周期列，并通过 Issue 乐观版本持久化拖拽移动。List 按生命周期状态分组展示同一批 Issue。Gantt 会在表格中保留未排期 Issue，只在开始和截止日期都存在时绘制条形，并在已排期 Issue 之间绘制 `blocks` 连线。拖动或调整一个条形只会更新该 Issue 的含首尾日期，不会移动依赖项。搜索以及状态、优先级、标签和截止日期筛选会一致应用于全部视图，所选视图、甘特图时间刻度与筛选条件以 `dsh.taskboard.view.v2` 为键保存在浏览器存储中；过时的 `v1` 值会原样保留且不再加载。
 

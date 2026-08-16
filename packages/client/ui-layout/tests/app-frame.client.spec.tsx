@@ -324,6 +324,29 @@ describe('AppFrame', () => {
 })
 
 describe('AppFrame — narrow-viewport auto-collapse', () => {
+  it('presents alternate-surface details full-frame and restores the preserved center on close', () => {
+    frameWidth = 800
+    const view = mountFrame()
+    view.surface.current = { id: 'taskboard', context: 'workspace-1' }
+    act(() => {
+      view.rerenderFrame()
+      view.instance.actions.openDetails()
+    })
+
+    expect(tracks(view.frame)).toEqual([0, 800])
+    expect(view.frame.hasAttribute('data-details-fullscreen')).toBe(true)
+    expect(view.getByTestId('surface-details')).toBeTruthy()
+    expect(view.frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
+    expect(view.slotCalls.filter(call => call.key === 'sidebar').at(-1)!.props)
+      .toEqual({ collapsed: true, width: 0 })
+    expect(view.instance.getSnapshot().details).toBe(360)
+
+    act(() => { view.instance.actions.closeDetails() })
+    expect(tracks(view.frame)).toEqual([SIDEBAR_COLLAPSED, 0])
+    expect(view.frame.hasAttribute('data-details-fullscreen')).toBe(false)
+    expect(view.getByTestId('surface-content')).toBeTruthy()
+  })
+
   it('mounts collapsed below the breakpoint with no sidebar handle', () => {
     frameWidth = 980
     const { frame, slotCalls } = mountFrame()
