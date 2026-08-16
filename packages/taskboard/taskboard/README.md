@@ -12,6 +12,7 @@ The Workspace-owned Taskboard Service Definition. `ctx.taskboard` exposes durabl
 - Competing Issue mutations require `expectedVersion`. Returning `in_review`, `blocked`, or `done` work to `todo` also requires a reason, which becomes an append-only Comment.
 - An update that changes no field is a no-op. Archiving is reversible, repeated archive attempts reject, and the service has no permanent Issue deletion operation. Comments and Activity entries are append-only.
 - Activity and Comment actors distinguish User, Patrol Agent, Reviewer, and System responsibility.
+- `listWorkspaceActivities` returns newest-first Activity for currently active Issues in one Workspace. Activity retained for archived Issues remains available through Issue history but is absent from the active Dashboard projection.
 - Attachments accept unrestricted file types up to 25 MB. Metadata reads never expose Provider paths; content reads require both the owning Issue and opaque attachment id. Upload and explicitly confirmed deletion advance the Issue version and append Activity, while all other Issue, Comment, Activity, and Patrol records retain their no-delete rules.
 - A dependency is one directed edge presented as `blocks` from its source and `blocked_by` from its target. Self, duplicate, cross-Workspace, and cyclic dependencies reject without mutation.
 - `listWorkspaceRelations` returns each Workspace dependency once as a canonical `blocks` view for timeline Consumers; `listRelations` retains the requested Issue-relative direction for details.

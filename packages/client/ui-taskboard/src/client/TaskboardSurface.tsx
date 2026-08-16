@@ -10,11 +10,23 @@ import {
   IconSearchOutline16,
   IconSettingsOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { Issue, IssuePriority, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
-import type { TaskboardStatusFilter } from './store.ts'
+import type { Activity, Issue, IssuePriority, IssueStatus } from '@deepseek-ai/dsh-taskboard/types'
+import type {
+  TaskboardPriorityFilter,
+  TaskboardScheduleFilter,
+  TaskboardStatusFilter,
+} from './store.ts'
 import type { TaskboardSurfaceProps as SurfaceProps } from './contract.ts'
 import { GanttView } from './GanttView.tsx'
-import { filterIssues, ISSUE_PRIORITIES, ISSUE_STATUSES, priorityLabel, statusLabel } from './model.ts'
+import { localDateValue } from './gantt-model.ts'
+import {
+  filterIssues,
+  ISSUE_PRIORITIES,
+  ISSUE_STATUSES,
+  priorityLabel,
+  scheduleBucket,
+  statusLabel,
+} from './model.ts'
 import css from './Taskboard.module.css'
 
 export type { TaskboardSurfaceProps } from './contract.ts'
@@ -68,48 +80,103 @@ function IssueCard({ issue, openIssue, t, draggable = false, onDragStart, onDrop
   )
 }
 
-/** Summary metrics and recent work for the active filter. */
-function DashboardView({ issues, openIssue, t }: {
+type DashboardFilter = {
+  status?: TaskboardStatusFilter
+  priority?: TaskboardPriorityFilter
+  schedule?: TaskboardScheduleFilter
+}
+
+/** Localize common Activity fields while retaining extension-owned field names. */
+function activityField(field: string, t: SurfaceProps['t']): string {
+  switch (field) {
+    case 'title': return t('field.title')
+    case 'description': return t('field.description')
+    case 'status': return t('field.status')
+    case 'priority': return t('field.priority')
+    case 'assignee': return t('field.assignee')
+    case 'labels': return t('field.labels')
+    case 'startDate': return t('field.startDate')
+    case 'dueDate': return t('field.dueDate')
+    default: return field
+  }
+}
+
+/** Summary metrics, upcoming work, and recent Activity for the active filter. */
+function DashboardView({ issues, activities, openIssue, showFilter, t }: {
   issues: readonly Issue[]
+  activities: readonly Activity[]
   openIssue: SurfaceProps['openIssue']
+  showFilter: (filter: DashboardFilter) => void
   t: SurfaceProps['t']
 }) {
   const completed = issues.filter(issue => issue.status === 'done').length
   const active = issues.filter(issue => issue.status === 'in_progress' || issue.status === 'in_review').length
-  const today = new Date().toISOString().slice(0, 10)
-  const overdue = issues.filter(issue => issue.dueDate !== null && issue.dueDate < today && issue.status !== 'done' && issue.status !== 'canceled').length
+  const today = localDateValue(new Date())
+  const overdue = issues.filter(issue => scheduleBucket(issue, today) === 'overdue')
+  const upcoming = issues
+    .filter(issue => scheduleBucket(issue, today) === 'upcoming')
+    .sort((left, right) => (left.dueDate ?? '').localeCompare(right.dueDate ?? ''))
+  const upcomingPreview = upcoming.slice(0, 5)
   const percentage = issues.length === 0 ? 0 : Math.round((completed / issues.length) * 100)
-  const recent = [...issues].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5)
+  const issuesById = new Map(issues.map(issue => [issue.id, issue]))
+  const recent = activities.flatMap((activity) => {
+    const issue = issuesById.get(activity.issueId)
+    return issue === undefined ? [] : [{ activity, issue }]
+  }).slice(0, 5)
   return (
     <div className={css.dashboard}>
       <div className={css.metricGrid}>
-        <section className={css.metricCard}>
+        <button type="button" className={css.metricCard} aria-label={`${t('dashboard.completion')} ${String(percentage)}%`} onClick={() => { showFilter({ status: 'done' }) }}>
           <span>{t('dashboard.completion')}</span>
           <strong>{percentage}%</strong>
           <span className={css.progressTrack}><span style={{ width: `${percentage}%` }} /></span>
-        </section>
-        <section className={css.metricCard}><span>{t('dashboard.total')}</span><strong>{issues.length}</strong></section>
-        <section className={css.metricCard}><span>{t('dashboard.active')}</span><strong>{active}</strong></section>
-        <section className={css.metricCard}><span>{t('dashboard.overdue')}</span><strong>{overdue}</strong></section>
+        </button>
+        <button type="button" className={css.metricCard} aria-label={`${t('dashboard.total')} ${String(issues.length)}`} onClick={() => { showFilter({}) }}><span>{t('dashboard.total')}</span><strong>{issues.length}</strong></button>
+        <button type="button" className={css.metricCard} aria-label={`${t('dashboard.active')} ${String(active)}`} onClick={() => { showFilter({ status: 'active' }) }}><span>{t('dashboard.active')}</span><strong>{active}</strong></button>
+        <button type="button" className={css.metricCard} aria-label={`${t('dashboard.overdue')} ${String(overdue.length)}`} onClick={() => { showFilter({ schedule: 'overdue' }) }}><span>{t('dashboard.overdue')}</span><strong>{overdue.length}</strong></button>
+        <button type="button" className={css.metricCard} aria-label={`${t('dashboard.upcoming')} ${String(upcoming.length)}`} onClick={() => { showFilter({ schedule: 'upcoming' }) }}><span>{t('dashboard.upcoming')}</span><strong>{upcoming.length}</strong></button>
       </div>
       <div className={css.dashboardColumns}>
         <section className={css.summaryPanel}>
           <h2>{t('dashboard.byStatus')}</h2>
           {ISSUE_STATUSES.map((status) => {
             const count = issues.filter(issue => issue.status === status).length
-            return <div className={css.summaryRow} key={status}><StatusMark status={status} t={t} /><strong>{count}</strong></div>
+            return <button type="button" className={css.summaryRow} aria-label={`${statusLabel(t, status)} ${String(count)}`} onClick={() => { showFilter({ status }) }} key={status}><StatusMark status={status} t={t} /><strong>{count}</strong></button>
           })}
         </section>
         <section className={css.summaryPanel}>
           <h2>{t('dashboard.byPriority')}</h2>
           {ISSUE_PRIORITIES.map((priority) => {
             const count = issues.filter(issue => issue.priority === priority).length
-            return <div className={css.summaryRow} key={priority}><PriorityMark priority={priority} t={t} /><strong>{count}</strong></div>
+            return <button type="button" className={css.summaryRow} aria-label={`${priorityLabel(t, priority)} ${String(count)}`} onClick={() => { showFilter({ priority }) }} key={priority}><PriorityMark priority={priority} t={t} /><strong>{count}</strong></button>
           })}
         </section>
         <section className={css.recentPanel}>
-          <h2>{t('dashboard.recent')}</h2>
-          {recent.map(issue => <IssueCard issue={issue} openIssue={openIssue} t={t} key={issue.id} />)}
+          <h2>{t('dashboard.upcoming')}</h2>
+          {upcomingPreview.length === 0
+            ? <p className={css.dashboardEmpty}>{t('dashboard.noUpcoming')}</p>
+            : upcomingPreview.map(issue => <IssueCard issue={issue} openIssue={openIssue} t={t} key={issue.id} />)}
+        </section>
+        <section className={css.recentPanel}>
+          <h2>{t('dashboard.recentActivity')}</h2>
+          {recent.length === 0
+            ? <p className={css.dashboardEmpty}>{t('dashboard.noActivity')}</p>
+            : recent.map(({ activity, issue }) => {
+              const fields = activity.changes.map(change => activityField(change.field, t)).join(', ')
+              return (
+                <button
+                  type="button"
+                  className={css.activityRow}
+                  aria-label={`${issue.identifier} ${activity.actor.name} ${fields}`}
+                  onClick={() => { openIssue(issue.id) }}
+                  key={activity.id}
+                >
+                  <strong>{issue.identifier}</strong>
+                  <span>{activity.actor.name} · {fields}</span>
+                  <time dateTime={activity.createdAt}>{activity.createdAt.slice(0, 16).replace('T', ' ')}Z</time>
+                </button>
+              )
+            })}
         </section>
       </div>
     </div>
@@ -259,7 +326,14 @@ export function TaskboardSurface({
   const [creating, setCreating] = useState(false)
   useEffect(() => { void activate(matched) }, [activate, matched])
   const filtered = useMemo(() => filterIssues(snapshot.issues, view), [snapshot.issues, view])
-  const hasFilters = view.query !== '' || view.status !== 'all' || view.priority !== 'all' || view.label !== ''
+  const hasFilters = view.query !== '' || view.status !== 'all' || view.priority !== 'all' || view.schedule !== 'all' || view.label !== ''
+  const showFilter = (filter: DashboardFilter): void => {
+    actions.resetFilters()
+    if (filter.status !== undefined) actions.setStatus(filter.status)
+    if (filter.priority !== undefined) actions.setPriority(filter.priority)
+    if (filter.schedule !== undefined) actions.setSchedule(filter.schedule)
+    actions.setMode('list')
+  }
   let body: ReactNode
   if (snapshot.phase === 'cold' || snapshot.phase === 'loading') {
     body = <div className={css.stateView}><span className={css.skeletonLine} />{t('loading')}</div>
@@ -270,7 +344,7 @@ export function TaskboardSurface({
   } else if (filtered.length === 0) {
     body = <div className={css.stateView}><p>{t('empty.filtered')}</p></div>
   } else if (view.mode === 'dashboard') {
-    body = <DashboardView issues={filtered} openIssue={openIssue} t={t} />
+    body = <DashboardView issues={filtered} activities={snapshot.workspaceActivities} openIssue={openIssue} showFilter={showFilter} t={t} />
   } else if (view.mode === 'board') {
     body = <BoardView issues={filtered} openIssue={openIssue} moveIssue={moveIssue} t={t} />
   } else if (view.mode === 'list') {
@@ -305,8 +379,9 @@ export function TaskboardSurface({
       </header>
       <div className={css.toolbar}>
         <label className={css.search}><IconSearchOutline16 /><input aria-label={t('search.placeholder')} placeholder={t('search.placeholder')} value={view.query} onChange={(event) => { actions.setQuery(event.target.value) }} /></label>
-        <select aria-label={t('filter.status')} value={view.status} onChange={(event) => { actions.setStatus(event.target.value as TaskboardStatusFilter) }}><option value="all">{t('filter.status')}</option>{ISSUE_STATUSES.map(status => <option value={status} key={status}>{statusLabel(t, status)}</option>)}</select>
+        <select aria-label={t('filter.status')} value={view.status} onChange={(event) => { actions.setStatus(event.target.value as TaskboardStatusFilter) }}><option value="all">{t('filter.status')}</option><option value="active">{t('filter.status.active')}</option>{ISSUE_STATUSES.map(status => <option value={status} key={status}>{statusLabel(t, status)}</option>)}</select>
         <select aria-label={t('filter.priority')} value={view.priority} onChange={(event) => { actions.setPriority(event.target.value as typeof view.priority) }}><option value="all">{t('filter.priority')}</option>{ISSUE_PRIORITIES.map(priority => <option value={priority} key={priority}>{priorityLabel(t, priority)}</option>)}</select>
+        <select aria-label={t('filter.schedule')} value={view.schedule} onChange={(event) => { actions.setSchedule(event.target.value as TaskboardScheduleFilter) }}><option value="all">{t('filter.schedule')}</option><option value="overdue">{t('filter.schedule.overdue')}</option><option value="upcoming">{t('filter.schedule.upcoming')}</option></select>
         <input className={css.labelFilter} aria-label={t('filter.label')} placeholder={t('filter.label')} value={view.label} onChange={(event) => { actions.setLabel(event.target.value) }} />
         {view.mode === 'gantt' && (
           <select aria-label={t('gantt.zoom')} value={view.ganttZoom} onChange={(event) => { actions.setGanttZoom(event.target.value as typeof view.ganttZoom) }}>

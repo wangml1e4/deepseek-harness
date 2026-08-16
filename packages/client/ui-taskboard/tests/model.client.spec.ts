@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Issue } from '@deepseek-ai/dsh-taskboard/types'
-import { filterIssues, priorityLabel, statusLabel } from '../src/client/model.ts'
+import { filterIssues, priorityLabel, scheduleBucket, statusLabel } from '../src/client/model.ts'
 
 function issue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -54,5 +54,12 @@ describe('Taskboard presentation model', () => {
     expect(filterIssues([target], { ...filters, query: 'taskBOARD' })).toEqual([target])
     expect(filterIssues([target], { ...filters, query: 'ISSUE EXPERIENCE' })).toEqual([target])
     expect(filterIssues([target], { ...filters, query: 'missing' })).toEqual([])
+  })
+
+  it('classifies overdue and fourteen-day upcoming work without terminal Issues', () => {
+    expect(scheduleBucket(issue({ dueDate: '2026-08-15' }), '2026-08-16')).toBe('overdue')
+    expect(scheduleBucket(issue({ dueDate: '2026-08-30' }), '2026-08-16')).toBe('upcoming')
+    expect(scheduleBucket(issue({ dueDate: '2026-08-31' }), '2026-08-16')).toBeNull()
+    expect(scheduleBucket(issue({ dueDate: '2026-08-20', status: 'done' }), '2026-08-16')).toBeNull()
   })
 })

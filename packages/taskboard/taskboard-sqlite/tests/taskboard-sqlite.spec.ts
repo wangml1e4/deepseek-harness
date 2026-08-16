@@ -1778,6 +1778,43 @@ describe('SQLite Taskboard service', () => {
     }
   })
 
+  it('lists current active Workspace activity newest first for Dashboard projection', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000052')
+    const otherWorkspaceId = WorkspaceId('00000000-0000-4000-8000-000000000053')
+    const mounted = await mount(path)
+    try {
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Dashboard activity' })
+      await mounted.ctx.taskboard.ensureWorkspace({ workspaceId: otherWorkspaceId, title: 'Other activity' })
+      const first = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'First active Issue' })
+      const second = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Second active Issue' })
+      const archived = await mounted.ctx.taskboard.createIssue({ workspaceId, title: 'Archived Issue' })
+      const other = await mounted.ctx.taskboard.createIssue({ workspaceId: otherWorkspaceId, title: 'Other Issue' })
+      await mounted.ctx.taskboard.updateIssue({
+        reference: first.id, status: 'todo', expectedVersion: first.version, actor,
+      })
+      await mounted.ctx.taskboard.updateIssue({
+        reference: second.id, priority: 'high', expectedVersion: second.version, actor,
+      })
+      const archivedUpdated = await mounted.ctx.taskboard.updateIssue({
+        reference: archived.id, priority: 'low', expectedVersion: archived.version, actor,
+      })
+      await mounted.ctx.taskboard.archiveIssue({
+        reference: archived.id, expectedVersion: archivedUpdated.version, actor,
+      })
+      await mounted.ctx.taskboard.updateIssue({
+        reference: other.id, status: 'todo', expectedVersion: other.version, actor,
+      })
+
+      await expect(mounted.ctx.taskboard.listWorkspaceActivities(workspaceId)).resolves.toMatchObject([
+        { issueId: second.id, changes: [{ field: 'priority', after: 'high' }] },
+        { issueId: first.id, changes: [{ field: 'status', after: 'todo' }] },
+      ])
+    } finally {
+      await mounted.dispose()
+    }
+  })
+
   it('stores blocks and blocked_by as two views of one directed relation', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-000000000013')

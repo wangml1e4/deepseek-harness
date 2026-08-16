@@ -11,6 +11,7 @@ The local SQLite Service Provider for `ctx.taskboard`. It stores every Workspace
 - `journalMode` defaults to `wal`; `busyTimeoutMs` defaults to 5000. Foreign keys remain enabled.
 - The database carries a fixed application id and monotonic schema version. A populated unversioned database, a foreign application id, or any unsupported version fails during service initialization.
 - Issue mutations, version updates, Activity entries, and required return Comments commit in the same transaction. Comment and Activity sequence columns preserve append order even when timestamps match.
+- Workspace Activity reads join the current active Issue partition and return global Activity sequence in newest-first order; archiving hides retained Issue history from that projection.
 - Workspace Label records are reused through ordered Issue-label rows; Issue reads expose only their stable label-name list.
 - Each Taskboard transaction creates its default-off `1h` Patrol Policy with `workspace-write` permission. Policy execution choices, cadence advancement, global active-Run reservation, scheduled-overlap results, ordered Issue Attempts, Development Context bindings, and terminal history remain transactional and durable across Host restarts.
 - Patrol Run rows have no deletion operation. A partial unique index enforces one active Run across every Workspace even if multiple scheduling callers race.

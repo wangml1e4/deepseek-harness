@@ -11,6 +11,7 @@
 - `journalMode` 默认为 `wal`，`busyTimeoutMs` 默认为 5000。外键保持启用。
 - 数据库带固定 application id 和单调 schema 版本。存在内容但未标版本的数据库、外来 application id 或任何不支持的版本都会在服务初始化时失败。
 - Issue 变更、版本更新、活动记录以及退回时必需的评论在同一事务中提交。评论和活动记录的序列列即使在时间戳相同时也能保持追加顺序。
+- Workspace 活动记录读取会关联当前活跃 Issue 分区，并按全局活动序列从新到旧返回；归档只会从该投影中隐藏保留的 Issue 历史。
 - Workspace 标签记录通过有序的 Issue-label 行复用；Issue 读取仅暴露稳定的标签名称列表。
 - 每个 Taskboard 事务都会创建默认关闭、间隔为 `1h`、权限为 `workspace-write` 的 Patrol Policy。Policy 执行选项、固定节拍推进、全局活跃 Run 预留、定时重叠结果、按顺序排列的 Issue Attempt、Development Context 绑定与终态历史都在事务中完成，并在 Host 重启后继续保留。
 - Patrol Run 行没有删除操作。部分唯一索引保证即使多个调度调用方竞争，所有 Workspace 中仍最多只有一个活跃 Run。

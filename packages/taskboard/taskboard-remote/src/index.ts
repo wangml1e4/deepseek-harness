@@ -254,6 +254,19 @@ export class TaskboardRemote extends TypertRemoteService {
   }
 
   /**
+   * List recent Activity for active Issues in one registered Workspace.
+   * @param workspaceId - Workspace whose Dashboard consumes the Activity.
+   * @returns newest-first Activity or a stable business failure.
+   */
+  @Remote('listWorkspaceActivities')
+  listWorkspaceActivities(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardActivityListValue>> {
+    return this.result(async () => {
+      this.requireWorkspace(workspaceId)
+      return { items: await this.ctx.taskboard.listWorkspaceActivities(workspaceId) }
+    })
+  }
+
+  /**
    * List one registered Workspace's canonical dependency records.
    * @param workspaceId - Authoritative Workspace identity.
    * @returns ordered `blocks` relation views or a stable business failure.

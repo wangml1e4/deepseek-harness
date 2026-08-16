@@ -12,6 +12,7 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 可能竞争的 Issue 变更要求 `expectedVersion`。将 `in_review`、`blocked` 或 `done` 工作退回 `todo` 还必须提供原因，该原因会成为仅追加的评论。
 - 未改变任何字段的更新是无操作。归档可逆，重复归档会被拒绝，服务不提供永久删除 Issue 的操作。评论和活动记录仅可追加。
 - 活动记录和评论的操作者会区分用户、Patrol Agent、Reviewer 与系统责任来源。
+- `listWorkspaceActivities` 会按从新到旧返回一个 Workspace 中当前活跃 Issue 的活动记录。已归档 Issue 的活动记录仍保留在其历史中，但不会进入活跃 Dashboard 投影。
 - 附件支持任意文件类型，单个文件上限为 25 MB。元数据读取绝不暴露 Provider 路径；内容读取必须同时提供所属 Issue 与不透明附件 id。上传和显式确认后的删除会推进 Issue 版本并追加活动记录，而其他 Issue、评论、活动记录与 Patrol 记录仍遵循禁止删除规则。
 - 一项依赖是同一条有向边：从来源查看为 `blocks`，从目标查看为 `blocked_by`。自环、重复、跨 Workspace 和成环依赖都会在不写入的情况下被拒绝。
 - `listWorkspaceRelations` 会把每条 Workspace 依赖以规范 `blocks` 视图返回一次，供时间轴消费方使用；`listRelations` 为详情界面保留相对于所请求 Issue 的方向。

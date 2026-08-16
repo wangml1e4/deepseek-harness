@@ -30,11 +30,15 @@ describe('assembled Workspace Taskboard', () => {
 
     const surface = await screen.findByRole('main', undefined, { timeout: 10_000 })
     await within(surface).findByText('Ship Taskboard dashboard')
+    const upcomingPanel = within(surface).getByRole('heading', { name: 'Due soon' }).closest('section')
+    const activityPanel = within(surface).getByRole('heading', { name: 'Recent activity' }).closest('section')
+    if (upcomingPanel === null || activityPanel === null) throw new Error('Dashboard projection panels missing')
     const dashboard = [
       `title=${within(surface).getByRole('heading', { level: 1 }).textContent}`,
       `tabs=${within(surface).getAllByRole('tab').map(tab => `${tab.textContent}:${tab.getAttribute('aria-selected')}`).join('|')}`,
-      `metrics=${['Completion', 'All Issues', 'Active', 'Overdue'].map(label => within(surface).getByText(label).parentElement?.textContent).join('|')}`,
-      `recent=${['FIX-1', 'FIX-2', 'FIX-3'].filter(id => surface.textContent?.includes(id)).join(',')}`,
+      `metrics=${['Completion', 'All Issues', 'Active', 'Overdue', 'Due soon'].map(label => within(surface).getByRole('button', { name: new RegExp(`^${label} `) }).textContent).join('|')}`,
+      `upcoming=${upcomingPanel.textContent}`,
+      `activity=${activityPanel.textContent}`,
     ].join('\n')
 
     fireEvent.click(within(surface).getByRole('tab', { name: 'Board' }))

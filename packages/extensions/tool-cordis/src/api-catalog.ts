@@ -1814,6 +1814,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'append-only field changes in chronological order.',
       },
       {
+        signature: 'abstract listWorkspaceActivities(workspaceId: WorkspaceId): Promise<readonly Activity[]>',
+        description: 'List Activity for active Issues currently owned by one Workspace, newest first.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose Dashboard consumes the activity.' }],
+        returns: 'append-only Issue changes in reverse chronological order.',
+      },
+      {
         signature: 'abstract addAttachment(input: AddAttachmentInput): Promise<TaskboardAttachmentMutation>',
         description: 'Store one attachment and its metadata while advancing the owning Issue version.',
         parameters: [{ name: 'input', description: 'File bytes, metadata, optimistic version, and actor.' }],
@@ -2132,6 +2138,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'List one Issue\'s append-only Activity.',
         parameters: [{ name: 'reference', description: 'Opaque id or human-readable identifier.' }],
         returns: 'ordered Activity or a stable business failure.',
+      },
+      {
+        signature: '@Remote(\'listWorkspaceActivities\') listWorkspaceActivities(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>',
+        description: 'List recent Activity for active Issues in one registered Workspace.',
+        parameters: [{ name: 'workspaceId', description: 'Workspace whose Dashboard consumes the Activity.' }],
+        returns: 'newest-first Activity or a stable business failure.',
       },
       {
         signature: '@Remote(\'listWorkspaceRelations\') listWorkspaceRelations(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardRelationListValue>>',

@@ -1,6 +1,7 @@
 /** Workspace-owned Taskboard capability seam. @module @deepseek-ai/dsh-taskboard */
 
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type {
   AddIssueRelationInput,
   AddAttachmentInput,
@@ -214,6 +215,13 @@ export abstract class TaskboardService extends Service {
    * @returns append-only field changes in chronological order.
    */
   abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+  /**
+   * List Activity for active Issues currently owned by one Workspace, newest first.
+   * @param workspaceId - Workspace whose Dashboard consumes the activity.
+   * @returns append-only Issue changes in reverse chronological order.
+   */
+  abstract listWorkspaceActivities(workspaceId: WorkspaceId): Promise<readonly Activity[]>
 
   /**
    * Store one attachment and its metadata while advancing the owning Issue version.
