@@ -11,11 +11,12 @@ describe('Taskboard view store', () => {
     first.actions.setQuery('frontend')
     first.actions.setStatus('todo')
     first.actions.setPriority('high')
+    first.actions.setSchedule('upcoming')
     first.actions.setLabel('ui')
     first.actions.setGanttZoom('month')
 
     expect(first.getSnapshot()).toEqual({
-      mode: 'board', query: 'frontend', status: 'todo', priority: 'high', label: 'ui', ganttZoom: 'month',
+      mode: 'board', query: 'frontend', status: 'todo', priority: 'high', schedule: 'upcoming', label: 'ui', ganttZoom: 'month',
     })
 
     const restored = createTaskboardViewStore().create()
@@ -23,7 +24,18 @@ describe('Taskboard view store', () => {
     restored.actions.setMode('gantt')
     restored.actions.resetFilters()
     expect(restored.getSnapshot()).toEqual({
-      mode: 'gantt', query: '', status: 'all', priority: 'all', label: '', ganttZoom: 'month',
+      mode: 'gantt', query: '', status: 'all', priority: 'all', schedule: 'all', label: '', ganttZoom: 'month',
     })
+  })
+
+  it('starts from the complete current state when the previous storage version remains', () => {
+    localStorage.setItem('dsh.taskboard.view.v1', JSON.stringify({
+      mode: 'list', query: 'legacy', status: 'todo', priority: 'high', label: 'ui', ganttZoom: 'month',
+    }))
+
+    expect(createTaskboardViewStore().create().getSnapshot()).toEqual({
+      mode: 'dashboard', query: '', status: 'all', priority: 'all', schedule: 'all', label: '', ganttZoom: 'week',
+    })
+    expect(localStorage.getItem('dsh.taskboard.view.v1')).not.toBeNull()
   })
 })

@@ -1756,7 +1756,13 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     createdAt: fixtureTaskboardTime,
     data: FIXTURE_IMAGE_DATA,
   }]
-  const taskboardActivities: FxTaskboardActivity[] = []
+  const taskboardActivities: FxTaskboardActivity[] = options.empty ? [] : [{
+    id: 'fx-activity-1',
+    issueId: 'fx-issue-3',
+    actor: { type: 'patrol_agent', id: 'fixture-patrol', name: 'Patrol Agent' },
+    changes: [{ field: 'status', before: 'in_review', after: 'done' }],
+    createdAt: '2026-08-15T10:00:00.000Z',
+  }]
   const taskboardRelations: FxTaskboardRelation[] = options.empty ? [] : [{
     id: 'fx-relation-1', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-2',
     createdAt: fixtureTaskboardTime,
@@ -1764,7 +1770,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   let nextTaskboardIssue = 4
   let nextTaskboardComment = 2
   let nextTaskboardAttachment = 2
-  let nextTaskboardActivity = 1
+  let nextTaskboardActivity = taskboardActivities.length + 1
   let nextTaskboardRelation = taskboardRelations.length + 1
   // Registry-global archive set mirroring the host: archived sessions keep
   // their workspace accounting slot and only grouping surfaces hide them.
@@ -3569,6 +3575,21 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           })),
       })
     },
+    listWorkspaceActivities(workspaceId: WorkspaceId) {
+      const activeIssueIds = new Set(taskboardIssues
+        .filter(issue => issue.workspaceId === workspaceId && issue.archivedAt === null)
+        .map(issue => issue.id))
+      return taskboardOk({
+        items: taskboardActivities
+          .filter(activity => activeIssueIds.has(activity.issueId))
+          .toReversed()
+          .map(activity => ({
+            ...activity,
+            actor: { ...activity.actor },
+            changes: activity.changes.map(change => ({ ...change })),
+          })),
+      })
+    },
     listWorkspaceRelations(workspaceId: WorkspaceId) {
       const workspaceIssueIds = new Set(
         taskboardIssues.filter(issue => issue.workspaceId === workspaceId).map(issue => issue.id),
@@ -3793,6 +3814,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/readAttachment': return Promise.resolve(taskboardRemotes.readAttachment(args.input as never))
         case 'taskboard/deleteAttachment': return Promise.resolve(taskboardRemotes.deleteAttachment(args.input as never))
         case 'taskboard/listActivities': return Promise.resolve(taskboardRemotes.listActivities(args.reference as string))
+        case 'taskboard/listWorkspaceActivities': {
+          return Promise.resolve(taskboardRemotes.listWorkspaceActivities(args.workspaceId as WorkspaceId))
+        }
         case 'taskboard/listWorkspaceRelations': {
           return Promise.resolve(taskboardRemotes.listWorkspaceRelations(args.workspaceId as WorkspaceId))
         }

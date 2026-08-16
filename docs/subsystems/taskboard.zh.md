@@ -50,11 +50,11 @@ Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git �
 
 消费方依赖 Service Definition，而非 SQLite 提供方。提供方启用外键，通过有序 Issue-label 行存储可复用的 Workspace 标签，使用固定 application id 和单调 schema 版本，并在初始化时拒绝存在内容但未标版本的文件、外来 application id 或不受支持的版本。其写事务使 Issue 版本、顺序、标签、必需评论、关系、附件元数据和活动记录保持一致。附件字节以不透明 id 作为仅所有者可访问的文件名，存放在相邻受管目录中，绝不进入 Workspace 仓库。
 
-`@deepseek-ai/dsh-taskboard-remote` 在 Typert `taskboard` namespace 下暴露 Service，并针对 `ctx.workspaceRegistry` 校验 Workspace 身份。它还会注册 `taskboard-issues` Workspace 删除守卫：活动和已归档 Issue 会保持注册记录不变，直到全部 Issue 移到另一个 Workspace。创建 Issue 和把 Issue 移入 Workspace 会与删除共享注册表变更队列，因此守卫不会漏掉并发 Taskboard 写入。领域失败会保留为类型化业务结果，载体校验与基础设施失败仍保持独立。浏览器 API 组合会挂载它生成的 Client 贡献。
+`@deepseek-ai/dsh-taskboard-remote` 在 Typert `taskboard` namespace 下暴露 Service，并针对 `ctx.workspaceRegistry` 校验 Workspace 身份。其 Workspace 活动记录读取会按从新到旧返回活跃 Issue 的活动记录，无需分别重新加载每个 Issue。它还会注册 `taskboard-issues` Workspace 删除守卫：活动和已归档 Issue 会保持注册记录不变，直到全部 Issue 移到另一个 Workspace。创建 Issue 和把 Issue 移入 Workspace 会与删除共享注册表变更队列，因此守卫不会漏掉并发 Taskboard 写入。领域失败会保留为类型化业务结果，载体校验与基础设施故障仍保持独立。浏览器 API 组合会挂载它生成的 Client 贡献。
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、附件上传、图片预览、受控下载与确认删除、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset，并显示 Run 恢复次数与时间。版本一不会发布或同步任何 GitHub Issue，包括 `deepseek-ai/deepseek-harness` 中的 Issue。
+Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、附件上传、图片预览、受控下载与确认删除、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。Dashboard 会推导完成率、生命周期数量、逾期工作、14 天内到期工作和最新五条 Workspace 活动记录，并把每项摘要链接到对应的筛选 List。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset，并显示 Run 恢复次数与时间。版本一不会发布或同步任何 GitHub Issue，包括 `deepseek-ai/deepseek-harness` 中的 Issue。
 
 ## 版本一之后的 GitHub 计划
 
@@ -158,6 +158,13 @@ abstract listComments(reference: IssueReference): Promise<readonly Comment[]>
  * @returns append-only field changes in chronological order.
  */
 abstract listActivities(reference: IssueReference): Promise<readonly Activity[]>
+
+/**
+ * List Activity for active Issues currently owned by one Workspace, newest first.
+ * @param workspaceId - Workspace whose Dashboard consumes the activity.
+ * @returns append-only Issue changes in reverse chronological order.
+ */
+abstract listWorkspaceActivities(workspaceId: WorkspaceId): Promise<readonly Activity[]>
 
 /**
  * Store one attachment and its metadata while advancing the owning Issue version.
@@ -340,7 +347,9 @@ abstract listPatrolReviews(reference: IssueReference): Promise<readonly PatrolRe
 abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]>
 ```
 
-Source: [`packages/taskboard/taskboard/src/index.ts:129`](../../packages/taskboard/taskboard/src/index.ts)
+Types: [WorkspaceId](workspace.md)
+
+Source: [`packages/taskboard/taskboard/src/index.ts:130`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -540,6 +549,13 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns ordered Activity or a stable business failure.
  */
 @Remote('listActivities') listActivities(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>
+
+/**
+ * List recent Activity for active Issues in one registered Workspace.
+ * @param workspaceId - Workspace whose Dashboard consumes the Activity.
+ * @returns newest-first Activity or a stable business failure.
+ */
+@Remote('listWorkspaceActivities') listWorkspaceActivities(workspaceId: WorkspaceId): Promise<TaskboardRemoteResult<TaskboardActivityListValue>>
 
 /**
  * List one registered Workspace's canonical dependency records.

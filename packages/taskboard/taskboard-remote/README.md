@@ -6,7 +6,7 @@ The Host Remote Consumer for the Workspace-owned Taskboard capability. It expose
 
 ## Remote methods
 
-The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, Activity, attachments, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`.
+The `taskboard` namespace provides Workspace metadata, Issue lifecycle, Comments, per-Issue and Workspace Activity, attachments, relations, and four Patrol operations: `patrol`, `updatePatrol`, `runPatrol`, and `patrolIssue`. `listWorkspaceActivities` validates the registered Workspace before returning newest-first Activity for its active Issues.
 
 Attachment metadata is listed separately from bytes. Upload and read methods carry canonical base64 through the controlled Host namespace, enforce the 25 MB limit before persistence, scope every read to its owning Issue, and never return the managed filesystem path. Deletion delegates explicit confirmation and optimistic version validation to the Taskboard Service.
 

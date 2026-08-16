@@ -4,7 +4,7 @@
 
 每个 Workspace 固有 Taskboard 的浏览器消费方。每个真实 Workspace 行都有一个紧凑操作，可把 Taskboard 作为替代中间界面打开；选择 Issue 后，其可编辑记录会显示在现有右侧详情栏中。返回 Session 时会恢复普通对话界面。
 
-中间界面基于同一个 `TaskboardController` 快照提供 Dashboard、Board、List 和 Gantt 视图。Dashboard 从当前 Issue 列表推导完成率、活动中、逾期、状态、优先级和最近工作摘要。Board 渲染七个生命周期列，并通过 Issue 乐观版本持久化拖拽移动。List 按生命周期状态分组展示同一批 Issue。Gantt 会在表格中保留未排期 Issue，只在开始和截止日期都存在时绘制条形，并在已排期 Issue 之间绘制 `blocks` 连线。拖动或调整一个条形只会更新该 Issue 的含首尾日期，不会移动依赖项。搜索以及状态、优先级和标签筛选会一致应用于全部视图，所选视图、甘特图时间刻度与筛选条件以 `dsh.taskboard.view.v1` 为键保存在浏览器存储中。
+中间界面基于同一个 `TaskboardController` 快照提供 Dashboard、Board、List 和 Gantt 视图。Dashboard 从当前 Host 记录推导完成率、生命周期数量、逾期工作、14 天内到期工作以及最新五条 Workspace 活动记录；每项摘要都能打开对应的筛选 List。Board 渲染七个生命周期列，并通过 Issue 乐观版本持久化拖拽移动。List 按生命周期状态分组展示同一批 Issue。Gantt 会在表格中保留未排期 Issue，只在开始和截止日期都存在时绘制条形，并在已排期 Issue 之间绘制 `blocks` 连线。拖动或调整一个条形只会更新该 Issue 的含首尾日期，不会移动依赖项。搜索以及状态、优先级、标签和截止日期筛选会一致应用于全部视图，所选视图、甘特图时间刻度与筛选条件以 `dsh.taskboard.view.v2` 为键保存在浏览器存储中；过时的 `v1` 值会原样保留且不再加载。
 
 详情界面可编辑标题、Markdown 描述、状态、优先级、负责人、标签和按天记录的日期。它会列出仅追加的评论与活动记录、管理有向依赖关系，并在不提供永久删除的前提下归档 Issue。附件支持单个不超过 25 MB 的任意文件类型；界面会列出元数据、预览图片、通过受控 Host Remote 下载字节，并且只会在浏览器确认后调用永久附件删除。把 `in_review`、`blocked` 或 `done` Issue 退回 `todo` 时，提交前会显示必填的原因字段。
 

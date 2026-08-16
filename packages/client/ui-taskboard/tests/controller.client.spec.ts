@@ -133,6 +133,7 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
     }),
     deleteAttachment: () => ok(issue({ version: 3 })),
     listActivities: () => ok({ items: [] }),
+    listWorkspaceActivities: () => ok({ items: [] }),
     listWorkspaceRelations: () => ok({ items: [] }),
     listRelations: () => ok({ items: [] }),
     addRelation: input => ok({
@@ -179,7 +180,15 @@ describe('TaskboardController', () => {
       relatedIssueId: 'issue-2' as never,
       createdAt: '2026-08-15T00:00:00.000Z',
     }
+    const workspaceActivity: Activity = {
+      id: 'activity-0' as never,
+      issueId: 'issue-1' as never,
+      actor,
+      changes: [{ field: 'status', before: 'backlog', after: 'todo' }],
+      createdAt: '2026-08-16T00:00:00.000Z',
+    }
     const controller = new TaskboardController(remote({
+      listWorkspaceActivities: () => ok({ items: [workspaceActivity] }),
       listWorkspaceRelations: () => ok({ items: [workspaceRelation] }),
     }))
     const snapshots: string[] = []
@@ -193,6 +202,7 @@ describe('TaskboardController', () => {
       workspaceId: 'ws',
       workspace: { prefix: 'WS' },
       issues: [{ identifier: 'WS-1' }],
+      workspaceActivities: [workspaceActivity],
       workspaceRelations: [workspaceRelation],
       error: null,
     })
@@ -336,6 +346,7 @@ describe('TaskboardController', () => {
     const cases: TaskboardClientRemote[] = [
       remote({ workspace: () => failure('Workspace rejected') }),
       remote({ listIssues: () => failure('Issue list rejected') }),
+      remote({ listWorkspaceActivities: () => failure('Activity list rejected') }),
       remote({ listWorkspaceRelations: () => failure('Relations rejected') }),
       remote({ patrol: () => failure('Patrol rejected') }),
       remote({ workspace: () => Promise.reject(new Error('Read exploded')) }),

@@ -6,7 +6,7 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 ## Remote 方法
 
-`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、活动记录、附件、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。
+`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、按 Issue 与 Workspace 读取的活动记录、附件、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。`listWorkspaceActivities` 会先校验已注册 Workspace，再按从新到旧返回其活跃 Issue 的活动记录。
 
 附件元数据与字节分开列出。上传和读取方法通过受控 Host namespace 传输规范 base64，在持久化前执行 25 MB 上限，并把每次读取限定到所属 Issue，且绝不返回受管文件系统路径。删除操作把显式确认与乐观版本校验委托给 Taskboard Service。
 

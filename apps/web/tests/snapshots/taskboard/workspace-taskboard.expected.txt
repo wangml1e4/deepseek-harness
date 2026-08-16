@@ -1,7 +1,8 @@
 title=fixture
 tabs=Dashboard:true|Board:false|List:false|Gantt:false
-metrics=Completion33%|All Issues3|Active1|Overdue1
-recent=FIX-1,FIX-2,FIX-3
+metrics=Completion33%|All Issues3|Active1|Overdue1|Due soon1
+upcoming=Due soonShip Taskboard dashboardFIX-1Highclienttaskboard
+activity=Recent activityFIX-3Patrol Agent · Status2026-08-15 10:00Z
 columns=Backlog0|Todo1|In progress0|In review1|Blocked0|Done1|Canceled0
 list=IssueStatusPriorityAssigneeDue date|FIX-1Ship Taskboard dashboardTodoHighUnassigned2026-08-20|FIX-2Review persistence modelIn reviewMediumUser2026-08-14|FIX-3Document patrol handoffDoneLowPatrol AgentNot set
 issue=FIX-1

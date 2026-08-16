@@ -65,6 +65,9 @@ export interface TaskboardClientRemote {
     input: DeleteAttachmentInput,
   ) => Promise<RemoteResult<TaskboardRemoteResult<Issue>>>
   listActivities: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardActivityListValue>>>
+  listWorkspaceActivities: (
+    workspaceId: WorkspaceId,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardActivityListValue>>>
   listWorkspaceRelations: (
     workspaceId: WorkspaceId,
   ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardRelationListValue>>>
@@ -96,6 +99,7 @@ export interface TaskboardSnapshot {
   readonly comments: readonly Comment[]
   readonly attachments: readonly TaskboardAttachment[]
   readonly activities: readonly Activity[]
+  readonly workspaceActivities: readonly Activity[]
   readonly workspaceRelations: readonly IssueRelation[]
   readonly relations: readonly IssueRelation[]
   readonly patrol: TaskboardPatrolValue | null
@@ -131,6 +135,7 @@ const EMPTY: TaskboardSnapshot = Object.freeze({
   comments: Object.freeze([]),
   attachments: Object.freeze([]),
   activities: Object.freeze([]),
+  workspaceActivities: Object.freeze([]),
   workspaceRelations: Object.freeze([]),
   relations: Object.freeze([]),
   patrol: null,
@@ -240,8 +245,9 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       workspaceId,
       workspace: result.value[0],
       issues: ordered(result.value[1].items),
-      workspaceRelations: result.value[2].items,
-      patrol: result.value[3],
+      workspaceActivities: result.value[2].items,
+      workspaceRelations: result.value[3].items,
+      patrol: result.value[4],
     })
     return OK
   }
@@ -270,8 +276,9 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       phase: 'ready',
       workspace: result.value[0],
       issues,
-      workspaceRelations: result.value[2].items,
-      patrol: result.value[3],
+      workspaceActivities: result.value[2].items,
+      workspaceRelations: result.value[3].items,
+      patrol: result.value[4],
       selectedIssue: selected,
       detailPanel: selected === null ? detailPanel === 'patrol' ? 'patrol' : null : 'issue',
       detailPhase: selected === null ? 'idle' : 'loading',
@@ -687,13 +694,15 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
   private async readWorkspace(workspaceId: WorkspaceId): Promise<ValueResult<readonly [
     WorkspaceTaskboard,
     TaskboardIssueListValue,
+    TaskboardActivityListValue,
     TaskboardRelationListValue,
     TaskboardPatrolValue,
   ]>> {
     try {
-      const [workspaceResponse, issueResponse, relationResponse, patrolResponse] = await Promise.all([
+      const [workspaceResponse, issueResponse, activityResponse, relationResponse, patrolResponse] = await Promise.all([
         this.remote.workspace(workspaceId),
         this.remote.listIssues({ workspaceId }),
+        this.remote.listWorkspaceActivities(workspaceId),
         this.remote.listWorkspaceRelations(workspaceId),
         this.remote.patrol(workspaceId),
       ])
@@ -701,11 +710,13 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
       if (!workspace.ok) return workspace
       const issues = unwrap(issueResponse)
       if (!issues.ok) return issues
+      const activities = unwrap(activityResponse)
+      if (!activities.ok) return activities
       const relations = unwrap(relationResponse)
       if (!relations.ok) return relations
       const patrol = unwrap(patrolResponse)
       return patrol.ok
-        ? { ok: true, value: [workspace.value, issues.value, relations.value, patrol.value] }
+        ? { ok: true, value: [workspace.value, issues.value, activities.value, relations.value, patrol.value] }
         : patrol
     } catch (error: unknown) {
       return rejected(error)

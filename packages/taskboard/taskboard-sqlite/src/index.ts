@@ -5,6 +5,7 @@ import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import {
   ActivityId,
   TaskboardAttachmentId,
@@ -746,6 +747,19 @@ export class SqliteTaskboard extends TaskboardService {
       WHERE issue_id = ?
       ORDER BY sequence
     `).all(issueId) as unknown as ActivityRow[]
+    return rows.map(rowToActivity)
+  }
+
+  // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
+  async listWorkspaceActivities(workspaceId: WorkspaceId): Promise<readonly Activity[]> {
+    const rows = this.database().prepare(`
+      SELECT activity.id, activity.issue_id, activity.actor_type, activity.actor_id,
+             activity.actor_name, activity.actor_avatar_url, activity.changes, activity.created_at
+      FROM activities AS activity
+      JOIN issue_records AS issue ON issue.id = activity.issue_id
+      WHERE issue.workspace_id = ? AND issue.archived_at IS NULL
+      ORDER BY activity.sequence DESC
+    `).all(workspaceId) as unknown as ActivityRow[]
     return rows.map(rowToActivity)
   }
 

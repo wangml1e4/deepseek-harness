@@ -159,6 +159,7 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'readAttachment', invocation: { kind: 'direct' } },
       { method: 'deleteAttachment', invocation: { kind: 'direct' } },
       { method: 'listActivities', invocation: { kind: 'direct' } },
+      { method: 'listWorkspaceActivities', invocation: { kind: 'direct' } },
       { method: 'listWorkspaceRelations', invocation: { kind: 'direct' } },
       { method: 'listRelations', invocation: { kind: 'direct' } },
       { method: 'addRelation', invocation: { kind: 'direct' } },
@@ -336,6 +337,10 @@ describe('Taskboard Remote Consumer', () => {
     const activities = await ctx.taskboardRemote.listActivities(first.value.id)
     if (!activities.ok) throw new Error(activities.error.message)
     expect(activities.value.items.length).toBeGreaterThan(0)
+    await expect(ctx.taskboardRemote.listWorkspaceActivities(workspaceId)).resolves.toMatchObject({
+      ok: true,
+      value: { items: [{ issueId: first.value.id }] },
+    })
     await expect(ctx.taskboardRemote.listRelations(first.value.id)).resolves.toMatchObject({
       ok: true,
       value: { items: [{ id: related.value.relation.id, type: 'blocks' }] },
@@ -385,6 +390,10 @@ describe('Taskboard Remote Consumer', () => {
   it('rejects unknown Workspace operations and preserves infrastructure failures', async () => {
     const ctx = await harness()
     await expect(ctx.taskboardRemote.listIssues({ workspaceId: WorkspaceId('missing') })).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'workspace_not_found' },
+    })
+    await expect(ctx.taskboardRemote.listWorkspaceActivities(WorkspaceId('missing'))).resolves.toMatchObject({
       ok: false,
       error: { code: 'workspace_not_found' },
     })

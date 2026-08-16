@@ -147,6 +147,16 @@ describe('FixtureApiClient Taskboard Remote', () => {
       rpc, 'taskboard/listIssues', { input: { workspaceId: 'fx-ws-fixture' } })
     expect(listed.value.items.map(issue => issue.identifier)).toEqual(['FIX-1', 'FIX-2', 'FIX-3'])
 
+    const seededActivities = await callRemote<{
+      ok: true
+      value: { items: { issueId: string; actor: { name: string }; changes: { field: string }[] }[] }
+    }>(rpc, 'taskboard/listWorkspaceActivities', { workspaceId: 'fx-ws-fixture' })
+    expect(seededActivities.value.items).toMatchObject([{
+      issueId: listed.value.items[2]!.id,
+      actor: { name: 'Patrol Agent' },
+      changes: [{ field: 'status' }],
+    }])
+
     const seededRelations = await callRemote<{
       ok: true
       value: { items: { id: string; type: string; issueId: string; relatedIssueId: string; createdAt: string }[] }

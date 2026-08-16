@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
-import type { Issue, TaskboardActor, TaskboardAttachment, WorkspaceTaskboard } from '@deepseek-ai/dsh-taskboard/types'
+import type { Activity, Issue, TaskboardActor, TaskboardAttachment, WorkspaceTaskboard } from '@deepseek-ai/dsh-taskboard/types'
 import type { WorkspaceId } from '@deepseek-ai/dsh-client-runtime/client'
 import type { TaskboardPatrolValue } from '@deepseek-ai/dsh-taskboard-remote/types'
 import { TaskboardSurface, type TaskboardSurfaceProps } from '../src/client/TaskboardSurface.tsx'
@@ -24,7 +24,7 @@ vi.mock('dhtmlx-gantt', () => ({
   },
 }))
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.useRealTimers() })
 beforeEach(() => { localStorage.clear() })
 
 const t = makeTranslate(zh, commonZh)
@@ -125,6 +125,7 @@ function snapshot(overrides: Partial<TaskboardSnapshot> = {}): TaskboardSnapshot
     comments: [],
     attachments: [],
     activities: [],
+    workspaceActivities: [],
     workspaceRelations: [],
     relations: [],
     patrol: null,
@@ -208,6 +209,46 @@ describe('TaskboardSurface', () => {
         title: 'Add Gantt', status: 'backlog', priority: 'none',
       })
     })
+  })
+
+  it('links Dashboard summaries to filtered work and shows upcoming and recent Activity', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime('2026-08-16T12:00:00.000Z')
+    const upcomingIssues = Array.from({ length: 6 }, (_, index) => issue({
+      id: `issue-upcoming-${String(index)}` as never,
+      identifier: `DSH-${String(index + 11)}` as never,
+      title: `Upcoming review ${String(index + 1)}`,
+      dueDate: `2026-08-${String(index + 20).padStart(2, '0')}`,
+    }))
+    const workspaceActivities: readonly Activity[] = [{
+      id: 'activity-1' as never,
+      issueId: upcomingIssues[0]!.id,
+      actor,
+      changes: [{ field: 'priority', before: 'medium', after: 'high' }],
+      createdAt: '2026-08-16T11:00:00.000Z',
+    }]
+    const view = mountSurface(snapshot({
+      issues: [
+        issue({ id: 'issue-overdue' as never, identifier: 'DSH-10' as never, title: 'Overdue migration', dueDate: '2026-08-15' }),
+        ...upcomingIssues,
+        issue({ id: 'issue-later' as never, identifier: 'DSH-20' as never, title: 'Later release', dueDate: '2026-09-10' }),
+        issue({ id: 'issue-done' as never, identifier: 'DSH-21' as never, title: 'Done setup', status: 'done', dueDate: '2026-08-18' }),
+      ],
+      workspaceActivities,
+    }))
+
+    expect(screen.getByRole('heading', { name: '即将到期' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '即将到期 6' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /DSH-11 Upcoming review 1/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /DSH-16 Upcoming review 6/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /DSH-20 Later release/ })).toBeNull()
+    expect(screen.getByRole('heading', { name: '最近活动' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /DSH-11.*User.*优先级/ })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: '已逾期 1' }))
+    expect(view.store.getSnapshot()).toMatchObject({ mode: 'list', schedule: 'overdue' })
+    expect(screen.getByRole('button', { name: /DSH-10/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /DSH-11/ })).toBeNull()
   })
 
   it('moves a dragged card to the dropped lifecycle column', async () => {
