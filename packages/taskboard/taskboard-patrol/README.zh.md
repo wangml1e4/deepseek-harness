@@ -12,8 +12,9 @@ Workspace Taskboard Patrol 的 Host 执行支持。`ctx.taskboardPatrol` 将已�
 - 每个执行 lease 会以 `rejected` 回答全部工具审批请求，记录请求工具及原因，并取消该轮。Patrol 协调器负责随后写回 Attempt 和 Issue。
 - 协调器根据持久化的 `nextDueAt` 调度已启用策略，只按手工顺序扫描 `todo` Issue，并跳过用户指派、明确等待，以及其 `done` 结果 commit 尚未集成到该 Issue 固定 Base Branch 的依赖项。
 - 一轮 Run 会在一个已审查 Issue 进入 `in_review` 后结束。只有因工具审批受阻的 Attempt 才能继续领取下一个合格 `todo`；其他任何故障都会阻塞已领取 Issue 并结束 Run。
-- 启动时，协调器会先恢复唯一的持久活跃 Run，再调度新的到期触发。活跃 Attempt 只能恢复其准确绑定 Session 和 worktree。已有 Reviewer 证据会被复用；否则恢复后的实现 Session 会先收到一轮恢复任务，再进入审查。绑定缺失或不匹配时，Run 与 Attempt 会以失败结束，Issue 移至 `blocked`，并且绝不会创建替代 Session。
+- 启动时，协调器会先恢复唯一的持久活跃 Run，再调度新的到期触发。活跃 Attempt 只能恢复其准确绑定 Session 和 worktree。已有 Reviewer 证据会被复用；否则恢复后的实现 Session 会先收到一轮恢复任务，再进入审查。恢复会先从准确持久化的实现 Session 和已记录的 Reviewer Session 重建 Attempt 统计，再追加恢复轮次。绑定缺失或不匹配时，Run 与 Attempt 会以失败结束，Issue 移至 `blocked`，并且绝不会创建替代 Session。
 - 实现 Agent 必须留下干净且已提交的 Base Branch diff。独立的持久 Reviewer Session 会接收该已提交 diff，继承已保存的模型组合，只暴露结构化审查提交工具，并固定使用只读沙箱与 `never` 审批策略。实现 Session 随后接收持久审查结论，执行一轮修正与验证，再交给人工审查。
+- 实现、Reviewer、修正和恢复轮次会从规范 Session 事件收集 Provider 报告的用量，且不会重复计算原始记录与组装记录。模型流的终态 `finish` 故障会与编排错误分别保留，Taskboard Provider 会把已完成 Attempt 的用量聚合到永久 Run 历史中。
 - `configuration()` 会发现本地分支、可挂载 Agent Preset、在线 provider／model／reasoning 选项和现有 Permission Preset。`updatePolicy()` 在乐观版本保存前校验这些 Host 所属选项。`trigger()` 可在不启用固定调度的情况下启动手工 Run。
 
 调度器在 Host 进程内运行，Host 停止期间不能执行。Taskboard Policy 会保留固定节拍；启动时会先完成活跃 Run 恢复，再最多消费一次已到期触发。

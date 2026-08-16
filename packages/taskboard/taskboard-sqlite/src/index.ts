@@ -19,6 +19,7 @@ import {
   TaskboardService,
   MAX_ATTACHMENT_BYTES,
   DEFAULT_PATROL_INTERVAL,
+  addPatrolTokenUsage,
   nextPatrolCadence,
   nextPatrolDueAfterSave,
 } from '@deepseek-ai/dsh-taskboard'
@@ -50,9 +51,12 @@ import type {
   PatrolAttempt,
   PatrolDevelopmentContext,
   PatrolPolicy,
+  PatrolProviderError,
   PatrolReview,
   RecordPatrolReviewInput,
   PatrolRun,
+  PatrolRunResult,
+  PatrolTokenUsage,
   ReadAttachmentInput,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
@@ -157,6 +161,52 @@ function derivePrefix(title: string): string {
 function rollback(db: DatabaseSync): void {
   /* v8 ignore else -- mutation failures occur before COMMIT; a post-COMMIT SQLite fault requires database corruption. */
   if (db.isTransaction) db.exec('ROLLBACK')
+}
+
+/** Aggregate completed Attempt telemetry while retaining the latest Provider failure. */
+function patrolRunTelemetry(
+  db: DatabaseSync,
+  runId: PatrolRunId,
+): { tokenUsage: PatrolTokenUsage | null; providerError: PatrolProviderError | null } {
+  const rows = db.prepare(`
+    SELECT token_usage, provider_error
+    FROM patrol_attempts
+    WHERE run_id = ?
+    ORDER BY sequence
+  `).all(runId) as unknown as Array<{ token_usage: string | null; provider_error: string | null }>
+  let tokenUsage: PatrolTokenUsage | null = null
+  let providerError: PatrolProviderError | null = null
+  for (const row of rows) {
+    tokenUsage = addPatrolTokenUsage(
+      tokenUsage,
+      row.token_usage === null ? null : JSON.parse(row.token_usage) as PatrolTokenUsage,
+    )
+    if (row.provider_error !== null) providerError = JSON.parse(row.provider_error) as PatrolProviderError
+  }
+  return { tokenUsage, providerError }
+}
+
+/** Complete one active Run with Attempt-aggregated telemetry inside its caller's transaction. */
+function completePatrolRunRecord(
+  db: DatabaseSync,
+  runId: PatrolRunId,
+  result: PatrolRunResult,
+  error: string | null,
+  timestamp: string,
+): void {
+  const telemetry = patrolRunTelemetry(db, runId)
+  db.prepare(`
+    UPDATE patrol_runs
+    SET state = 'completed', result = ?, error = ?, token_usage = ?, provider_error = ?, ended_at = ?
+    WHERE id = ? AND state = 'active'
+  `).run(
+    result,
+    error,
+    telemetry.tokenUsage === null ? null : JSON.stringify(telemetry.tokenUsage),
+    telemetry.providerError === null ? null : JSON.stringify(telemetry.providerError),
+    timestamp,
+    runId,
+  )
 }
 
 /** Replace one Issue's ordered labels while reusing its Workspace label records. */
@@ -1337,8 +1387,8 @@ export class SqliteTaskboard extends TaskboardService {
       db.prepare(`
         INSERT INTO patrol_runs (
           id, workspace_id, trigger, scheduled_for, state, result,
-          error, recovery_count, last_recovered_at, started_at, ended_at
-        ) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)
+          error, token_usage, provider_error, recovery_count, last_recovered_at, started_at, ended_at
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?)
       `).run(
         id,
         input.workspaceId,
@@ -1366,7 +1416,7 @@ export class SqliteTaskboard extends TaskboardService {
     try {
       const row = db.prepare(`
         SELECT id, workspace_id, trigger, scheduled_for, state, result,
-               error, recovery_count, last_recovered_at, started_at, ended_at
+               error, token_usage, provider_error, recovery_count, last_recovered_at, started_at, ended_at
         FROM patrol_runs
         WHERE id = ?
       `).get(input.runId) as PatrolRunRow | undefined
@@ -1374,11 +1424,7 @@ export class SqliteTaskboard extends TaskboardService {
         throw new TaskboardError('patrol_run_not_active', `Patrol Run '${input.runId}' is not active`)
       }
       const timestamp = new Date().toISOString()
-      db.prepare(`
-        UPDATE patrol_runs
-        SET state = 'completed', result = ?, error = ?, ended_at = ?
-        WHERE id = ? AND state = 'active'
-      `).run(input.result, input.error ?? null, timestamp, input.runId)
+      completePatrolRunRecord(db, input.runId, input.result, input.error ?? null, timestamp)
       return this.commitPatrolRunMutation(db, input.runId, row.workspace_id)
     } catch (error: unknown) {
       rollback(db)
@@ -1392,7 +1438,7 @@ export class SqliteTaskboard extends TaskboardService {
   ): Promise<readonly PatrolRun[]> {
     const rows = this.database().prepare(`
       SELECT id, workspace_id, trigger, scheduled_for, state, result,
-             error, recovery_count, last_recovered_at, started_at, ended_at
+             error, token_usage, provider_error, recovery_count, last_recovered_at, started_at, ended_at
       FROM patrol_runs
       WHERE workspace_id = ?
       ORDER BY sequence DESC
@@ -1404,7 +1450,7 @@ export class SqliteTaskboard extends TaskboardService {
   async getActivePatrolRun(): Promise<PatrolRun | undefined> {
     const row = this.database().prepare(`
       SELECT id, workspace_id, trigger, scheduled_for, state, result,
-             error, recovery_count, last_recovered_at, started_at, ended_at
+             error, token_usage, provider_error, recovery_count, last_recovered_at, started_at, ended_at
       FROM patrol_runs
       WHERE state = 'active'
     `).get() as PatrolRunRow | undefined
@@ -1491,14 +1537,16 @@ export class SqliteTaskboard extends TaskboardService {
       )
       db.prepare(`
         UPDATE patrol_attempts
-        SET state = 'completed', result = 'failed', error = ?, ended_at = ?
+        SET state = 'completed', result = 'failed', error = ?, token_usage = ?, provider_error = ?, ended_at = ?
         WHERE id = ? AND state = 'active'
-      `).run(detail, timestamp, input.attemptId)
-      db.prepare(`
-        UPDATE patrol_runs
-        SET state = 'completed', result = 'failed', error = ?, ended_at = ?
-        WHERE id = ? AND state = 'active'
-      `).run(detail, timestamp, input.runId)
+      `).run(
+        detail,
+        input.tokenUsage === undefined ? null : JSON.stringify(input.tokenUsage),
+        input.providerError === undefined ? null : JSON.stringify(input.providerError),
+        timestamp,
+        input.attemptId,
+      )
+      completePatrolRunRecord(db, input.runId, 'failed', detail, timestamp)
       return this.commitPatrolRunMutation(db, input.runId, row.workspace_id)
     } catch (error: unknown) {
       rollback(db)
@@ -1603,8 +1651,9 @@ export class SqliteTaskboard extends TaskboardService {
       this.recordActivity(IssueId(issue.id), input.actor, changes, timestamp)
       db.prepare(`
         INSERT INTO patrol_attempts (
-          id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
-        ) VALUES (?, ?, ?, ?, 'active', NULL, NULL, ?, NULL)
+          id, run_id, issue_id, session_id, state, result, error,
+          token_usage, provider_error, started_at, ended_at
+        ) VALUES (?, ?, ?, ?, 'active', NULL, NULL, NULL, NULL, ?, NULL)
       `).run(attemptId, input.runId, issue.id, context?.session_id ?? null, timestamp)
       db.exec('COMMIT')
       const stored = requireStored(this.findPatrolAttempt(attemptId), 'Patrol Attempt')
@@ -1836,9 +1885,16 @@ export class SqliteTaskboard extends TaskboardService {
       }
       db.prepare(`
         UPDATE patrol_attempts
-        SET state = 'completed', result = ?, error = ?, ended_at = ?
+        SET state = 'completed', result = ?, error = ?, token_usage = ?, provider_error = ?, ended_at = ?
         WHERE id = ? AND state = 'active'
-      `).run(input.result, handoff ? null : detail as string, timestamp, input.attemptId)
+      `).run(
+        input.result,
+        handoff ? null : detail as string,
+        input.tokenUsage === undefined ? null : JSON.stringify(input.tokenUsage),
+        input.providerError === undefined ? null : JSON.stringify(input.providerError),
+        timestamp,
+        input.attemptId,
+      )
       db.exec('COMMIT')
       const stored = requireStored(this.findPatrolAttempt(input.attemptId), 'Patrol Attempt')
       this.notifyChanged(attempt.workspace_id as EnsureWorkspaceInput['workspaceId'])
@@ -1952,7 +2008,8 @@ export class SqliteTaskboard extends TaskboardService {
   // oxlint-disable-next-line typescript/require-await -- Preserve rejection semantics at the asynchronous Service contract.
   async listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[]> {
     const rows = this.database().prepare(`
-      SELECT id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
+      SELECT id, run_id, issue_id, session_id, state, result, error,
+             token_usage, provider_error, started_at, ended_at
       FROM patrol_attempts
       WHERE run_id = ?
       ORDER BY sequence
@@ -1993,7 +2050,7 @@ export class SqliteTaskboard extends TaskboardService {
   private findPatrolRun(runId: PatrolRunId): PatrolRun | undefined {
     const row = this.database().prepare(`
       SELECT id, workspace_id, trigger, scheduled_for, state, result,
-             error, recovery_count, last_recovered_at, started_at, ended_at
+             error, token_usage, provider_error, recovery_count, last_recovered_at, started_at, ended_at
       FROM patrol_runs
       WHERE id = ?
     `).get(runId) as PatrolRunRow | undefined
@@ -2012,7 +2069,8 @@ export class SqliteTaskboard extends TaskboardService {
   /** Read one Patrol Attempt from the initialized database. */
   private findPatrolAttempt(attemptId: PatrolAttemptId): PatrolAttempt | undefined {
     const row = this.database().prepare(`
-      SELECT id, run_id, issue_id, session_id, state, result, error, started_at, ended_at
+      SELECT id, run_id, issue_id, session_id, state, result, error,
+             token_usage, provider_error, started_at, ended_at
       FROM patrol_attempts
       WHERE id = ?
     `).get(attemptId) as PatrolAttemptRow | undefined

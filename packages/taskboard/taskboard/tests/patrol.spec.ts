@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_PATROL_INTERVAL,
   PATROL_INTERVALS,
+  addPatrolTokenUsage,
   nextPatrolCadence,
   nextPatrolDueAfterSave,
   patrolIntervalMilliseconds,
@@ -22,5 +23,34 @@ describe('Patrol fixed intervals', () => {
       new Date('2026-08-16T03:12:00.000Z'),
     )).toBe('2026-08-16T03:30:00.000Z')
     expect(patrolIntervalMilliseconds('24h')).toBe(86_400_000)
+  })
+
+  it('adds reported usage without inventing optional buckets', () => {
+    const first = {
+      inputTokens: 10,
+      outputTokens: 2,
+      cacheReadTokens: 4,
+      reasoningTokens: 1,
+    }
+    const second = {
+      inputTokens: 3,
+      outputTokens: 1,
+      cacheWriteTokens: 5,
+      reasoningTokens: 2,
+    }
+    expect(addPatrolTokenUsage(null, null)).toBeNull()
+    expect(addPatrolTokenUsage(null, first)).toBe(first)
+    expect(addPatrolTokenUsage(second, null)).toBe(second)
+    expect(addPatrolTokenUsage(first, second)).toEqual({
+      inputTokens: 13,
+      outputTokens: 3,
+      cacheReadTokens: 4,
+      cacheWriteTokens: 5,
+      reasoningTokens: 3,
+    })
+    expect(addPatrolTokenUsage(
+      { inputTokens: 1, outputTokens: 2 },
+      { inputTokens: 3, outputTokens: 4 },
+    )).toEqual({ inputTokens: 4, outputTokens: 6 })
   })
 })

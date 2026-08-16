@@ -166,6 +166,8 @@ describe('TaskboardPatrolService', () => {
         state: 'active' as const,
         result: null,
         error: null,
+        tokenUsage: null,
+        providerError: null,
         startedAt: '2026-08-16T00:00:00.000Z',
         endedAt: null,
       }

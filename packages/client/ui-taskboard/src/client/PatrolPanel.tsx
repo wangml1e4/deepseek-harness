@@ -7,12 +7,23 @@ import {
   IconPauseOutline16,
   IconPlayOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PatrolInterval } from '@deepseek-ai/dsh-taskboard/types'
+import type { PatrolInterval, PatrolTokenUsage } from '@deepseek-ai/dsh-taskboard/types'
 import type { TaskboardPatrolValue } from '@deepseek-ai/dsh-taskboard-remote/types'
 import type { TaskboardDetailsProps as DetailsProps } from './contract.ts'
 import css from './Taskboard.module.css'
 
 type PatrolPanelProps = Pick<DetailsProps, 'useTaskboard' | 'updatePatrol' | 'runPatrol' | 'close' | 't'>
+
+function usageText(usage: PatrolTokenUsage, t: DetailsProps['t']): string {
+  const values = [
+    t('patrol.usage.input', { count: usage.inputTokens }),
+    t('patrol.usage.output', { count: usage.outputTokens }),
+  ]
+  if (usage.cacheReadTokens !== undefined) values.push(t('patrol.usage.cacheRead', { count: usage.cacheReadTokens }))
+  if (usage.cacheWriteTokens !== undefined) values.push(t('patrol.usage.cacheWrite', { count: usage.cacheWriteTokens }))
+  if (usage.reasoningTokens !== undefined) values.push(t('patrol.usage.reasoning', { count: usage.reasoningTokens }))
+  return values.join(' · ')
+}
 
 const INTERVALS: readonly PatrolInterval[] = ['5m', '30m', '1h', '2h', '6h', '12h', '24h']
 
@@ -139,6 +150,26 @@ export function PatrolPanel({ useTaskboard, updatePatrol, runPatrol, close, t }:
                   count: run.recoveryCount,
                   time: new Date(run.lastRecoveredAt).toLocaleString(),
                 })}</p>}
+                {run.tokenUsage !== null && <p>{usageText(run.tokenUsage, t)}</p>}
+                {run.providerError !== null && <>
+                  <p className={css.inlineError}>{t('patrol.providerError', {
+                    code: run.providerError.code,
+                    message: run.providerError.message,
+                  })}</p>
+                  {(run.providerError.status !== undefined
+                    || run.providerError.providerRetryAfterMs !== undefined
+                    || run.providerError.requestId !== undefined) && <p>{[
+                    run.providerError.status === undefined
+                      ? null
+                      : t('patrol.providerStatus', { status: run.providerError.status }),
+                    run.providerError.providerRetryAfterMs === undefined
+                      ? null
+                      : t('patrol.providerRetry', { milliseconds: run.providerError.providerRetryAfterMs }),
+                    run.providerError.requestId === undefined
+                      ? null
+                      : t('patrol.providerRequest', { id: run.providerError.requestId }),
+                  ].filter(value => value !== null).join(' · ')}</p>}
+                </>}
                 {run.error !== null && <p className={css.inlineError}>{run.error}</p>}
                 {attempts.map(attempt => (
                   <div className={css.attemptRow} key={attempt.id}>

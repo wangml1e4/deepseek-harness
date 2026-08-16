@@ -18,6 +18,7 @@ import { setApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import type { Workspace } from '@deepseek-ai/dsh-workspace'
 import type { PatrolGitDiff, PatrolWorktree } from './git.ts'
 import { reviewerPrompt } from './prompts.ts'
+import { PatrolTelemetryRecorder } from './telemetry.ts'
 
 /** Structured evidence returned by the scoped Reviewer tool. */
 export interface PatrolReviewerResult {
@@ -64,6 +65,7 @@ export class PatrolReviewer {
    * @param commit - exact preliminary commit.
    * @param diff - bounded committed patch.
    * @param workspace - Workspace that publishes the Reviewer Session.
+   * @param telemetry - Attempt-wide usage and Provider-failure recorder.
    * @returns validated structured Reviewer evidence.
    */
   async review(
@@ -74,6 +76,7 @@ export class PatrolReviewer {
     commit: string,
     diff: PatrolGitDiff,
     workspace: Workspace,
+    telemetry: PatrolTelemetryRecorder,
   ): Promise<PatrolReviewerResult> {
     if (attempt.state !== 'active' || attempt.issueId !== issue.id) {
       throw new Error(`Patrol Attempt "${attempt.id}" cannot start an independent review`)
@@ -170,12 +173,17 @@ export class PatrolReviewer {
     try {
       await workspace.attachSession(sessionId)
       await this.ctx.sessions.flush(handle.agent.session)
+      const firstEvent = handle.agent.session.events.length
       const priorTurns = handle.agent.session.events.filter(event => event.type === 'turn/end').length
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: reviewerPrompt(issue, commit, diff) }],
         source: { kind: 'plugin', plugin: 'taskboard-patrol' },
       }))
-      await handle.agent.whenIdle()
+      try {
+        await handle.agent.whenIdle()
+      } finally {
+        telemetry.record(handle.agent.session.events.slice(firstEvent))
+      }
       const ends = handle.agent.session.events.filter(event => event.type === 'turn/end')
       const last = ends.at(-1)
       if (ends.length !== priorTurns + 1 || last?.type !== 'turn/end' || last.data.reason.kind !== 'completed') {

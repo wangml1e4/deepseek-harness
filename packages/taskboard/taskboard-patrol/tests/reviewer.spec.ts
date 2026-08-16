@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent, AgentHandle, CreateAgentOptions } from '@deepseek-ai/dsh-agent'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { CallId, createAssistantMessage } from '@deepseek-ai/dsh-llm'
 import { effectiveSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -12,6 +12,7 @@ import { defineTool, type PostToolDecision } from '@deepseek-ai/dsh-tools'
 import { effectiveApprovalPolicy } from '@deepseek-ai/dsh-user-approval'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { PatrolReviewer } from '../src/reviewer.ts'
+import { PatrolTelemetryRecorder } from '../src/telemetry.ts'
 
 const contexts: Context[] = []
 
@@ -47,6 +48,8 @@ const attempt = {
   state: 'active' as const,
   result: null,
   error: null,
+  tokenUsage: null,
+  providerError: null,
   startedAt: '2026-08-16T00:00:00.000Z',
   endedAt: null,
 }
@@ -152,6 +155,15 @@ async function harness(mode: ReviewMode) {
                 })
               }
             }
+            session.append('assistant/message', {
+              turn,
+              step: 1,
+              message: createAssistantMessage({
+                content: [],
+                source: { provider: 'deepseek', model: 'deepseek-chat' },
+              }),
+              usage: { inputTokens: 8, outputTokens: 2, reasoningTokens: 1 },
+            }, { surfaceOp: 'append' })
             session.append('turn/end', {
               turn,
               reason: mode === 'interrupted' ? { kind: 'interrupted' } : { kind: 'completed' },
@@ -189,6 +201,7 @@ async function harness(mode: ReviewMode) {
 describe('PatrolReviewer', () => {
   it('runs a separate read-only/never Session and accepts only its scoped structured tool', async () => {
     const test = await harness('valid')
+    const telemetry = new PatrolTelemetryRecorder()
     const result = await new PatrolReviewer(test.ctx).review(
       attempt,
       issue,
@@ -197,6 +210,7 @@ describe('PatrolReviewer', () => {
       'abc123',
       { patch: '+tested', stat: '1 file changed' },
       test.workspace as never,
+      telemetry,
     )
     expect(result).toMatchObject({
       reviewedCommit: 'abc123',
@@ -210,6 +224,9 @@ describe('PatrolReviewer', () => {
     expect(test.tools()).toEqual(['patrol_review_submit'])
     expect(test.presentationTitle()).toBe('Submit Patrol review: approve')
     expect(test.disposed).toHaveBeenCalledOnce()
+    expect(telemetry.fields()).toEqual({
+      tokenUsage: { inputTokens: 8, outputTokens: 2, reasoningTokens: 1 },
+    })
   })
 
   it('also exposes only the submit tool when there are no inherited tools to restrict', async () => {
@@ -217,7 +234,7 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, issue, { ...development, reasoningEffort: null },
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never,
+      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).resolves.toMatchObject({ verdict: 'changes_requested' })
     expect(test.tools()).toEqual(['patrol_review_submit'])
   })
@@ -227,12 +244,12 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       { ...attempt, state: 'completed' }, issue, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '', stat: '' }, test.workspace as never,
+      'abc123', { patch: '', stat: '' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).rejects.toThrow('cannot start an independent review')
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, { ...issue, id: IssueId('other') }, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '', stat: '' }, test.workspace as never,
+      'abc123', { patch: '', stat: '' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).rejects.toThrow('cannot start an independent review')
   })
 
@@ -241,7 +258,7 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, issue, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never,
+      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).rejects.toThrow(mode === 'interrupted' ? 'did not complete' : 'did not submit')
     expect(test.disposed).toHaveBeenCalledOnce()
   })
@@ -251,7 +268,7 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, issue, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never,
+      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).rejects.toThrow('did not submit')
   })
 
@@ -260,7 +277,7 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, issue, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never,
+      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).rejects.toThrow('has no scoped Agent')
   })
 
@@ -269,7 +286,7 @@ describe('PatrolReviewer', () => {
     await expect(new PatrolReviewer(test.ctx).review(
       attempt, issue, development,
       { root: '/worktrees/review-1', sessionCwd: '/worktrees/review-1/project' },
-      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never,
+      'abc123', { patch: '+change', stat: '1 file' }, test.workspace as never, new PatrolTelemetryRecorder(),
     )).resolves.toMatchObject({ findings: 'Add a regression test.' })
   })
 })

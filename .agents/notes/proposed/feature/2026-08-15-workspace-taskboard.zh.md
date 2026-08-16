@@ -88,7 +88,7 @@ Patrol Policy 是宿主持有的持久定时任务。它会跨宿主重启保存
 
 Taskboard 顶栏还会提供“立即巡检”。即使固定间隔调度已关闭，它也会使用已保存策略启动一次 Patrol Run，且不会改变启用状态。已有其他 Run 活动时，该操作不可用；其结果会像定时触发一样持久化。
 
-第一版不提供 Provider 额度感知暂停，因为 Harness Provider 没有统一的额度查询接口。Patrol Run 历史会保留 token 用量和 Provider 错误。额度或限流失败会记录原因、把当前 Issue 移至 `blocked` 并结束本轮，但不会关闭固定间隔策略；后续定时 Run 仍可处理其他符合条件的 Issue。
+第一版不提供 Provider 额度感知暂停，因为 Harness Provider 没有统一的额度查询接口。Patrol Run 历史会保留 token 用量和 Provider 错误。规范 Session 用量事件与模型流终态故障是计量来源：每个 Attempt 累加实现、Reviewer、修正和恢复轮次，Run 完成时再聚合其 Attempt，并保留最近一次结构化 Provider 故障。恢复会先从准确持久化的实现 Session 与已记录的 Reviewer Session 重建崩溃前计量，再追加恢复轮次。Git、权限和审查故障继续作为独立错误文本，因此 Patrol 不会根据消息推断 Provider 故障。额度或限流失败会记录原因、把当前 Issue 移至 `blocked` 并结束本轮，但不会关闭固定间隔策略；后续定时 Run 仍可处理其他符合条件的 Issue。
 
 Patrol Policy 还会选择 Agent Preset、模型和推理强度，初始继承当前的新 Session 默认值。新建 Patrol Session 会在创建时记录这些已解析选择。后续策略变更只影响之后创建的 Session；已绑定 Issue 会使用其 Session 的既有配置恢复运行。
 

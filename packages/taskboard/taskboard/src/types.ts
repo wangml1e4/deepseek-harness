@@ -2,6 +2,7 @@
 
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { LlmFailure, TokenUsage } from '@deepseek-ai/dsh-llm/types'
 import type {
   ActivityId,
   TaskboardAttachmentId,
@@ -86,6 +87,12 @@ export type PatrolRunResult =
   | 'failed'
   | 'skipped_global_busy'
 
+/** Provider-reported model usage retained for one Patrol execution scope. */
+export type PatrolTokenUsage = Readonly<TokenUsage>
+
+/** Structured Provider or transport failure retained by Patrol history. */
+export type PatrolProviderError = LlmFailure
+
 /** One durable scheduled or manually requested Patrol execution. */
 export interface PatrolRun {
   /** Stable opaque trigger identity. */
@@ -102,6 +109,10 @@ export interface PatrolRun {
   readonly result: PatrolRunResult | null
   /** Human-readable failure detail, or null when none was recorded. */
   readonly error: string | null
+  /** Aggregated Provider-reported model usage across this Run's Attempts, or null when none was reported. */
+  readonly tokenUsage: PatrolTokenUsage | null
+  /** Latest structured Provider failure across this Run's Attempts, or null when none occurred. */
+  readonly providerError: PatrolProviderError | null
   /** Number of Host startup recovery attempts recorded for this Run. */
   readonly recoveryCount: number
   /** ISO-8601 instant of the latest startup recovery attempt, or null before recovery. */
@@ -160,6 +171,10 @@ export interface PatrolAttempt {
   readonly result: PatrolAttemptResult | null
   /** Human-readable terminal detail, or null when none was recorded. */
   readonly error: string | null
+  /** Provider-reported model usage across implementation, review, and remediation, or null when none was reported. */
+  readonly tokenUsage: PatrolTokenUsage | null
+  /** Latest structured Provider failure observed during this Attempt, or null when none occurred. */
+  readonly providerError: PatrolProviderError | null
   /** ISO-8601 claim instant. */
   readonly startedAt: string
   /** ISO-8601 terminal instant, or null while active. */
@@ -257,6 +272,10 @@ export interface CompletePatrolAttemptInput {
   readonly error?: string
   /** Result commit required for review handoff. */
   readonly resultCommit?: string
+  /** Provider-reported model usage accumulated by this Attempt. */
+  readonly tokenUsage?: PatrolTokenUsage
+  /** Latest structured Provider failure observed during this Attempt. */
+  readonly providerError?: PatrolProviderError
   /** Actor recorded on the lifecycle transition and optional blocker comment. */
   readonly actor: TaskboardActor
 }
@@ -305,6 +324,10 @@ export interface FailPatrolRecoveryInput {
   readonly attemptId: PatrolAttemptId
   /** Durable human-readable recovery failure. */
   readonly error: string
+  /** Provider-reported model usage accumulated while resuming the Attempt. */
+  readonly tokenUsage?: PatrolTokenUsage
+  /** Latest structured Provider failure observed while resuming the Attempt. */
+  readonly providerError?: PatrolProviderError
   /** Patrol actor recorded on the Issue lifecycle mutation and Comment. */
   readonly actor: TaskboardActor
 }

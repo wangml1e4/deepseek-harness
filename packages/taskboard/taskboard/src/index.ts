@@ -58,6 +58,7 @@ export type { TaskboardErrorCode } from './error.ts'
 export {
   DEFAULT_PATROL_INTERVAL,
   PATROL_INTERVALS,
+  addPatrolTokenUsage,
   nextPatrolCadence,
   nextPatrolDueAfterSave,
   patrolIntervalMilliseconds,
@@ -100,6 +101,7 @@ export type {
   PatrolDevelopmentContext,
   PatrolInterval,
   PatrolPolicy,
+  PatrolProviderError,
   PatrolReview,
   PatrolReviewVerdict,
   RecordPatrolReviewInput,
@@ -108,6 +110,7 @@ export type {
   PatrolRunId as PatrolRunIdType,
   PatrolRunResult,
   PatrolRunTrigger,
+  PatrolTokenUsage,
   RemoveIssueRelationInput,
   SetWorkspacePrefixInput,
   TaskboardActor,

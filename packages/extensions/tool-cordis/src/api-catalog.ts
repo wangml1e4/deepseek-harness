@@ -3356,7 +3356,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'CompletePatrolAttemptInput',
-    declaration: 'export interface CompletePatrolAttemptInput {\n    readonly attemptId: PatrolAttemptId;\n    readonly result: PatrolAttemptResult;\n    readonly error?: string;\n    readonly resultCommit?: string;\n    readonly actor: TaskboardActor;\n}',
+    declaration: 'export interface CompletePatrolAttemptInput {\n    readonly attemptId: PatrolAttemptId;\n    readonly result: PatrolAttemptResult;\n    readonly error?: string;\n    readonly resultCommit?: string;\n    readonly tokenUsage?: PatrolTokenUsage;\n    readonly providerError?: PatrolProviderError;\n    readonly actor: TaskboardActor;\n}',
   },
   {
     name: 'CompletePatrolRunInput',
@@ -3584,7 +3584,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'FailPatrolRecoveryInput',
-    declaration: 'export interface FailPatrolRecoveryInput {\n    readonly runId: PatrolRunId;\n    readonly attemptId: PatrolAttemptId;\n    readonly error: string;\n    readonly actor: TaskboardActor;\n}',
+    declaration: 'export interface FailPatrolRecoveryInput {\n    readonly runId: PatrolRunId;\n    readonly attemptId: PatrolAttemptId;\n    readonly error: string;\n    readonly tokenUsage?: PatrolTokenUsage;\n    readonly providerError?: PatrolProviderError;\n    readonly actor: TaskboardActor;\n}',
   },
   {
     name: 'FileDiff',
@@ -4088,7 +4088,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PatrolAttempt',
-    declaration: 'export interface PatrolAttempt {\n    readonly id: PatrolAttemptId;\n    readonly runId: PatrolRunId;\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolAttemptResult | null;\n    readonly error: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
+    declaration: 'export interface PatrolAttempt {\n    readonly id: PatrolAttemptId;\n    readonly runId: PatrolRunId;\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolAttemptResult | null;\n    readonly error: string | null;\n    readonly tokenUsage: PatrolTokenUsage | null;\n    readonly providerError: PatrolProviderError | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
   },
   {
     name: 'PatrolAttemptId',
@@ -4135,6 +4135,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PatrolPolicyDefaults {\n    readonly baseBranch: string;\n    readonly agentPreset: string;\n    readonly selection: ModelSelection;\n    readonly permissionPreset: string;\n}',
   },
   {
+    name: 'PatrolProviderError',
+    declaration: 'export type PatrolProviderError = LlmFailure;',
+  },
+  {
     name: 'PatrolProviderOption',
     declaration: 'export interface PatrolProviderOption {\n    readonly id: string;\n    readonly name: string;\n    readonly models: readonly PatrolModelOption[];\n}',
   },
@@ -4152,7 +4156,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'PatrolRun',
-    declaration: 'export interface PatrolRun {\n    readonly id: PatrolRunId;\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n    readonly scheduledFor: string | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolRunResult | null;\n    readonly error: string | null;\n    readonly recoveryCount: number;\n    readonly lastRecoveredAt: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
+    declaration: 'export interface PatrolRun {\n    readonly id: PatrolRunId;\n    readonly workspaceId: WorkspaceId;\n    readonly trigger: PatrolRunTrigger;\n    readonly scheduledFor: string | null;\n    readonly state: \'active\' | \'completed\';\n    readonly result: PatrolRunResult | null;\n    readonly error: string | null;\n    readonly tokenUsage: PatrolTokenUsage | null;\n    readonly providerError: PatrolProviderError | null;\n    readonly recoveryCount: number;\n    readonly lastRecoveredAt: string | null;\n    readonly startedAt: string;\n    readonly endedAt: string | null;\n}',
   },
   {
     name: 'PatrolRunId',
@@ -4165,6 +4169,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PatrolRunTrigger',
     declaration: 'export type PatrolRunTrigger = \'scheduled\' | \'manual\';',
+  },
+  {
+    name: 'PatrolTokenUsage',
+    declaration: 'export type PatrolTokenUsage = Readonly<TokenUsage>;',
   },
   {
     name: 'PatrolWorktree',

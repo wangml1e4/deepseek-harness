@@ -100,6 +100,19 @@ function patrol(): TaskboardPatrolValue {
         state: 'completed',
         result: 'review_handoff',
         error: null,
+        tokenUsage: {
+          inputTokens: 120,
+          outputTokens: 24,
+          cacheReadTokens: 80,
+          reasoningTokens: 6,
+        },
+        providerError: {
+          message: 'Provider rate limit was observed',
+          code: 'RATE_LIMIT',
+          status: 429,
+          providerRetryAfterMs: 1_500,
+          requestId: 'request-taskboard-ui' as never,
+        },
         recoveryCount: 1,
         lastRecoveredAt: '2026-08-16T00:05:00.000Z',
         startedAt: '2026-08-16T00:00:00.000Z',
@@ -390,6 +403,13 @@ describe('TaskboardDetails', () => {
   it('configures the disabled-by-default Patrol and can trigger one Run', async () => {
     const view = mountDetails(snapshot({ detailPanel: 'patrol', patrol: patrol() }))
     expect(screen.getByText(/已恢复 1 次/)).toBeTruthy()
+    expect(screen.getByText(/输入 120/)).toBeTruthy()
+    expect(screen.getByText(/输出 24/)).toBeTruthy()
+    expect(screen.getByText(/缓存读取 80/)).toBeTruthy()
+    expect(screen.getByText(/推理 6/)).toBeTruthy()
+    expect(screen.getByText(/RATE_LIMIT/)).toBeTruthy()
+    expect(screen.getByText(/重试等待 1500 毫秒/)).toBeTruthy()
+    expect(screen.getByText(/request-taskboard-ui/)).toBeTruthy()
     const toggle = screen.getByRole('switch', { name: '开启或关闭自动巡检' })
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     fireEvent.click(toggle)

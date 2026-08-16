@@ -50,6 +50,8 @@ function attempt(value: Issue, sessionId: PatrolAttempt['sessionId'] = null): Pa
     state: 'active',
     result: null,
     error: null,
+    tokenUsage: null,
+    providerError: null,
     startedAt: NOW,
     endedAt: null,
   }

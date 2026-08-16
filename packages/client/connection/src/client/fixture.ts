@@ -1587,6 +1587,20 @@ interface FxPatrolRun {
   state: 'active' | 'completed'
   result: 'no_eligible_issue' | 'review_handoff' | 'blocked' | 'failed' | 'skipped_global_busy' | null
   error: string | null
+  tokenUsage: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    reasoningTokens?: number
+  } | null
+  providerError: {
+    message: string
+    code: string
+    status?: number
+    providerRetryAfterMs?: number
+    requestId?: string
+  } | null
   recoveryCount: number
   lastRecoveredAt: string | null
   startedAt: string
@@ -1713,6 +1727,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
       state: 'completed',
       result: 'review_handoff',
       error: null,
+      tokenUsage: { inputTokens: 120, outputTokens: 24, cacheReadTokens: 80, reasoningTokens: 6 },
+      providerError: null,
       recoveryCount: 1,
       lastRecoveredAt: '2026-08-15T08:05:00.000Z',
       startedAt: '2026-08-15T07:00:00.000Z',
@@ -3732,6 +3748,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         state: 'completed',
         result: 'no_eligible_issue',
         error: null,
+        tokenUsage: null,
+        providerError: null,
         recoveryCount: 0,
         lastRecoveredAt: null,
         startedAt: now,
