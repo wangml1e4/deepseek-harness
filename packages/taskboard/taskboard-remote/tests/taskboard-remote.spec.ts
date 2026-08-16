@@ -88,6 +88,12 @@ async function harness() {
       stat: ' src/index.ts | 1 +',
       patch: 'diff --git a/src/index.ts b/src/index.ts\n+export const ready = true',
     })),
+    removeWorktree: vi.fn((input: { reference: string }) => Promise.resolve({
+      worktreePath: `/worktrees/${input.reference.toLowerCase()}`,
+      branch: `dsh-task/${input.reference.toLowerCase()}`,
+      resultCommit: 'abc123',
+    })),
+    worktreePresent: vi.fn(() => Promise.resolve(true)),
   } as never)
   await ctx.plugin(TaskboardRemote)
   return ctx
@@ -173,6 +179,7 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'updatePatrol', invocation: { kind: 'direct' } },
       { method: 'runPatrol', invocation: { kind: 'direct' } },
       { method: 'patrolIssue', invocation: { kind: 'direct' } },
+      { method: 'removePatrolWorktree', invocation: { kind: 'direct' } },
     ])
   })
 
@@ -442,7 +449,7 @@ describe('Taskboard Remote Consumer', () => {
     if (!issue.ok) throw new Error(issue.error.message)
     await expect(ctx.taskboardRemote.patrolIssue(issue.value.id)).resolves.toEqual({
       ok: true,
-      value: { context: null, diff: null, reviews: [] },
+      value: { context: null, worktreePresent: false, diff: null, reviews: [] },
     })
 
     vi.spyOn(ctx.taskboard, 'getPatrolDevelopmentContext').mockResolvedValueOnce({
@@ -464,7 +471,20 @@ describe('Taskboard Remote Consumer', () => {
     const evidence = await ctx.taskboardRemote.patrolIssue(issue.value.id)
     expect(evidence.ok).toBe(true)
     if (!evidence.ok) throw new Error(evidence.error.message)
+    expect(evidence.value.worktreePresent).toBe(true)
     expect(evidence.value.diff?.stat).toBe(' src/index.ts | 1 +')
     expect(evidence.value.diff?.patch).toContain('+export const ready = true')
+    await expect(ctx.taskboardRemote.removePatrolWorktree({
+      workspaceId,
+      reference: issue.value.identifier,
+      confirmed: true,
+    })).resolves.toEqual({
+      ok: true,
+      value: {
+        worktreePath: `/worktrees/${issue.value.identifier.toLowerCase()}`,
+        branch: `dsh-task/${issue.value.identifier.toLowerCase()}`,
+        resultCommit: 'abc123',
+      },
+    })
   })
 })

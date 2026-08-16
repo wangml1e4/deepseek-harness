@@ -37,6 +37,7 @@ describe('manage-taskboard bundled skill', () => {
     expect(skill).toMatch(/move the Issue to `in_review` and end the current execution round/i)
     expect(skill).toMatch(/never move an Issue to `done` automatically/i)
     expect(skill).toMatch(/Never delete an Issue/i)
+    expect(skill).toMatch(/Remove a Patrol worktree only when the user explicitly requests it/i)
   })
 
   it('documents every taskctl operation exposed by the V1 domain slice', () => {
@@ -44,6 +45,7 @@ describe('manage-taskboard bundled skill', () => {
       'issue list', 'issue get', 'issue create', 'issue update', 'issue move',
       'issue archive', 'issue restore', 'comment list', 'comment add',
       'activity list', 'relation list', 'relation add', 'relation remove',
+      'patrol cleanup',
     ]) {
       expect(cli).toContain(`taskctl ${command}`)
     }

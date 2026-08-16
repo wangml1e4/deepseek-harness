@@ -44,7 +44,7 @@ One active Attempt accepts one permanent `PatrolReview` from a distinct Reviewer
 
 `@deepseek-ai/dsh-taskboard-patrol` schedules enabled Policies from durable due instants and scans only `todo` Issues in manual order. It skips User assignments, explicit waits, and dependencies without a `done` result commit integrated into the Issue's fixed Base Branch. One reviewed handoff to `in_review` ends the Run; only an Attempt blocked by a rejected tool approval may continue scanning. Other failures block the claimed Issue and end the Run.
 
-The Patrol Consumer uses the managed subprocess service for a fixed local-only Git command set, never runs fetch, pull, push, PR, merge, reset, branch deletion, or worktree removal, and preserves the Workspace-relative Session directory inside the Issue worktree. It resumes the exact Session, mounts the saved Agent and Permission Presets, and rejects unattended approvals. The implementation Agent must leave a clean committed change. A separate persistent Reviewer Session receives the bounded committed diff, exposes only its structured submission tool, and uses fixed read-only sandboxing with approval policy `never`; the original Session receives its durable findings for one correction turn before human review.
+The Patrol Consumer uses the managed subprocess service for a fixed local-only Git command set, never runs fetch, pull, push, PR, merge, reset, branch deletion, or automatic worktree removal, and preserves the Workspace-relative Session directory inside the Issue worktree. A confirmed manual removal rejects unless the exact physical worktree is clean and its recorded result commit is integrated into Base Branch; it preserves the branch, Session binding, Development Context, and history. Patrol resumes the exact Session, mounts the saved Agent and Permission Presets, and rejects unattended approvals. The implementation Agent must leave a clean committed change. A separate persistent Reviewer Session receives the bounded committed diff, exposes only its structured submission tool, and uses fixed read-only sandboxing with approval policy `never`; the original Session receives its durable findings for one correction turn before human review.
 
 An interrupted active Attempt can recover only through its stored Development Context. Recovery reopens the exact Session and worktree, reuses Reviewer evidence already stored for that Attempt, and otherwise asks the implementation Session to inspect its prior transcript and current branch before continuing. A missing or mismatched Context, Session, or worktree atomically ends the Attempt and Run as failed, moves the Issue to `blocked`, appends the reason, and never creates a replacement Session.
 
@@ -56,7 +56,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery evidence, aggregated token usage, and structured Provider diagnostics. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, confirmed physical-worktree removal, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery evidence, aggregated token usage, and structured Provider diagnostics. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
 
 ## Post-version-one GitHub plan
 
@@ -422,6 +422,21 @@ result(context: PatrolDevelopmentContext): Promise<PatrolGitResult>
 diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff>
 
 /**
+ * Read whether one recorded physical Issue worktree is currently present.
+ * @param context - persistent Development Context.
+ * @returns true only for the exact physical directory.
+ */
+worktreePresent(context: PatrolDevelopmentContext): Promise<boolean>
+
+/**
+ * Remove one exact physical Issue worktree while preserving its branch and durable binding.
+ * @param input - Workspace, Issue lookup, and explicit confirmation.
+ * @returns preserved branch, path, and result-commit identities; rejects unless the worktree is
+ * clean and its result commit is integrated.
+ */
+async removeWorktree(input: RemovePatrolWorktreeInput): Promise<PatrolWorktreeRemoval>
+
+/**
  * Start one manual background Run under Host-wide exclusivity.
  * @param input - Workspace and optional exact todo Issue.
  * @returns active durable Run accepted by the Taskboard Provider.
@@ -431,7 +446,7 @@ trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:169`](../../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:190`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -621,11 +636,18 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns explicit nullable binding and append-only reviews.
  */
 @Remote('patrolIssue') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>
+
+/**
+ * Remove one explicitly confirmed, clean, integrated Issue worktree.
+ * @param input - Workspace, Issue lookup, and confirmation.
+ * @returns preserved Development Context identities.
+ */
+@Remote('removePatrolWorktree') removePatrolWorktree( input: TaskboardPatrolWorktreeRemovalInput, ): Promise<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>>
 ```
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-remote/src/index.ts:59`](../../packages/taskboard/taskboard-remote/src/index.ts)
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:61`](../../packages/taskboard/taskboard-remote/src/index.ts)
 
 <a id="taskboard-events"></a>
 

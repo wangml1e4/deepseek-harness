@@ -387,6 +387,7 @@ describe('taskctl', () => {
       ['patrol', 'run', 'workspace-1', '--issue', 'TASK-7'],
       ['patrol', 'run', 'workspace-1'],
       ['patrol', 'issue', 'TASK-7'],
+      ['patrol', 'cleanup', 'TASK-7', '--workspace', 'workspace-1', '--confirm'],
     ]) {
       expect((await run(command, fetchImplementation)).exitCode).toBe(0)
     }
@@ -417,6 +418,9 @@ describe('taskctl', () => {
       { method: 'taskboard/runPatrol', args: { input: { workspaceId: 'workspace-1', issue: 'TASK-7' } } },
       { method: 'taskboard/runPatrol', args: { input: { workspaceId: 'workspace-1' } } },
       { method: 'taskboard/patrolIssue', args: { reference: 'TASK-7' } },
+      { method: 'taskboard/removePatrolWorktree', args: { input: {
+        workspaceId: 'workspace-1', reference: 'TASK-7', confirmed: true,
+      } } },
     ])
   })
 
@@ -439,6 +443,7 @@ describe('taskctl', () => {
       [['relation', 'add', 'TASK-1', '--type', 'relates', '--issue', 'TASK-2', '--if-version', '1'], 'Invalid --type'],
       [['patrol', 'update', 'workspace-1', '--enabled', 'yes', '--if-version', '1'], 'Invalid --enabled'],
       [['patrol', 'update', 'workspace-1', '--interval', '10m', '--if-version', '1'], 'Invalid --interval'],
+      [['patrol', 'cleanup', 'TASK-1', '--workspace', 'workspace-1'], 'Option --confirm is required'],
     ] as const) {
       const result = await run([...argv], unreachableFetch)
       expect(result.exitCode).toBe(2)

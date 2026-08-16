@@ -160,9 +160,25 @@ export interface TaskboardPatrolTriggerInput {
   readonly issue?: IssueReference
 }
 
+/** Explicit request to remove one safe physical Patrol worktree. */
+export interface TaskboardPatrolWorktreeRemovalInput {
+  readonly workspaceId: WorkspaceId
+  readonly reference: IssueReference
+  readonly confirmed: boolean
+}
+
+/** Preserved Development Context identities returned after worktree removal. */
+export interface TaskboardPatrolWorktreeRemovalValue {
+  readonly worktreePath: string
+  readonly branch: string
+  readonly resultCommit: string
+}
+
 /** Persistent Session/Git binding and independent review evidence for one Issue. */
 export interface TaskboardPatrolIssueValue {
   readonly context: PatrolDevelopmentContext | null
+  /** Whether the recorded physical worktree directory is currently present. */
+  readonly worktreePresent: boolean
   /** Base Branch to result-commit evidence, or null before a committed handoff. */
   readonly diff: TaskboardPatrolDiffValue | null
   readonly reviews: readonly PatrolReview[]

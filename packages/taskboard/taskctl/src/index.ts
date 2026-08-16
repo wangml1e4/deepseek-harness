@@ -52,6 +52,7 @@ const COMMAND_OPTIONS = new Map<string, ReadonlySet<string>>([
   ])],
   ['patrol run', new Set(['issue', 'json'])],
   ['patrol issue', new Set(['json'])],
+  ['patrol cleanup', new Set(['workspace', 'confirm', 'json'])],
 ])
 
 type OptionValue = string | true
@@ -337,6 +338,14 @@ async function execute(parsed: ParsedTaskctlArgs, overrides: TaskctlRunOptions):
     case 'patrol issue':
       expectOperands(parsed, 1)
       return client.call('patrolIssue', { reference: parsed.operands[0] })
+    case 'patrol cleanup':
+      expectOperands(parsed, 1)
+      if (parsed.options.confirm !== true) throw usageError('Option --confirm is required')
+      return client.call('removePatrolWorktree', { input: {
+        workspaceId: requiredOption(parsed, 'workspace'),
+        reference: parsed.operands[0],
+        confirmed: true,
+      } })
     /* v8 ignore next 2 -- COMMAND_OPTIONS rejects every command absent from the exhaustive switch. */
     default:
       throw new Error(`Unhandled taskctl command ${JSON.stringify(command)}`)

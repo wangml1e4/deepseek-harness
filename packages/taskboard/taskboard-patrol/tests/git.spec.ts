@@ -102,6 +102,12 @@ describe('PatrolGit', () => {
       expect(diff.stat).toContain('value.txt')
       await expect(patrol.isAncestor(fixture.workspace, result.head, context.branch)).resolves.toBe(true)
       await expect(patrol.isAncestor(fixture.workspace, result.head, 'main')).resolves.toBe(false)
+      await expect(patrol.worktreePresent(context)).resolves.toBe(true)
+      await patrol.removeWorktree(fixture.workspace, context)
+      await expect(patrol.worktreePresent(context)).resolves.toBe(false)
+      expect(git(fixture.root, 'show-ref', '--verify', `refs/heads/${context.branch}`)).not.toBe('')
+      await expect(patrol.ensureWorktree(fixture.workspace, context)).resolves.toEqual(first)
+      await expect(patrol.result(context)).resolves.toMatchObject({ head: result.head, clean: true })
     } finally {
       await fiber.dispose()
     }
@@ -195,11 +201,16 @@ describe('PatrolGit', () => {
       await patrol.ensureWorktree(fixture.workspace, context)
       const alias = join(fixture.worktrees, 'aliased-worktree')
       await symlink(context.worktreePath, alias)
+      await expect(patrol.worktreePresent({ worktreePath: alias })).resolves.toBe(false)
       await expect(patrol.ensureWorktree(fixture.workspace, {
         ...context,
         worktreePath: alias,
       })).rejects.toThrow(`at "${context.worktreePath}"`)
       await expect(patrol.result({ ...context, baseBranch: 'missing-base' })).rejects.toThrow('git diff --quiet')
+      await expect(patrol.removeWorktree(fixture.workspace, {
+        ...context,
+        worktreePath: alias,
+      })).rejects.toThrow(context.worktreePath)
     } finally {
       await fiber.dispose()
     }

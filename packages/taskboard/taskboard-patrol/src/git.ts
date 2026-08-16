@@ -1,6 +1,6 @@
 /** Local-only Git operations used by Taskboard Patrol execution. */
 
-import { mkdir, realpath, stat } from 'node:fs/promises'
+import { lstat, mkdir, realpath, stat } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { IssueIdentifier, PatrolDevelopmentContext } from '@deepseek-ai/dsh-taskboard'
@@ -172,6 +172,39 @@ export class PatrolGit {
       throw new Error(`Patrol Session directory "${sessionCwd}" does not exist in the Issue worktree`)
     }
     return { root: context.worktreePath, sessionCwd }
+  }
+
+  /**
+   * Remove one exact Issue worktree without deleting its local branch.
+   * @param workspacePath - Registered Workspace checkout.
+   * @param context - Stored Issue branch and worktree identity.
+   * @returns when Git has removed the verified worktree; rejects an absent, aliased, or mismatched binding.
+   */
+  async removeWorktree(
+    workspacePath: string,
+    context: Pick<PatrolDevelopmentContext, 'branch' | 'worktreePath'>,
+  ): Promise<void> {
+    const repository = await this.repository(workspacePath)
+    const actualRoot = await this.text(context.worktreePath, ['rev-parse', '--show-toplevel'])
+    const actualBranch = await this.text(context.worktreePath, ['branch', '--show-current'])
+    if (actualRoot !== context.worktreePath || actualBranch !== context.branch) {
+      throw new Error(
+        `Patrol worktree "${context.worktreePath}" is bound to branch "${actualBranch}" at "${actualRoot}", expected "${context.branch}"`,
+      )
+    }
+    await this.text(repository.root, ['worktree', 'remove', context.worktreePath])
+  }
+
+  /**
+   * Check whether the exact recorded worktree path is a physical directory.
+   * @param context - Stored worktree identity.
+   * @returns true for a physical directory and false for an absent or symbolic-link path.
+   */
+  async worktreePresent(context: Pick<PatrolDevelopmentContext, 'worktreePath'>): Promise<boolean> {
+    return await lstat(context.worktreePath).then(value => value.isDirectory(), (error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false
+      throw error
+    })
   }
 
   /**

@@ -1788,6 +1788,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
   let nextTaskboardAttachment = 2
   let nextTaskboardActivity = taskboardActivities.length + 1
   let nextTaskboardRelation = taskboardRelations.length + 1
+  let reviewWorktreePresent = !options.empty
   // Registry-global archive set mirroring the host: archived sessions keep
   // their workspace accounting slot and only grouping surfaces hide them.
   const archivedSessionIds: SessionId[] = []
@@ -3761,7 +3762,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     patrolIssue(reference: string) {
       const issue = findTaskboardIssue(reference)
       if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
-      if (issue.id !== 'fx-issue-2') return taskboardOk({ context: null, diff: null, reviews: [] })
+      if (issue.id !== 'fx-issue-2') {
+        return taskboardOk({ context: null, worktreePresent: false, diff: null, reviews: [] })
+      }
       return taskboardOk({
         context: {
           issueId: issue.id,
@@ -3779,6 +3782,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           createdAt: '2026-08-15T08:20:00.000Z',
           updatedAt: '2026-08-15T09:00:00.000Z',
         },
+        worktreePresent: reviewWorktreePresent,
         diff: {
           stat: ' packages/taskboard/taskboard-sqlite/src/index.ts | 4 ++++',
           patch: 'diff --git a/packages/taskboard/taskboard-sqlite/src/index.ts b/packages/taskboard/taskboard-sqlite/src/index.ts\n+// Keep the mutation and Activity write in one transaction.',
@@ -3794,6 +3798,24 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           risks: ['Platform CI remains pending'],
           createdAt: '2026-08-15T08:50:00.000Z',
         }],
+      })
+    },
+    removePatrolWorktree(input: { workspaceId: WorkspaceId; reference: string; confirmed: boolean }) {
+      const issue = findTaskboardIssue(input.reference)
+      if (issue === undefined || issue.workspaceId !== input.workspaceId) {
+        return taskboardReject('issue_not_found', `Issue '${input.reference}' does not exist in this Workspace`)
+      }
+      if (!input.confirmed) {
+        return taskboardReject('patrol_worktree_confirmation_required', 'Explicit confirmation is required')
+      }
+      if (issue.id !== 'fx-issue-2' || !reviewWorktreePresent) {
+        return taskboardReject('patrol_context_missing', `Issue '${input.reference}' has no physical Patrol worktree`)
+      }
+      reviewWorktreePresent = false
+      return taskboardOk({
+        worktreePath: '/tmp/dsh-taskboard/fx-ws-fixture/fix-2',
+        branch: 'dsh-task/fix-2',
+        resultCommit: '0123456789abcdef',
       })
     },
   }
@@ -3857,6 +3879,9 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/updatePatrol': return Promise.resolve(taskboardRemotes.updatePatrol(args.input as never))
         case 'taskboard/runPatrol': return Promise.resolve(taskboardRemotes.runPatrol(args.input as never))
         case 'taskboard/patrolIssue': return Promise.resolve(taskboardRemotes.patrolIssue(args.reference as string))
+        case 'taskboard/removePatrolWorktree': {
+          return Promise.resolve(taskboardRemotes.removePatrolWorktree(args.input as never))
+        }
         default:
           return Promise.reject(new Error(`fixture connection RPC endpoint ${JSON.stringify(endpoint)} is unavailable`))
       }

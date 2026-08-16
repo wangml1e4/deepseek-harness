@@ -5,8 +5,8 @@ English | [中文](README.zh.md)
 Host execution support for Workspace Taskboard Patrol. `ctx.taskboardPatrol` turns an already durable `PatrolAttempt` into one persistent Development Context and one ordinary visible Harness Session.
 
 - A never-bound Issue captures the selected local Base Branch, Agent Preset, provider, model, reasoning effort, and Permission Preset. A returned Issue reuses those values instead of reading later Policy changes.
-- Each Issue owns one `dsh-task/<issue-identifier>` branch and one permanent Host-managed worktree. The Session cwd preserves the Workspace's relative directory when the Workspace is below the repository root.
-- The Git adapter uses argument-vector local commands only: repository/ref inspection, `worktree add`, ancestry checks, status, diff, and commit reads. It contains no fetch, pull, push, merge, reset, branch deletion, worktree removal, or pull-request operation.
+- Each Issue owns one `dsh-task/<issue-identifier>` branch and one persistent Host-managed worktree binding. The physical worktree is created or restored at that exact path when Patrol resumes the Issue. The Session cwd preserves the Workspace's relative directory when the Workspace is below the repository root.
+- The Git adapter uses argument-vector local commands only: repository/ref inspection, `worktree add`, guarded `worktree remove`, ancestry checks, status, diff, and commit reads. It contains no fetch, pull, push, merge, reset, branch deletion, automatic worktree removal, or pull-request operation.
 - A reserved Session id may be created after provisioning failed before its first persistence. Once first persistence is recorded, a cold Session resumes that exact id and a missing Session fails instead of creating a replacement. A live bound Session is borrowed only while idle and only when its cwd and Agent Preset still match.
 - New Sessions join the selected Agent Preset before publication, record their Permission Preset, retain logged model selection on resume, attach to the owning Workspace, and flush before execution begins.
 - Each execution lease answers every tool approval request with `rejected`, records the requested tool and reason, and cancels that turn. The Patrol coordinator owns the resulting Attempt and Issue writeback.
@@ -16,6 +16,7 @@ Host execution support for Workspace Taskboard Patrol. `ctx.taskboardPatrol` tur
 - The implementation Agent must leave a clean committed Base Branch diff. A separate persistent Reviewer Session receives that committed diff, inherits the saved model composition, exposes only its structured review-submission tool, and always uses read-only sandboxing with approval policy `never`. The implementation Session then receives the durable findings for one correction and verification turn before human handoff.
 - Implementation, Reviewer, correction, and recovery turns collect Provider-reported usage from canonical Session events without double-counting raw and assembled records. A terminal model-stream `finish` failure is retained separately from orchestration errors, and the Taskboard Provider aggregates completed Attempt usage into permanent Run history.
 - `configuration()` discovers local branches, mountable Agent Presets, live provider/model/reasoning choices, and existing Permission Presets. `updatePolicy()` validates those Host-owned choices before the version-checked save. `trigger()` starts a manual Run without enabling the fixed schedule.
+- `removeWorktree()` requires explicit confirmation, a clean physical worktree, and a recorded result commit already integrated into the fixed Base Branch. It removes only the physical directory; the Issue branch, Session binding, Development Context, and Patrol history remain, and a later returned Issue can restore the same path.
 
 The scheduler is in-process: while the Host is stopped it cannot run. The Taskboard Policy retains cadence; startup finishes active-Run recovery first, then consumes at most one overdue trigger.
 
@@ -79,5 +80,5 @@ Append-only after the recovered implementation Session's existing reusable prefi
 
 ## Known Limitations and Deferred Work
 
-- It supports only local Git repositories and permanent local worktrees; remote fetch, push, pull-request, merge, and cleanup operations are deliberately absent.
+- It supports only local Git repositories; remote fetch, push, pull-request, merge, and branch cleanup operations are deliberately absent. Physical worktree removal is an explicit guarded user operation and never runs from Patrol scheduling or review acceptance.
 - Version one never publishes Taskboard Issues to `deepseek-ai/deepseek-harness` GitHub Issues.

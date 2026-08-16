@@ -319,6 +319,7 @@ function mountDetails(current: TaskboardSnapshot) {
     removeRelation: vi.fn(async () => ({ ok: true as const })),
     updatePatrol: vi.fn(async () => ({ ok: true as const })),
     runPatrol: vi.fn(async () => ({ ok: true as const })),
+    removePatrolWorktree: vi.fn(async () => ({ ok: true as const })),
     openSession: vi.fn(),
     close: vi.fn(),
     t,
@@ -458,6 +459,7 @@ describe('TaskboardDetails', () => {
           createdAt: '2026-08-16T00:00:00.000Z',
           updatedAt: '2026-08-16T00:00:00.000Z',
         },
+        worktreePresent: true,
         diff: {
           stat: ' src/index.ts | 1 +',
           patch: 'diff --git a/src/index.ts b/src/index.ts\n+export const ready = true',
@@ -482,6 +484,13 @@ describe('TaskboardDetails', () => {
     expect(screen.getByText(/export const ready = true/)).toBeTruthy()
     expect(screen.getByText('Add the missing regression test.')).toBeTruthy()
     expect(screen.getByText(/Inspected diff/)).toBeTruthy()
+    expect(screen.getByText('/worktrees/dsh-1')).toBeTruthy()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    fireEvent.click(screen.getByRole('button', { name: '移除 worktree' }))
+    expect(view.props.removePatrolWorktree).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '移除 worktree' }))
+    expect(view.props.removePatrolWorktree).toHaveBeenCalledWith(true)
+    confirm.mockRestore()
     fireEvent.click(screen.getByRole('button', { name: '标记 done' }))
     expect(view.props.updateIssue).toHaveBeenCalledWith(selected, { status: 'done' })
     fireEvent.change(screen.getByPlaceholderText('退回 Agent 的具体修改意见'), { target: { value: 'Please cover Windows.' } })

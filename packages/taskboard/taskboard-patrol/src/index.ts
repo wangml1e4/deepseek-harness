@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {
   Issue,
+  IssueReference,
   PatrolAttempt,
   PatrolDevelopmentContext,
   PatrolPolicy,
@@ -39,6 +40,26 @@ export {
   type PatrolWorktree,
 } from './git.ts'
 export type { TriggerPatrolRunInput } from './coordinator.ts'
+
+/** Explicit user request to remove one safely integrated Issue worktree. */
+export interface RemovePatrolWorktreeInput {
+  /** Registered Workspace that owns the Issue. */
+  readonly workspaceId: WorkspaceId
+  /** Opaque Issue id or human-readable identifier. */
+  readonly reference: IssueReference
+  /** Explicit acknowledgement that the physical worktree will be removed. */
+  readonly confirmed: boolean
+}
+
+/** Preserved Development Context identities returned after physical worktree removal. */
+export interface PatrolWorktreeRemoval {
+  /** Removed physical worktree path. */
+  readonly worktreePath: string
+  /** Preserved local Issue branch. */
+  readonly branch: string
+  /** Preserved result commit already recorded for the Issue. */
+  readonly resultCommit: string
+}
 
 /** Defaults applied to local Git subprocess calls. */
 const DEFAULT_GIT_GRACE_MS = 5000
@@ -403,6 +424,63 @@ export class TaskboardPatrolService extends Service {
    */
   diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff> {
     return this.git.diff(context, commit)
+  }
+
+  /**
+   * Read whether one recorded physical Issue worktree is currently present.
+   * @param context - persistent Development Context.
+   * @returns true only for the exact physical directory.
+   */
+  worktreePresent(context: PatrolDevelopmentContext): Promise<boolean> {
+    return this.git.worktreePresent(context)
+  }
+
+  /**
+   * Remove one exact physical Issue worktree while preserving its branch and durable binding.
+   * @param input - Workspace, Issue lookup, and explicit confirmation.
+   * @returns preserved branch, path, and result-commit identities; rejects unless the worktree is
+   * clean and its result commit is integrated.
+   */
+  async removeWorktree(input: RemovePatrolWorktreeInput): Promise<PatrolWorktreeRemoval> {
+    if (!input.confirmed) {
+      throw new TaskboardError(
+        'patrol_worktree_confirmation_required',
+        'Explicit confirmation is required to remove a Patrol worktree',
+      )
+    }
+    const workspace = this.requireWorkspace(input.workspaceId)
+    const issue = await this.ctx.taskboard.getIssue(input.reference)
+    if (issue === undefined || issue.workspaceId !== input.workspaceId) {
+      throw new TaskboardError('issue_not_found', `Issue "${input.reference}" does not exist in this Workspace`)
+    }
+    const context = await this.ctx.taskboard.getPatrolDevelopmentContext(issue.id)
+    if (context === undefined || context.resultCommit === null) {
+      throw new TaskboardError('patrol_context_missing', `Issue "${issue.identifier}" has no completed Development Context`)
+    }
+    if (!(await this.git.worktreePresent(context))) {
+      throw new TaskboardError(
+        'patrol_worktree_missing',
+        `Issue "${issue.identifier}" physical worktree is not present`,
+      )
+    }
+    if (!(await this.git.result(context)).clean) {
+      throw new TaskboardError(
+        'patrol_worktree_not_clean',
+        `Issue "${issue.identifier}" worktree has uncommitted changes`,
+      )
+    }
+    if (!(await this.git.isAncestor(workspace.path, context.resultCommit, context.baseBranch))) {
+      throw new TaskboardError(
+        'patrol_worktree_not_integrated',
+        `Issue "${issue.identifier}" result commit is not integrated into Base Branch "${context.baseBranch}"`,
+      )
+    }
+    await this.git.removeWorktree(workspace.path, context)
+    return {
+      worktreePath: context.worktreePath,
+      branch: context.branch,
+      resultCommit: context.resultCommit,
+    }
   }
 
   /**

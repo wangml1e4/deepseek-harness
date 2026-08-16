@@ -2270,7 +2270,7 @@ export interface Config {
 }
 ```
 
-来源：[`packages/taskboard/taskboard-patrol/src/index.ts:48`](../packages/taskboard/taskboard-patrol/src/index.ts)
+来源：[`packages/taskboard/taskboard-patrol/src/index.ts:69`](../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="deepseek-aidsh-taskboard-sqlite"></a>
 

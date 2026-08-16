@@ -165,7 +165,12 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       startedAt: '2026-08-16T00:00:00.000Z',
       endedAt: null,
     }),
-    patrolIssue: () => ok({ context: null, diff: null, reviews: [] }),
+    patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [] }),
+    removePatrolWorktree: input => ok({
+      worktreePath: `/worktrees/${input.reference}`,
+      branch: `dsh-task/${input.reference}`,
+      resultCommit: 'abc123',
+    }),
     ...overrides,
   }
 }
@@ -776,5 +781,46 @@ describe('TaskboardController', () => {
     await expect(controller.runPatrol()).resolves.toEqual({ ok: true })
     expect(runPatrol).toHaveBeenLastCalledWith({ workspaceId: 'ws' })
     expect(controller.getSnapshot().patrol?.runs).toHaveLength(1)
+  })
+
+  it('removes the selected Issue worktree while retaining its visible Development Context', async () => {
+    const context = {
+      issueId: 'issue-1' as never,
+      sessionId: 'session-implementation' as never,
+      sessionStartedAt: '2026-08-16T00:00:00.000Z',
+      baseBranch: 'main',
+      branch: 'dsh-task/ws-1',
+      worktreePath: '/worktrees/ws-1',
+      agentPreset: 'coding',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      reasoningEffort: null,
+      permissionPreset: 'workspace-write',
+      resultCommit: 'abc123',
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:10:00.000Z',
+    }
+    const removePatrolWorktree = vi.fn(() => ok({
+      worktreePath: context.worktreePath,
+      branch: context.branch,
+      resultCommit: context.resultCommit,
+    }))
+    const controller = new TaskboardController(remote({
+      patrolIssue: () => ok({ context, worktreePresent: true, diff: null, reviews: [] }),
+      removePatrolWorktree,
+    }))
+    await controller.activate('ws' as never)
+    await controller.selectIssue('issue-1' as never)
+
+    await expect(controller.removePatrolWorktree(true)).resolves.toEqual({ ok: true })
+    expect(removePatrolWorktree).toHaveBeenCalledWith({
+      workspaceId: 'ws', reference: 'issue-1', confirmed: true,
+    })
+    expect(controller.getSnapshot().patrolIssue).toEqual({
+      context,
+      worktreePresent: false,
+      diff: null,
+      reviews: [],
+    })
   })
 })

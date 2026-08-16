@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry, { type Agent, type AgentFactory } from '@deepseek-ai/dsh-agent'
 import { IssueId, IssueIdentifier, PatrolAttemptId, PatrolRunId } from '@deepseek-ai/dsh-taskboard'
-import type { PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
+import type { Issue, PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import SessionStore from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -48,6 +48,7 @@ describe('TaskboardPatrolService', () => {
     const attached: string[] = []
     const permissionSelections: string[] = []
     const mountedPresets: string[] = []
+    let storedIssue: Issue | undefined
     let binding: PatrolDevelopmentContext | undefined
     const workspace = {
       id: workspaceId,
@@ -86,6 +87,7 @@ describe('TaskboardPatrolService', () => {
     ctx.provide('permissionPresets', permissionPresets as never)
     ctx.provide('sessionPersistence', { list: () => Promise.resolve([]) } as never)
     ctx.provide('taskboard', {
+      getIssue: () => Promise.resolve(storedIssue),
       getPatrolDevelopmentContext: () => Promise.resolve(binding),
       bindPatrolDevelopmentContext: (input: { context: Omit<
         PatrolDevelopmentContext,
@@ -158,6 +160,7 @@ describe('TaskboardPatrolService', () => {
         createdAt: '2026-08-16T00:00:00.000Z',
         updatedAt: '2026-08-16T00:00:00.000Z',
       }
+      storedIssue = issue
       const attempt = {
         id: attemptId,
         runId: PatrolRunId('run-patrol-service'),
@@ -262,6 +265,55 @@ describe('TaskboardPatrolService', () => {
       }, issue, policy)).rejects.toThrow(
         `bound Patrol Session "${binding!.sessionId}" cannot be resumed from persistence`,
       )
+
+      await writeFile(join(binding!.worktreePath, 'project', 'result.txt'), 'complete\n')
+      git(binding!.worktreePath, 'add', '.')
+      git(binding!.worktreePath, 'commit', '-m', 'complete issue')
+      const result = await ctx.taskboardPatrol.result(binding!)
+      binding = { ...binding!, resultCommit: result.head }
+
+      await expect(ctx.taskboardPatrol.removeWorktree({
+        workspaceId,
+        reference: issue.id,
+        confirmed: true,
+      })).rejects.toMatchObject({ code: 'patrol_worktree_not_integrated' })
+      await expect(stat(binding.worktreePath)).resolves.toMatchObject({})
+
+      git(fixture.workspace, 'merge', '--ff-only', binding.branch)
+
+      await writeFile(join(binding.worktreePath, 'project', 'result.txt'), 'dirty\n')
+      await expect(ctx.taskboardPatrol.removeWorktree({
+        workspaceId,
+        reference: issue.id,
+        confirmed: true,
+      })).rejects.toMatchObject({ code: 'patrol_worktree_not_clean' })
+      await expect(stat(binding.worktreePath)).resolves.toMatchObject({})
+      await writeFile(join(binding.worktreePath, 'project', 'result.txt'), 'complete\n')
+
+      await expect(ctx.taskboardPatrol.removeWorktree({
+        workspaceId,
+        reference: issue.id,
+        confirmed: false,
+      })).rejects.toMatchObject({ code: 'patrol_worktree_confirmation_required' })
+      await expect(stat(binding.worktreePath)).resolves.toMatchObject({})
+
+      await expect(ctx.taskboardPatrol.removeWorktree({
+        workspaceId,
+        reference: issue.id,
+        confirmed: true,
+      })).resolves.toEqual({
+        worktreePath: binding.worktreePath,
+        branch: binding.branch,
+        resultCommit: result.head,
+      })
+      await expect(stat(binding.worktreePath)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(git(fixture.workspace, 'show-ref', '--verify', `refs/heads/${binding.branch}`)).not.toBe('')
+      await expect(ctx.taskboard.getPatrolDevelopmentContext(issue.id)).resolves.toEqual(binding)
+      await expect(ctx.taskboardPatrol.removeWorktree({
+        workspaceId,
+        reference: issue.id,
+        confirmed: true,
+      })).rejects.toMatchObject({ code: 'patrol_worktree_missing' })
     } finally {
       await patrolFiber.dispose()
       await toolsFiber.dispose()

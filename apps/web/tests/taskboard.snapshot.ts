@@ -5,7 +5,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { installAssembledBootEnv, mountAssembledApp, REFRESHING_GOLDEN } from './assembled-boot.ts'
 
 const EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/taskboard/workspace-taskboard.expected.txt')
@@ -93,8 +93,14 @@ describe('assembled Workspace Taskboard', () => {
     )
     const reviewPanel = reviewFinding.closest('aside')
     if (reviewPanel === null) throw new Error('Reviewer evidence must render in the right column')
+    const worktreePath = within(reviewPanel).getByText('/tmp/dsh-taskboard/fx-ws-fixture/fix-2').textContent
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(within(reviewPanel).getByRole('button', { name: 'Remove worktree' }))
+    await within(reviewPanel).findByText('The physical worktree is removed. The Issue branch, Session, and history remain.')
+    confirm.mockRestore()
     const review = [
       `session=${within(reviewPanel).getByRole('button', { name: 'Open Session fx-beta' }).textContent}`,
+      `worktree=${worktreePath}|cleanup=${within(reviewPanel).queryByRole('button', { name: 'Remove worktree' }) === null ? 'removed' : 'available'}`,
       `diff=${within(reviewPanel).getByText(/packages\/taskboard\/taskboard-sqlite\/src\/index\.ts \| 4 \+\+\+\+/).textContent}|patch=${reviewPanel.textContent?.includes('Keep the mutation and Activity write in one transaction.') ? 'visible' : '<absent>'}`,
       `review=${['Reviewer requested changes', 'Verification:', 'Remaining risks:'].filter(label => reviewPanel.textContent?.includes(label)).join('|')}`,
       `human=${['Return to todo', 'Mark done'].map(label => within(reviewPanel).getByRole('button', { name: label }).textContent).join('|')}`,

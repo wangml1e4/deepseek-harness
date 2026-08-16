@@ -28,6 +28,10 @@ export type TaskboardErrorCode =
   | 'patrol_issue_ineligible'
   | 'patrol_context_exists'
   | 'patrol_context_missing'
+  | 'patrol_worktree_confirmation_required'
+  | 'patrol_worktree_missing'
+  | 'patrol_worktree_not_clean'
+  | 'patrol_worktree_not_integrated'
   | 'patrol_review_exists'
   | 'patrol_policy_invalid'
 

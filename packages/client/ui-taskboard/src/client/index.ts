@@ -78,6 +78,7 @@ export function apply(ctx: ClientContext): void {
     removeRelation: relation => controller.removeRelation(relation, USER_ACTOR),
     updatePatrol: patch => controller.updatePatrol(patch),
     runPatrol: issue => controller.runPatrol(issue),
+    removePatrolWorktree: confirmed => controller.removePatrolWorktree(confirmed),
     close: () => {
       controller.clearSelection()
       ctx.layout.closeDetails()

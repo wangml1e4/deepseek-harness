@@ -271,10 +271,23 @@ describe('FixtureApiClient Taskboard Remote', () => {
     expect(run.value.result).toBe('no_eligible_issue')
     const evidence = await callRemote<{
       ok: true
-      value: { context: { sessionId: string }; reviews: { verdict: string }[] }
+      value: { context: { sessionId: string }; worktreePresent: boolean; reviews: { verdict: string }[] }
     }>(rpc, 'taskboard/patrolIssue', { reference: 'FIX-2' })
     expect(evidence.value).toMatchObject({
       context: { sessionId: 'fx-beta' },
+      worktreePresent: true,
+      reviews: [{ verdict: 'changes_requested' }],
+    })
+    await callRemote(rpc, 'taskboard/removePatrolWorktree', { input: {
+      workspaceId: 'fx-ws-fixture', reference: 'FIX-2', confirmed: true,
+    } })
+    const removed = await callRemote<{
+      ok: true
+      value: { context: { sessionId: string }; worktreePresent: boolean; reviews: { verdict: string }[] }
+    }>(rpc, 'taskboard/patrolIssue', { reference: 'FIX-2' })
+    expect(removed.value).toMatchObject({
+      context: { sessionId: 'fx-beta' },
+      worktreePresent: false,
       reviews: [{ verdict: 'changes_requested' }],
     })
   })

@@ -34,4 +34,5 @@ Open only the relevant section of [references/cli.md](references/cli.md) when co
 - Add only relations needed by the work. Use `blocks` and `blocked_by` for dependencies.
 - Let `taskctl` read `CODEX_THREAD_ID` for write attribution. Do not fabricate another Session identity.
 - Read or change Patrol settings and start a manual Run only when the user explicitly asks. Do not reproduce Patrol claim or lifecycle transactions with Issue commands.
+- Remove a Patrol worktree only when the user explicitly requests it. Pass `--confirm` once; the Host rejects a dirty or unintegrated worktree and preserves its branch, Session binding, Issue history, and Patrol history.
 - A Host outage, invalid response, or persistent conflict ends the operation; do not loop.

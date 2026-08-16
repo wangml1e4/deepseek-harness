@@ -6,7 +6,7 @@ English | [中文](README.zh.md)
 
 ## Commands and output
 
-The CLI covers Workspace metadata; Issue list, get, create, update, move, archive, and restore; append-only Comments and Activity; attachment upload, list, download, and confirmed deletion; dependency relations; and Patrol policy, history, manual Run, and Issue evidence operations. Run `taskctl <resource> <action>` with the option reference bundled in [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md).
+The CLI covers Workspace metadata; Issue list, get, create, update, move, archive, and restore; append-only Comments and Activity; attachment upload, list, download, and confirmed deletion; dependency relations; and Patrol policy, history, manual Run, Issue evidence, and confirmed worktree cleanup operations. Run `taskctl <resource> <action>` with the option reference bundled in [`@deepseek-ai/dsh-skill-manage-taskboard`](../skill-manage-taskboard/README.md).
 
 Each invocation writes exactly one JSON object. Success uses `{ "schemaVersion": 1, "result": ... }`; failure uses `{ "schemaVersion": 1, "error": { "code", "message" } }`.
 
@@ -20,7 +20,7 @@ Each invocation writes exactly one JSON object. Success uses `{ "schemaVersion":
 
 The default Host origin is `http://127.0.0.1:3080`; `DSH_TASKBOARD_URL` overrides it. Writes use `CODEX_THREAD_ID` as the actor id when available. `DSH_TASKBOARD_ACTOR_TYPE`, `DSH_TASKBOARD_ACTOR_ID`, and `DSH_TASKBOARD_ACTOR_NAME` provide explicit attribution overrides.
 
-Every competing mutation requires `--if-version`. The CLI never retries automatically and has no Issue deletion command.
+Every competing mutation requires `--if-version`. `taskctl patrol cleanup ISSUE_ID --workspace WORKSPACE_ID --confirm` requests physical worktree removal; the Host rejects dirty or unintegrated worktrees and preserves the Issue branch, Session binding, and history. The CLI never retries automatically and has no Issue deletion command.
 
 ## Attribution
 
