@@ -59,11 +59,15 @@ describe('assembled Workspace Taskboard', () => {
     await within(detailPanel).findByText('taskboard-preview.png')
     fireEvent.click(within(detailPanel).getByRole('button', { name: 'Preview taskboard-preview.png' }))
     await within(detailPanel).findByRole('img', { name: 'taskboard-preview.png' })
+    const dependency = [
+      `FIX-2:${detailPanel.textContent?.includes('Waiting for predecessor completion') ? 'predecessor_not_done' : '<absent>'}`,
+      `FIX-3:${detailPanel.textContent?.includes('Waiting for code integration') ? 'waiting_for_integration' : '<absent>'}`,
+    ].join('|')
     const detail = [
       `issue=${detailPanel.textContent?.includes('FIX-1') ? 'FIX-1' : '<absent>'}`,
       `sections=${['Attachments', 'Comments', 'Dependencies', 'Activity'].filter(label => detailPanel.textContent?.includes(label)).join(',')}`,
       `attachment=${detailPanel.textContent?.includes('taskboard-preview.png') ? 'taskboard-preview.png' : '<absent>'}|preview=${within(detailPanel).queryByRole('img', { name: 'taskboard-preview.png' }) === null ? '<absent>' : 'visible'}`,
-      `dependency=${detailPanel.textContent?.includes('FIX-2') ? 'FIX-2' : '<absent>'}`,
+      `dependency=${dependency}`,
       `archive=${within(detailPanel).getByRole('button', { name: 'Archive Issue' }).textContent}`,
     ].join('\n')
 

@@ -1779,10 +1779,16 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     changes: [{ field: 'status', before: 'in_review', after: 'done' }],
     createdAt: '2026-08-15T10:00:00.000Z',
   }]
-  const taskboardRelations: FxTaskboardRelation[] = options.empty ? [] : [{
-    id: 'fx-relation-1', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-2',
-    createdAt: fixtureTaskboardTime,
-  }]
+  const taskboardRelations: FxTaskboardRelation[] = options.empty ? [] : [
+    {
+      id: 'fx-relation-1', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-2',
+      createdAt: fixtureTaskboardTime,
+    },
+    {
+      id: 'fx-relation-2', type: 'blocked_by', issueId: 'fx-issue-1', relatedIssueId: 'fx-issue-3',
+      createdAt: fixtureTaskboardTime,
+    },
+  ]
   let nextTaskboardIssue = 4
   let nextTaskboardComment = 2
   let nextTaskboardAttachment = 2
@@ -3762,8 +3768,20 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     patrolIssue(reference: string) {
       const issue = findTaskboardIssue(reference)
       if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
+      if (issue.id === 'fx-issue-1') {
+        return taskboardOk({
+          context: null,
+          worktreePresent: false,
+          diff: null,
+          reviews: [],
+          dependencyWaits: [
+            { issueId: 'fx-issue-2', reason: 'predecessor_not_done' },
+            { issueId: 'fx-issue-3', reason: 'waiting_for_integration' },
+          ],
+        })
+      }
       if (issue.id !== 'fx-issue-2') {
-        return taskboardOk({ context: null, worktreePresent: false, diff: null, reviews: [] })
+        return taskboardOk({ context: null, worktreePresent: false, diff: null, reviews: [], dependencyWaits: [] })
       }
       return taskboardOk({
         context: {
@@ -3783,6 +3801,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           updatedAt: '2026-08-15T09:00:00.000Z',
         },
         worktreePresent: reviewWorktreePresent,
+        dependencyWaits: [],
         diff: {
           stat: ' packages/taskboard/taskboard-sqlite/src/index.ts | 4 ++++',
           patch: 'diff --git a/packages/taskboard/taskboard-sqlite/src/index.ts b/packages/taskboard/taskboard-sqlite/src/index.ts\n+// Keep the mutation and Activity write in one transaction.',

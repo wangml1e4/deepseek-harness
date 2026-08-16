@@ -9,7 +9,7 @@ list=IssueStatusPriorityAssigneeDue date|FIX-1Ship Taskboard dashboardTodoHighUn
 issue=FIX-1
 sections=Attachments,Comments,Dependencies,Activity
 attachment=taskboard-preview.png|preview=visible
-dependency=FIX-2
+dependency=FIX-2:predecessor_not_done|FIX-3:waiting_for_integration
 archive=Archive Issue
 patrol=enabled
 interval=30m

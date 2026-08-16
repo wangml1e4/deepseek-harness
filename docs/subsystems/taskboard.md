@@ -42,7 +42,7 @@ Each Patrol-owned Issue has at most one permanent `PatrolDevelopmentContext`. It
 
 One active Attempt accepts one permanent `PatrolReview` from a distinct Reviewer Session. It records the reviewed preliminary commit, verdict, findings, verification evidence, risks, and completion time before the implementation Session performs its correction turn. A second review for the same Attempt rejects.
 
-`@deepseek-ai/dsh-taskboard-patrol` schedules enabled Policies from durable due instants and scans only `todo` Issues in manual order. It skips User assignments, explicit waits, and dependencies without a `done` result commit integrated into the Issue's fixed Base Branch. One reviewed handoff to `in_review` ends the Run; only an Attempt blocked by a rejected tool approval may continue scanning. Other failures block the claimed Issue and end the Run.
+`@deepseek-ai/dsh-taskboard-patrol` schedules enabled Policies from durable due instants and scans only `todo` Issues in manual order. It skips User assignments, explicit waits, unfinished dependencies, and dependencies without a `done` result commit integrated into the Issue's fixed Base Branch. One shared dependency inspection supplies exact integrated commits to the atomic claim and projects unfinished predecessors separately from completed work waiting for code integration. One reviewed handoff to `in_review` ends the Run; only an Attempt blocked by a rejected tool approval may continue scanning. Other failures block the claimed Issue and end the Run.
 
 The Patrol Consumer uses the managed subprocess service for a fixed local-only Git command set, never runs fetch, pull, push, PR, merge, reset, branch deletion, or automatic worktree removal, and preserves the Workspace-relative Session directory inside the Issue worktree. A confirmed manual removal rejects unless the exact physical worktree is clean and its recorded result commit is integrated into Base Branch; it preserves the branch, Session binding, Development Context, and history. Patrol resumes the exact Session, mounts the saved Agent and Permission Presets, and rejects unattended approvals. The implementation Agent must leave a clean committed change. A separate persistent Reviewer Session receives the bounded committed diff, exposes only its structured submission tool, and uses fixed read-only sandboxing with approval policy `never`; the original Session receives its durable findings for one correction turn before human review.
 
@@ -56,7 +56,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, confirmed physical-worktree removal, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Issue details use the right column on wide layouts and fill the AppFrame on narrow layouts; closing them restores the mounted Taskboard center and sidebar. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery evidence, aggregated token usage, and structured Provider diagnostics. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, confirmed physical-worktree removal, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Issue details use the right column on wide layouts and fill the AppFrame on narrow layouts; closing them restores the mounted Taskboard center and sidebar. Dependency rows distinguish a predecessor that is not done from completed work waiting for code integration. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery evidence, aggregated token usage, and structured Provider diagnostics. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
 
 ## Post-version-one GitHub plan
 
@@ -398,6 +398,14 @@ localBranches(workspaceId: WorkspaceId): Promise<readonly string[]>
 isAncestor(workspaceId: WorkspaceId, commit: string, baseBranch: string): Promise<boolean>
 
 /**
+ * Inspect every blocked-by predecessor against the Base Branch used by an Issue.
+ * @param issue - Successor whose dependency state is inspected.
+ * @param policy - Saved Workspace policy used when the Issue has no Development Context.
+ * @returns integrated commit evidence plus distinct unfinished and unintegrated waits.
+ */
+async inspectDependencies( issue: Issue, policy: PatrolPolicy, ): Promise<PatrolDependencyInspection>
+
+/**
  * Create or reuse one claim's permanent Development Context, worktree, and exact Session.
  * @param attempt - active durable claim.
  * @param issue - claimed Issue snapshot.
@@ -446,7 +454,7 @@ trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:190`](../../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:210`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -631,9 +639,9 @@ Host Remote adapter that keeps Workspace identity authoritative.
 @Remote('runPatrol') runPatrol(input: TaskboardPatrolTriggerInput): Promise<TaskboardRemoteResult<PatrolRun>>
 
 /**
- * Read one Issue's persistent implementation binding and Reviewer evidence.
+ * Read one Issue's persistent implementation, review, and dependency evidence.
  * @param reference - opaque id or human-readable identifier.
- * @returns explicit nullable binding and append-only reviews.
+ * @returns explicit nullable binding, append-only reviews, and unsatisfied predecessor reasons.
  */
 @Remote('patrolIssue') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>
 

@@ -3,8 +3,8 @@ import { Context } from '@deepseek-ai/cordis'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentFactory, AgentSetup, ModelSelection } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { IssueId, IssueIdentifier, PatrolAttemptId, PatrolRunId } from '@deepseek-ai/dsh-taskboard'
-import type { Issue, PatrolAttempt, PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
+import { IssueId, IssueIdentifier, PatrolAttemptId, PatrolRunId, RelationId } from '@deepseek-ai/dsh-taskboard'
+import type { Issue, IssueRelation, PatrolAttempt, PatrolDevelopmentContext, PatrolPolicy } from '@deepseek-ai/dsh-taskboard'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
@@ -100,6 +100,9 @@ interface Harness {
   readonly ctx: Context
   readonly workspaceId: WorkspaceId
   binding: PatrolDevelopmentContext | undefined
+  readonly dependencyIssues: Map<string, Issue>
+  readonly dependencyContexts: Map<string, PatrolDevelopmentContext>
+  readonly dependencyRelations: Map<string, readonly IssueRelation[]>
   persisted: string[]
   resumeLogged: ModelSelection | undefined
   resumeCwd: string
@@ -128,6 +131,9 @@ async function mountHarness(): Promise<Harness> {
     ctx,
     workspaceId,
     binding: undefined,
+    dependencyIssues: new Map(),
+    dependencyContexts: new Map(),
+    dependencyRelations: new Map(),
     persisted: [],
     resumeLogged: undefined,
     resumeCwd: '/worktrees/issue-a',
@@ -180,7 +186,12 @@ async function mountHarness(): Promise<Harness> {
   } as never)
   ctx.provide('subprocess', {} as never)
   ctx.provide('taskboard', {
-    getPatrolDevelopmentContext: () => Promise.resolve(harness.binding),
+    getIssue: (reference: string) => Promise.resolve(harness.dependencyIssues.get(reference)),
+    listRelations: (reference: string) => Promise.resolve(harness.dependencyRelations.get(reference) ?? []),
+    getPatrolDevelopmentContext: (reference: string) => Promise.resolve(
+      harness.dependencyContexts.get(reference)
+      ?? (harness.binding?.issueId === reference ? harness.binding : undefined),
+    ),
     bindPatrolDevelopmentContext: (input: {
       attemptId: PatrolAttempt['id']
       context: Omit<
@@ -290,6 +301,45 @@ async function mountHarness(): Promise<Harness> {
 }
 
 describe('TaskboardPatrolService rejection paths', () => {
+  it('distinguishes unfinished predecessors from done work awaiting Base Branch integration', async () => {
+    const harness = await mountHarness()
+    const anchor = issue('anchor', harness.workspaceId, 'todo')
+    const incomplete = issue('incomplete', harness.workspaceId, 'in_review')
+    const uncommitted = issue('uncommitted', harness.workspaceId, 'done')
+    const unintegrated = issue('unintegrated', harness.workspaceId, 'done')
+    const integrated = issue('integrated', harness.workspaceId, 'done')
+    for (const value of [incomplete, uncommitted, unintegrated, integrated]) {
+      harness.dependencyIssues.set(String(value.id), value)
+      if (value === uncommitted) continue
+      harness.dependencyContexts.set(String(value.id), context(value, `session-${value.id}`, {
+        resultCommit: String(value.id),
+      }))
+    }
+    harness.dependencyRelations.set(String(anchor.id), [
+      incomplete,
+      uncommitted,
+      unintegrated,
+      integrated,
+    ].map((value, index) => ({
+      id: RelationId(`relation-${String(index)}`),
+      type: 'blocked_by',
+      issueId: anchor.id,
+      relatedIssueId: value.id,
+      createdAt: NOW,
+    })))
+    harness.git.isAncestor.mockImplementation(async (_path: string, commit: string) => commit === 'integrated')
+
+    await expect(harness.ctx.taskboardPatrol.inspectDependencies(anchor, policy(harness.workspaceId)))
+      .resolves.toEqual({
+        dependencyCommits: { [integrated.id]: 'integrated' },
+        waits: [
+          { issueId: incomplete.id, reason: 'predecessor_not_done' },
+          { issueId: uncommitted.id, reason: 'waiting_for_integration' },
+          { issueId: unintegrated.id, reason: 'waiting_for_integration' },
+        ],
+      })
+  })
+
   it('retains direct-construction defaults when Cordis validation is bypassed', () => {
     const ctx = new Context()
     ctx.provide('subprocess', {} as never)

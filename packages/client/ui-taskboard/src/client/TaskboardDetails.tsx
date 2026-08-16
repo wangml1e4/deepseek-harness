@@ -292,7 +292,23 @@ export function TaskboardDetails({
           <h2>{t('details.relations')}</h2>
           {snapshot.relations.map((relation) => {
             const related = snapshot.issues.find(candidate => candidate.id === relation.relatedIssueId)
-            return <div className={css.relationRow} key={relation.id}><span><IconLinkOutline16 />{t(`relation.${relation.type}`)} <strong>{related?.identifier ?? relation.relatedIssueId}</strong></span><button type="button" className={css.ghostButton} onClick={() => { void removeRelation(relation) }}>{t('details.relation.remove')}</button></div>
+            const wait = snapshot.patrolIssue?.dependencyWaits.find(value => value.issueId === relation.relatedIssueId)
+            return (
+              <div className={css.relationRow} key={relation.id}>
+                <span>
+                  <IconLinkOutline16 />
+                  {t(`relation.${relation.type}`)}
+                  {' '}
+                  <strong>{related?.identifier ?? relation.relatedIssueId}</strong>
+                  {wait === undefined
+                    ? null
+                    : <small className={css.relationWait}>{t(`relation.wait.${wait.reason}`)}</small>}
+                </span>
+                <button type="button" className={css.ghostButton} onClick={() => { void removeRelation(relation) }}>
+                  {t('details.relation.remove')}
+                </button>
+              </div>
+            )
           })}
           <form className={css.relationForm} onSubmit={(event) => {
             event.preventDefault()

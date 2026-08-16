@@ -55,7 +55,7 @@ async function bench() {
       }),
       updatePatrol: () => ok({}),
       runPatrol: () => ok({}),
-      patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [] }),
+      patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [], dependencyWaits: [] }),
       removePatrolWorktree: () => ok({ worktreePath: '/tmp/taskboard', branch: 'dsh-task/WS-1', resultCommit: 'commit' }),
     },
   }

@@ -10,7 +10,7 @@ Workspace Taskboard Patrol 的 Host 执行支持。`ctx.taskboardPatrol` 将已�
 - 首次持久化前配置失败时，可以继续创建已经预留 id 的 Session。首次持久化一旦记录，冷 Session 只恢复该确切 id，Session 缺失时会失败且不创建替代对象。已存活的绑定 Session 仅在 idle 且 cwd 与 Agent Preset 仍匹配时借用。
 - 新 Session 在发布前加入所选 Agent Preset，记录 Permission Preset；恢复时保留日志中的模型选择；随后挂接到所属 Workspace，并在执行前 flush。
 - 每个执行 lease 会以 `rejected` 回答全部工具审批请求，记录请求工具及原因，并取消该轮。Patrol 协调器负责随后写回 Attempt 和 Issue。
-- 协调器根据持久化的 `nextDueAt` 调度已启用策略，只按手工顺序扫描 `todo` Issue，并跳过用户指派、明确等待，以及其 `done` 结果 commit 尚未集成到该 Issue 固定 Base Branch 的依赖项。
+- 协调器根据持久化的 `nextDueAt` 调度已启用策略，只按手工顺序扫描 `todo` Issue，并跳过用户指派、明确等待、尚未完成的依赖，以及其 `done` 结果 commit 尚未集成到该 Issue 固定 Base Branch 的依赖项。同一项检查既为原子认领提供 commit 证据，也为读取投影提供不同的 `predecessor_not_done` 或 `waiting_for_integration` 原因。
 - 一轮 Run 会在一个已审查 Issue 进入 `in_review` 后结束。只有因工具审批受阻的 Attempt 才能继续领取下一个合格 `todo`；其他任何故障都会阻塞已领取 Issue 并结束 Run。
 - 启动时，协调器会先恢复唯一的持久活跃 Run，再调度新的到期触发。活跃 Attempt 只能恢复其准确绑定 Session 和 worktree。已有 Reviewer 证据会被复用；否则恢复后的实现 Session 会先收到一轮恢复任务，再进入审查。恢复会先从准确持久化的实现 Session 和已记录的 Reviewer Session 重建 Attempt 统计，再追加恢复轮次。绑定缺失或不匹配时，Run 与 Attempt 会以失败结束，Issue 移至 `blocked`，并且绝不会创建替代 Session。
 - 实现 Agent 必须留下干净且已提交的 Base Branch diff。独立的持久 Reviewer Session 会接收该已提交 diff，继承已保存的模型组合，只暴露结构化审查提交工具，并固定使用只读沙箱与 `never` 审批策略。实现 Session 随后接收持久审查结论，执行一轮修正与验证，再交给人工审查。

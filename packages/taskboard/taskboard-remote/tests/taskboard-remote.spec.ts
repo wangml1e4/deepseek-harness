@@ -94,6 +94,7 @@ async function harness() {
       resultCommit: 'abc123',
     })),
     worktreePresent: vi.fn(() => Promise.resolve(true)),
+    inspectDependencies: vi.fn(() => Promise.resolve({ dependencyCommits: {}, waits: [] })),
   } as never)
   await ctx.plugin(TaskboardRemote)
   return ctx
@@ -449,7 +450,18 @@ describe('Taskboard Remote Consumer', () => {
     if (!issue.ok) throw new Error(issue.error.message)
     await expect(ctx.taskboardRemote.patrolIssue(issue.value.id)).resolves.toEqual({
       ok: true,
-      value: { context: null, worktreePresent: false, diff: null, reviews: [] },
+      value: { context: null, worktreePresent: false, diff: null, reviews: [], dependencyWaits: [] },
+    })
+
+    vi.mocked(ctx.taskboardPatrol.inspectDependencies).mockResolvedValueOnce({
+      dependencyCommits: {},
+      waits: [{ issueId: issue.value.id, reason: 'waiting_for_integration' }],
+    })
+    await expect(ctx.taskboardRemote.patrolIssue(issue.value.id)).resolves.toMatchObject({
+      ok: true,
+      value: {
+        dependencyWaits: [{ issueId: issue.value.id, reason: 'waiting_for_integration' }],
+      },
     })
 
     vi.spyOn(ctx.taskboard, 'getPatrolDevelopmentContext').mockResolvedValueOnce({
