@@ -16,7 +16,7 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 每个方法都返回 `TaskboardRemoteResult<T>`。领域失败会保留为带有 `TaskboardError.code` 的稳定业务结果；格式错误的请求在生成的 Typert 载体中失败，基础设施故障则直接拒绝，不会被错误标记为领域错误。`getIssue` 使用显式可空值，因此 Issue 不存在与调用失败是两种不同结果。
 
-`patrol` 会组合已保存策略、当前 Host 选项以及永久 Run／Attempt 历史。`updatePatrol` 把 Host 所属选项校验委托给 Patrol 消费方，`runPatrol` 启动一轮手工后台 Run。`patrolIssue` 会为详情栏返回永久 Development Context、当前物理 worktree 是否存在、结果 commit 相对 Base Branch 的受限 diff，以及独立 Reviewer 证据。`removePatrolWorktree` 把显式确认和干净且已集成的检查委托给 Patrol 消费方，再返回保留的分支、路径和结果 commit 身份。
+`patrol` 会组合已保存策略、当前 Host 选项以及永久 Run／Attempt 历史。`updatePatrol` 把 Host 所属选项校验委托给 Patrol 消费方，`runPatrol` 启动一轮手工后台 Run。`patrolIssue` 会为详情栏返回永久 Development Context、当前物理 worktree 是否存在、结果 commit 相对 Base Branch 的受限 diff、独立 Reviewer 证据，以及每个未满足前置 Issue 的未完成或尚未集成原因。`removePatrolWorktree` 把显式确认和干净且已集成的检查委托给 Patrol 消费方，再返回保留的分支、路径和结果 commit 身份。
 
 生成的 `./remote` 入口由 [`@deepseek-ai/dsh-api-remotes`](../../api/remotes/README.md) 挂载给浏览器消费方。Web Host 会把本包与 Taskboard Service Definition 和 SQLite Provider 一起挂载。
 

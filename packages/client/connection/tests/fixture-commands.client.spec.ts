@@ -161,12 +161,20 @@ describe('FixtureApiClient Taskboard Remote', () => {
       ok: true
       value: { items: { id: string; type: string; issueId: string; relatedIssueId: string; createdAt: string }[] }
     }>(rpc, 'taskboard/listWorkspaceRelations', { workspaceId: 'fx-ws-fixture' })
-    expect(seededRelations.value.items).toMatchObject([{
-      id: 'fx-relation-1',
-      type: 'blocks',
-      issueId: listed.value.items[1]!.id,
-      relatedIssueId: listed.value.items[0]!.id,
-    }])
+    expect(seededRelations.value.items).toMatchObject([
+      {
+        id: 'fx-relation-1',
+        type: 'blocks',
+        issueId: listed.value.items[1]!.id,
+        relatedIssueId: listed.value.items[0]!.id,
+      },
+      {
+        id: 'fx-relation-2',
+        type: 'blocks',
+        issueId: listed.value.items[2]!.id,
+        relatedIssueId: listed.value.items[0]!.id,
+      },
+    ])
     expect(typeof seededRelations.value.items[0]?.createdAt).toBe('string')
 
     const attachments = await callRemote<{
@@ -247,7 +255,7 @@ describe('FixtureApiClient Taskboard Remote', () => {
       relatedIssueId: created.value.id,
     })
     expect(typeof added?.createdAt).toBe('string')
-    expect(workspaceRelations.value.items).toHaveLength(2)
+    expect(workspaceRelations.value.items).toHaveLength(3)
 
     const patrol = await callRemote<{
       ok: true

@@ -15,6 +15,7 @@ import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import type {
   Issue,
+  IssueId,
   IssueReference,
   PatrolAttempt,
   PatrolDevelopmentContext,
@@ -59,6 +60,25 @@ export interface PatrolWorktreeRemoval {
   readonly branch: string
   /** Preserved result commit already recorded for the Issue. */
   readonly resultCommit: string
+}
+
+/** Why one predecessor prevents a Patrol claim. */
+export type PatrolDependencyWaitReason = 'predecessor_not_done' | 'waiting_for_integration'
+
+/** One predecessor whose current state prevents a Patrol claim. */
+export interface PatrolDependencyWait {
+  /** Blocking Issue identity. */
+  readonly issueId: IssueId
+  /** User-visible reason the successor must wait. */
+  readonly reason: PatrolDependencyWaitReason
+}
+
+/** Current dependency evidence used by both claim execution and read projections. */
+export interface PatrolDependencyInspection {
+  /** Exact integrated predecessor commits supplied to the atomic claim. */
+  readonly dependencyCommits: Readonly<Record<string, string>>
+  /** Unsatisfied predecessors in relation order. */
+  readonly waits: readonly PatrolDependencyWait[]
 }
 
 /** Defaults applied to local Git subprocess calls. */
@@ -365,6 +385,44 @@ export class TaskboardPatrolService extends Service {
    */
   isAncestor(workspaceId: WorkspaceId, commit: string, baseBranch: string): Promise<boolean> {
     return this.git.isAncestor(this.requireWorkspace(workspaceId).path, commit, baseBranch)
+  }
+
+  /**
+   * Inspect every blocked-by predecessor against the Base Branch used by an Issue.
+   * @param issue - Successor whose dependency state is inspected.
+   * @param policy - Saved Workspace policy used when the Issue has no Development Context.
+   * @returns integrated commit evidence plus distinct unfinished and unintegrated waits.
+   */
+  async inspectDependencies(
+    issue: Issue,
+    policy: PatrolPolicy,
+  ): Promise<PatrolDependencyInspection> {
+    const context = await this.ctx.taskboard.getPatrolDevelopmentContext(issue.id)
+    const baseBranch = context?.baseBranch
+      ?? policy.baseBranch
+      ?? (await this.defaults(issue.workspaceId)).baseBranch
+    const dependencyCommits: Record<string, string> = {}
+    const waits: PatrolDependencyWait[] = []
+    for (const relation of await this.ctx.taskboard.listRelations(issue.id)) {
+      if (relation.type !== 'blocked_by') continue
+      const blocker = await this.ctx.taskboard.getIssue(relation.relatedIssueId)
+      if (blocker?.status !== 'done') {
+        waits.push({ issueId: relation.relatedIssueId, reason: 'predecessor_not_done' })
+        continue
+      }
+      const blockerContext = await this.ctx.taskboard.getPatrolDevelopmentContext(blocker.id)
+      const resultCommit = blockerContext?.resultCommit
+      if (
+        resultCommit === null
+        || resultCommit === undefined
+        || !await this.isAncestor(issue.workspaceId, resultCommit, baseBranch)
+      ) {
+        waits.push({ issueId: blocker.id, reason: 'waiting_for_integration' })
+        continue
+      }
+      dependencyCommits[String(blocker.id)] = resultCommit
+    }
+    return { dependencyCommits, waits }
   }
 
   /**

@@ -383,14 +383,23 @@ export class TaskboardRemote extends TypertRemoteService {
   }
 
   /**
-   * Read one Issue's persistent implementation binding and Reviewer evidence.
+   * Read one Issue's persistent implementation, review, and dependency evidence.
    * @param reference - opaque id or human-readable identifier.
-   * @returns explicit nullable binding and append-only reviews.
+   * @returns explicit nullable binding, append-only reviews, and unsatisfied predecessor reasons.
    */
   @Remote('patrolIssue')
   patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>> {
     return this.result(async () => {
+      const issue = await this.ctx.taskboard.getIssue(reference)
+      if (issue === undefined) {
+        throw new TaskboardError('issue_not_found', `Issue '${reference}' does not exist`)
+      }
+      const policy = await this.ctx.taskboard.getPatrolPolicy(issue.workspaceId)
+      if (policy === undefined) {
+        throw new TaskboardError('workspace_not_found', `Workspace '${issue.workspaceId}' has no Taskboard Patrol Policy`)
+      }
       const context = await this.ctx.taskboard.getPatrolDevelopmentContext(reference) ?? null
+      const dependencies = await this.ctx.taskboardPatrol.inspectDependencies(issue, policy)
       return {
         context,
         worktreePresent: context === null ? false : await this.ctx.taskboardPatrol.worktreePresent(context),
@@ -398,6 +407,7 @@ export class TaskboardRemote extends TypertRemoteService {
           ? null
           : await this.ctx.taskboardPatrol.diff(context, context.resultCommit),
         reviews: await this.ctx.taskboard.listPatrolReviews(reference),
+        dependencyWaits: dependencies.waits,
       }
     })
   }

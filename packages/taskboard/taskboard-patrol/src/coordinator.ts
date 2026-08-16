@@ -392,25 +392,10 @@ export class PatrolCoordinator {
     ) return undefined
     const comments = await this.ctx.taskboard.listComments(issue.id)
     if (hasExplicitWait(comments.at(-1)?.body ?? '')) return undefined
-    const context = await this.ctx.taskboard.getPatrolDevelopmentContext(issue.id)
-    const baseBranch = context?.baseBranch
-      ?? policy.baseBranch
-      ?? (await this.host.defaults(workspaceId)).baseBranch
-    const dependencyCommits: Record<string, string> = {}
-    const relations = await this.ctx.taskboard.listRelations(issue.id)
-    for (const relation of relations) {
-      if (relation.type !== 'blocked_by') continue
-      const blocker = await this.ctx.taskboard.getIssue(relation.relatedIssueId)
-      const blockerContext = await this.ctx.taskboard.getPatrolDevelopmentContext(relation.relatedIssueId)
-      if (
-        blocker?.status !== 'done'
-        || blockerContext?.resultCommit === null
-        || blockerContext?.resultCommit === undefined
-        || !await this.host.isAncestor(workspaceId, blockerContext.resultCommit, baseBranch)
-      ) return undefined
-      dependencyCommits[String(blocker.id)] = blockerContext.resultCommit
-    }
-    return { issue, dependencyCommits }
+    const dependencies = await this.host.inspectDependencies(issue, policy)
+    return dependencies.waits.length === 0
+      ? { issue, dependencyCommits: dependencies.dependencyCommits }
+      : undefined
   }
 
   /** Run implementation, independent review, and one correction turn in the exact Issue Session. */

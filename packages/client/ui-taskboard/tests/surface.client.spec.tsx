@@ -436,6 +436,46 @@ describe('TaskboardDetails', () => {
     expect(view.props.runPatrol).toHaveBeenCalledWith()
   })
 
+  it('distinguishes unfinished dependencies from done code awaiting Base Branch integration', () => {
+    const selected = issue()
+    const incomplete = issue({
+      id: 'issue-incomplete' as never,
+      identifier: 'DSH-2' as never,
+      status: 'in_review',
+    })
+    const unintegrated = issue({
+      id: 'issue-unintegrated' as never,
+      identifier: 'DSH-3' as never,
+      status: 'done',
+    })
+    mountDetails(snapshot({
+      selectedIssue: selected,
+      detailPanel: 'issue',
+      detailPhase: 'ready',
+      issues: [selected, incomplete, unintegrated],
+      relations: [incomplete, unintegrated].map((related, index) => ({
+        id: `relation-${String(index)}` as never,
+        type: 'blocked_by',
+        issueId: selected.id,
+        relatedIssueId: related.id,
+        createdAt: '2026-08-16T00:00:00.000Z',
+      })),
+      patrolIssue: {
+        context: null,
+        worktreePresent: false,
+        diff: null,
+        reviews: [],
+        dependencyWaits: [
+          { issueId: incomplete.id, reason: 'predecessor_not_done' },
+          { issueId: unintegrated.id, reason: 'waiting_for_integration' },
+        ],
+      },
+    }))
+
+    expect(screen.getByText('等待前置 Issue 完成')).toBeTruthy()
+    expect(screen.getByText('等待代码集成')).toBeTruthy()
+  })
+
   it('shows persistent Agent and Reviewer evidence before the human marks done', async () => {
     const selected = issue({ status: 'in_review' })
     const view = mountDetails(snapshot({
@@ -460,6 +500,7 @@ describe('TaskboardDetails', () => {
           updatedAt: '2026-08-16T00:00:00.000Z',
         },
         worktreePresent: true,
+        dependencyWaits: [],
         diff: {
           stat: ' src/index.ts | 1 +',
           patch: 'diff --git a/src/index.ts b/src/index.ts\n+export const ready = true',

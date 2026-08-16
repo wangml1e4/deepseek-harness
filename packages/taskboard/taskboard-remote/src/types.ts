@@ -6,6 +6,7 @@ import type {
   TaskboardAttachmentId,
   Comment,
   Issue,
+  IssueId,
   IssueReference,
   IssueRelation,
   PatrolAttempt,
@@ -174,6 +175,15 @@ export interface TaskboardPatrolWorktreeRemovalValue {
   readonly resultCommit: string
 }
 
+/** Client-safe reason one predecessor prevents a Patrol claim. */
+export type TaskboardPatrolDependencyWaitReason = 'predecessor_not_done' | 'waiting_for_integration'
+
+/** Client-safe predecessor wait projected into Issue details. */
+export interface TaskboardPatrolDependencyWait {
+  readonly issueId: IssueId
+  readonly reason: TaskboardPatrolDependencyWaitReason
+}
+
 /** Persistent Session/Git binding and independent review evidence for one Issue. */
 export interface TaskboardPatrolIssueValue {
   readonly context: PatrolDevelopmentContext | null
@@ -182,6 +192,8 @@ export interface TaskboardPatrolIssueValue {
   /** Base Branch to result-commit evidence, or null before a committed handoff. */
   readonly diff: TaskboardPatrolDiffValue | null
   readonly reviews: readonly PatrolReview[]
+  /** Predecessors that currently prevent a Patrol claim. */
+  readonly dependencyWaits: readonly TaskboardPatrolDependencyWait[]
 }
 
 /** Bounded committed diff presented during human review. */

@@ -510,6 +510,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   PatrolAgentLease: 'taskboard.md',
   PatrolDevelopmentContext: 'taskboard.md',
   PatrolConfiguration: 'taskboard.md',
+  PatrolDependencyInspection: 'taskboard.md',
   PatrolGitDiff: 'taskboard.md',
   PatrolGitResult: 'taskboard.md',
   PatrolPolicy: 'taskboard.md',

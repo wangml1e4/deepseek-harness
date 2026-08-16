@@ -2013,6 +2013,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'whether the commit is an ancestor of the branch.',
       },
       {
+        signature: 'async inspectDependencies( issue: Issue, policy: PatrolPolicy, ): Promise<PatrolDependencyInspection>',
+        description: 'Inspect every blocked-by predecessor against the Base Branch used by an Issue.',
+        parameters: [{ name: 'issue', description: 'Successor whose dependency state is inspected.' }, { name: 'policy', description: 'Saved Workspace policy used when the Issue has no Development Context.' }],
+        returns: 'integrated commit evidence plus distinct unfinished and unintegrated waits.',
+      },
+      {
         signature: 'async prepare( attempt: PatrolAttempt, issue: Issue, policy: PatrolPolicy, ): Promise<PatrolAgentLease>',
         description: 'Create or reuse one claim\'s permanent Development Context, worktree, and exact Session.',
         parameters: [{ name: 'attempt', description: 'active durable claim.' }, { name: 'issue', description: 'claimed Issue snapshot.' }, { name: 'policy', description: 'saved Workspace Patrol choices for an unbound Issue.' }],
@@ -2207,9 +2213,9 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'patrolIssue\') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>',
-        description: 'Read one Issue\'s persistent implementation binding and Reviewer evidence.',
+        description: 'Read one Issue\'s persistent implementation, review, and dependency evidence.',
         parameters: [{ name: 'reference', description: 'opaque id or human-readable identifier.' }],
-        returns: 'explicit nullable binding and append-only reviews.',
+        returns: 'explicit nullable binding, append-only reviews, and unsatisfied predecessor reasons.',
       },
       {
         signature: '@Remote(\'removePatrolWorktree\') removePatrolWorktree( input: TaskboardPatrolWorktreeRemovalInput, ): Promise<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>>',
@@ -4121,6 +4127,18 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PatrolConfiguration {\n    readonly defaults: PatrolPolicyDefaults;\n    readonly branches: readonly string[];\n    readonly agentPresets: readonly PatrolAgentPresetOption[];\n    readonly providers: readonly PatrolProviderOption[];\n    readonly permissionPresets: readonly PatrolPermissionOption[];\n}',
   },
   {
+    name: 'PatrolDependencyInspection',
+    declaration: 'export interface PatrolDependencyInspection {\n    readonly dependencyCommits: Readonly<Record<string, string>>;\n    readonly waits: readonly PatrolDependencyWait[];\n}',
+  },
+  {
+    name: 'PatrolDependencyWait',
+    declaration: 'export interface PatrolDependencyWait {\n    readonly issueId: IssueId;\n    readonly reason: PatrolDependencyWaitReason;\n}',
+  },
+  {
+    name: 'PatrolDependencyWaitReason',
+    declaration: 'export type PatrolDependencyWaitReason = \'predecessor_not_done\' | \'waiting_for_integration\';',
+  },
+  {
     name: 'PatrolDevelopmentContext',
     declaration: 'export interface PatrolDevelopmentContext {\n    readonly issueId: IssueId;\n    readonly sessionId: SessionId;\n    readonly sessionStartedAt: string | null;\n    readonly baseBranch: string;\n    readonly branch: string;\n    readonly worktreePath: string;\n    readonly agentPreset: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n    readonly resultCommit: string | null;\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
   },
@@ -5065,12 +5083,20 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface TaskboardPatrolDefaultsValue {\n    readonly baseBranch: string;\n    readonly agentPreset: string;\n    readonly provider: string;\n    readonly model: string;\n    readonly reasoningEffort: string | null;\n    readonly permissionPreset: string;\n}',
   },
   {
+    name: 'TaskboardPatrolDependencyWait',
+    declaration: 'export interface TaskboardPatrolDependencyWait {\n    readonly issueId: IssueId;\n    readonly reason: TaskboardPatrolDependencyWaitReason;\n}',
+  },
+  {
+    name: 'TaskboardPatrolDependencyWaitReason',
+    declaration: 'export type TaskboardPatrolDependencyWaitReason = \'predecessor_not_done\' | \'waiting_for_integration\';',
+  },
+  {
     name: 'TaskboardPatrolDiffValue',
     declaration: 'export interface TaskboardPatrolDiffValue {\n    readonly patch: string;\n    readonly stat: string;\n}',
   },
   {
     name: 'TaskboardPatrolIssueValue',
-    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly worktreePresent: boolean;\n    readonly diff: TaskboardPatrolDiffValue | null;\n    readonly reviews: readonly PatrolReview[];\n}',
+    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly worktreePresent: boolean;\n    readonly diff: TaskboardPatrolDiffValue | null;\n    readonly reviews: readonly PatrolReview[];\n    readonly dependencyWaits: readonly TaskboardPatrolDependencyWait[];\n}',
   },
   {
     name: 'TaskboardPatrolModelOption',

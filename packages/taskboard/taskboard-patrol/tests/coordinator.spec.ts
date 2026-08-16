@@ -335,6 +335,28 @@ function harness(options: HarnessOptions) {
   const host = {
     defaults: () => Promise.resolve({ baseBranch: 'main' }),
     isAncestor: (_workspaceId: WorkspaceId, commit: string) => Promise.resolve(commit !== 'unintegrated'),
+    inspectDependencies: async (value: Issue) => {
+      const dependencyCommits: Record<string, string> = {}
+      const waits: Array<{
+        issueId: Issue['id']
+        reason: 'predecessor_not_done' | 'waiting_for_integration'
+      }> = []
+      for (const relation of await taskboard.listRelations(String(value.id))) {
+        if (relation.type !== 'blocked_by') continue
+        const blocker = await taskboard.getIssue(String(relation.relatedIssueId))
+        if (blocker?.status !== 'done') {
+          waits.push({ issueId: relation.relatedIssueId as Issue['id'], reason: 'predecessor_not_done' })
+          continue
+        }
+        const resultCommit = (await taskboard.getPatrolDevelopmentContext(String(blocker.id)))?.resultCommit
+        if (resultCommit === null || resultCommit === undefined || resultCommit === 'unintegrated') {
+          waits.push({ issueId: blocker.id, reason: 'waiting_for_integration' })
+          continue
+        }
+        dependencyCommits[String(blocker.id)] = resultCommit
+      }
+      return { dependencyCommits, waits }
+    },
     prepare: vi.fn(async (_attempt: PatrolAttempt, value: Issue): Promise<PatrolAgentLease> => {
       if (options.prepareError !== undefined) throw options.prepareError
       const context = options.contexts?.[value.id] ?? development(value)

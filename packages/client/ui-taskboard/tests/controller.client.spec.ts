@@ -165,7 +165,7 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       startedAt: '2026-08-16T00:00:00.000Z',
       endedAt: null,
     }),
-    patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [] }),
+    patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [], dependencyWaits: [] }),
     removePatrolWorktree: input => ok({
       worktreePath: `/worktrees/${input.reference}`,
       branch: `dsh-task/${input.reference}`,
@@ -806,7 +806,7 @@ describe('TaskboardController', () => {
       resultCommit: context.resultCommit,
     }))
     const controller = new TaskboardController(remote({
-      patrolIssue: () => ok({ context, worktreePresent: true, diff: null, reviews: [] }),
+      patrolIssue: () => ok({ context, worktreePresent: true, diff: null, reviews: [], dependencyWaits: [] }),
       removePatrolWorktree,
     }))
     await controller.activate('ws' as never)
@@ -821,6 +821,7 @@ describe('TaskboardController', () => {
       worktreePresent: false,
       diff: null,
       reviews: [],
+      dependencyWaits: [],
     })
   })
 })
