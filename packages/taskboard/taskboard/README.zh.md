@@ -19,6 +19,7 @@ Workspace 所属 Taskboard 的 Service Definition。`ctx.taskboard` 暴露持久
 - 每个 Taskboard 的 Patrol 默认关闭、选中 `1h`、使用 `workspace-write` 权限，并将新 Session 选项保持为空。Policy 更新只接受 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h`；启用时必须提供本地 Base Branch，启用或修改间隔会从保存时刻重新排期，关闭则清除 `nextDueAt`，但不终止活跃 Run。
 - 定时触发会消费一个到期时刻，并从原有固定节拍推进至当前时间之后，因此 Host 停机不会形成补跑队列。即使 Policy 已关闭，仍可手动触发一次 Run。
 - 整个 Host 最多保留一个活跃 Patrol Run。定时触发重叠会形成永久的 `skipped_global_busy` 历史记录；手动触发重叠则以繁忙拒绝。Run 完成后不能覆写其终态结果。
+- 每个终态 Attempt 会保留 Provider 报告的 token 用量，以及执行期间观察到的最近一次结构化 Provider 错误。Run 完成时会聚合其全部 Attempt 的用量并保留最近一次 Provider 错误；Git、权限和审查故障仍是普通错误文本，不会被标记为 Provider 错误。
 - 启动恢复会在不依赖 Workspace 注册状态的情况下定位该 Host 范围活跃 Run。每次恢复都会递增 `recoveryCount` 并保存 `lastRecoveredAt`；无法恢复的活跃 Attempt 会与所属 Run 原子地结束为失败，同时 Issue 移至 `blocked` 并保留带操作者信息的原因。
 - 一个 Run 拥有按顺序排列的 `PatrolAttempt` claim。领取操作会原子校验 `todo`、指派、Run 归属、乐观版本、前置 Issue 的 `done` 状态及其确切 commit 快照，再把 Issue 移到 `in_progress`。只有前一个 Attempt 为 `permission_blocked` 时，同一 Run 才能继续领取。
 - 每个由 Patrol 执行的 Issue 最多拥有一份 `PatrolDevelopmentContext`。其中确切的 Session id、Base Branch、分支、worktree、Agent Preset、模型选择和 Permission Preset 会在以后每次退回 `todo` 时继续保留；首次 Session 持久化会与 id 预留分别记录，进入 review handoff 时会记录结果 commit。绑定和 Attempt 历史都没有删除操作。

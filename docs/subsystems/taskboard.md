@@ -30,6 +30,8 @@ A scheduled trigger consumes its prior due instant and advances by fixed cadence
 
 Patrol Run reservation is Host-wide and durable. One active row excludes every other active row across Workspaces. Scheduled overlap persists a completed `skipped_global_busy` result and advances that Workspace's cadence without queueing; manual overlap rejects. Terminal Run results cannot be overwritten and no Run deletion operation exists.
 
+Each terminal Attempt retains the Provider-reported usage collected across its implementation, independent review, correction, and recovery turns. Recovery rebuilds pre-crash accounting from the exact persisted implementation Session and any recorded Reviewer Session, excluding implementation events older than the Attempt. A Provider failure keeps its structured message, code, HTTP status, retry delay, and request id when supplied; non-Provider failures remain separate error text. Run completion aggregates all Attempt usage and retains the latest Provider error in permanent history.
+
 Before scheduling any new due trigger, Host startup finds the active Run without relying on Workspace enumeration and appends recovery evidence by incrementing `recoveryCount` and saving `lastRecoveredAt`. A completed Attempt checkpoint is reconciled directly; a permission-blocked checkpoint resumes scanning under the same Run.
 
 ## Patrol claims and execution identity
@@ -54,7 +56,7 @@ Consumers depend on the Service Definition rather than the SQLite provider. The 
 
 `@deepseek-ai/dsh-taskctl` is a JSON CLI over that Remote. `@deepseek-ai/dsh-skill-manage-taskboard` registers a bundled model- and user-invocable workflow that requires Agents to read current Issue context, claim only `todo`, use optimistic versions, review and commit before moving work to `in_review`, and leave `done` to human acceptance. The standard Web Host mounts the Provider, Remote, and skill together.
 
-The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery count and time. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
+The Web Consumer exposes bilingual Dashboard, Board, List, Gantt, Issue details, attachment upload, image preview, controlled download and confirmed deletion, Patrol settings and history, Development Context and review evidence, and human acceptance or return actions. Each Workspace row shows its live `todo` count, a bound implementation Session returns to the ordinary conversation view, and human review displays the committed Base Branch diff. Dashboard derives completion, lifecycle counts, overdue work, work due within 14 days, and the five newest Workspace Activity entries, then links every summary to its filtered List. Gantt reads every Workspace dependency once in canonical `blocks` direction, keeps unscheduled Issues in the grid, and persists manual bar changes without shifting dependents. Patrol settings reuse the details column, discover local branches, Agent Presets, provider/model/reasoning choices, and Permission Presets from the Host, and show Run recovery evidence, aggregated token usage, and structured Provider diagnostics. Version one does not publish or synchronize GitHub Issues, including Issues in `deepseek-ai/deepseek-harness`.
 
 ## Post-version-one GitHub plan
 
@@ -349,7 +351,7 @@ abstract listPatrolAttempts(runId: PatrolRunId): Promise<readonly PatrolAttempt[
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/index.ts:130`](../../packages/taskboard/taskboard/src/index.ts)
+Source: [`packages/taskboard/taskboard/src/index.ts:133`](../../packages/taskboard/taskboard/src/index.ts)
 
 <a id="ctxtaskboardpatrol--taskboardpatrolservice"></a>
 
@@ -647,5 +649,5 @@ A durable Taskboard mutation committed for one Workspace. Observer failures are 
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard/src/types.ts:651`](../../packages/taskboard/taskboard/src/types.ts)
+Source: [`packages/taskboard/taskboard/src/types.ts:674`](../../packages/taskboard/taskboard/src/types.ts)
 <!-- END GENERATED cordis-surface -->

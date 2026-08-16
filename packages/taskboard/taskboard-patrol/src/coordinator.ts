@@ -3,6 +3,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import {
   TaskboardActorId,
   TaskboardError,
@@ -17,6 +18,7 @@ import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { TaskboardPatrolService } from './index.ts'
 import { hasExplicitWait, implementationPrompt, recoveryPrompt, remediationPrompt } from './prompts.ts'
 import { PatrolReviewer } from './reviewer.ts'
+import { PatrolTelemetryRecorder } from './telemetry.ts'
 
 const MAX_TIMER_MS = 2_147_483_647
 const PATROL_ACTOR = {
@@ -229,13 +231,22 @@ export class PatrolCoordinator {
     }
     const review = (await this.ctx.taskboard.listPatrolReviews(issue.id))
       .find(value => value.attemptId === latest.id)
+    const telemetry = new PatrolTelemetryRecorder()
     try {
-      const outcome = await this.executeAttempt(latest, issue, policy, review === undefined ? {} : { review })
+      await this.restoreRecoveryTelemetry(telemetry, latest, context.sessionId, review)
+      const outcome = await this.executeAttempt(
+        latest,
+        issue,
+        policy,
+        telemetry,
+        review === undefined ? {} : { review },
+      )
       if (outcome.kind === 'permission_blocked') {
         await this.ctx.taskboard.completePatrolAttempt({
           attemptId: latest.id,
           result: 'permission_blocked',
           error: outcome.reason,
+          ...telemetry.fields(),
           actor: PATROL_ACTOR,
         })
         await this.execute(run)
@@ -245,6 +256,7 @@ export class PatrolCoordinator {
         attemptId: latest.id,
         result: 'review_handoff',
         resultCommit: outcome.commit,
+        ...telemetry.fields(),
         actor: PATROL_ACTOR,
       })
       await this.ctx.taskboard.completePatrolRun({ runId: run.id, result: 'review_handoff' })
@@ -253,9 +265,24 @@ export class PatrolCoordinator {
         runId: run.id,
         attemptId: latest.id,
         error: errorText(error),
+        ...telemetry.fields(),
         actor: PATROL_ACTOR,
       })
     }
+  }
+
+  /** Restore pre-crash Attempt accounting from its exact persisted Sessions. */
+  private async restoreRecoveryTelemetry(
+    telemetry: PatrolTelemetryRecorder,
+    attempt: PatrolAttempt,
+    implementationSessionId: SessionId,
+    review: PatrolReview | undefined,
+  ): Promise<void> {
+    const startedAt = Date.parse(attempt.startedAt)
+    const implementation = await this.ctx.sessionPersistence.load(implementationSessionId)
+    telemetry.record(implementation.events.filter(event => event.time >= startedAt))
+    if (review === undefined) return
+    telemetry.record((await this.ctx.sessionPersistence.load(review.sessionId)).events)
   }
 
   /** Execute zero or more claims, continuing only after a permission-blocked Attempt. */
@@ -277,13 +304,15 @@ export class PatrolCoordinator {
         return
       }
       let outcome: Awaited<ReturnType<PatrolCoordinator['executeAttempt']>>
+      const telemetry = new PatrolTelemetryRecorder()
       try {
-        outcome = await this.executeAttempt(candidate.attempt, candidate.issue, policy)
+        outcome = await this.executeAttempt(candidate.attempt, candidate.issue, policy, telemetry)
       } catch (error: unknown) {
         await this.ctx.taskboard.completePatrolAttempt({
           attemptId: candidate.attempt.id,
           result: 'failed',
           error: errorText(error),
+          ...telemetry.fields(),
           actor: PATROL_ACTOR,
         })
         throw error
@@ -294,6 +323,7 @@ export class PatrolCoordinator {
           attemptId: candidate.attempt.id,
           result: 'permission_blocked',
           error: outcome.reason,
+          ...telemetry.fields(),
           actor: PATROL_ACTOR,
         })
         continue
@@ -302,6 +332,7 @@ export class PatrolCoordinator {
         attemptId: candidate.attempt.id,
         result: 'review_handoff',
         resultCommit: outcome.commit,
+        ...telemetry.fields(),
         actor: PATROL_ACTOR,
       })
       await this.ctx.taskboard.completePatrolRun({
@@ -387,6 +418,7 @@ export class PatrolCoordinator {
     attempt: PatrolAttempt,
     issue: Issue,
     policy: PatrolPolicy,
+    telemetry: PatrolTelemetryRecorder,
     recovery?: { readonly review?: PatrolReview },
   ): Promise<{ kind: 'permission_blocked'; reason: string } | { kind: 'review_handoff'; commit: string }> {
     const lease = await this.host.prepare(attempt, issue, policy)
@@ -395,7 +427,7 @@ export class PatrolCoordinator {
       if (review === undefined) {
         await runAgentTurn(lease.agent, recovery === undefined
           ? implementationPrompt(issue)
-          : recoveryPrompt(issue))
+          : recoveryPrompt(issue), telemetry)
         const firstApproval = permissionReason(lease.rejectedApprovals)
         if (firstApproval !== undefined) return { kind: 'permission_blocked', reason: firstApproval }
         const preliminary = await this.host.result(lease.context)
@@ -411,13 +443,14 @@ export class PatrolCoordinator {
           preliminary.head,
           diff,
           workspace,
+          telemetry,
         )
         review = await this.ctx.taskboard.recordPatrolReview({
           attemptId: attempt.id,
           ...reviewed,
         })
       }
-      await runAgentTurn(lease.agent, remediationPrompt(review))
+      await runAgentTurn(lease.agent, remediationPrompt(review), telemetry)
       const correctionApproval = permissionReason(lease.rejectedApprovals)
       if (correctionApproval !== undefined) return { kind: 'permission_blocked', reason: correctionApproval }
       const result = await this.host.result(lease.context)
@@ -433,16 +466,28 @@ export class PatrolCoordinator {
 }
 
 /** Drive exactly one plugin-owned turn and require a normal durable close. */
-async function runAgentTurn(agent: Agent, prompt: string): Promise<void> {
+async function runAgentTurn(
+  agent: Agent,
+  prompt: string,
+  telemetry: PatrolTelemetryRecorder,
+): Promise<void> {
+  const firstEvent = agent.session.events.length
   const before = agent.session.events.filter(event => event.type === 'turn/end').length
   agent.followup(createUserMessage({
     content: [{ type: 'text', text: prompt }],
     source: { kind: 'plugin', plugin: 'taskboard-patrol' },
   }))
-  await agent.whenIdle()
+  try {
+    await agent.whenIdle()
+  } finally {
+    telemetry.record(agent.session.events.slice(firstEvent))
+  }
   const ends = agent.session.events.filter(event => event.type === 'turn/end')
   const last = ends.at(-1)
   if (ends.length !== before + 1 || last?.type !== 'turn/end' || last.data.reason.kind !== 'completed') {
+    if (last?.type === 'turn/end' && last.data.reason.kind === 'error') {
+      throw new Error(last.data.reason.error.message)
+    }
     throw new Error(`Patrol Agent Session "${agent.session.id}" did not complete its assigned turn`)
   }
 }

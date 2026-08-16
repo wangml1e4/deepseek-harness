@@ -25,17 +25,19 @@ import type {
   PatrolAttempt,
   PatrolAttemptResult,
   PatrolDevelopmentContext,
+  PatrolProviderError,
   PatrolReview,
   PatrolRun,
   PatrolRunResult,
   PatrolRunTrigger,
+  PatrolTokenUsage,
   WorkspaceTaskboard,
 } from '@deepseek-ai/dsh-taskboard'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 
 /** Current pre-release Taskboard SQLite layout version. */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 /** SQLite application identity for a Harness Taskboard database (`DSHT`). */
 export const TASKBOARD_SQLITE_APPLICATION_ID = 0x44534854
@@ -145,6 +147,8 @@ export interface PatrolRunRow {
   state: PatrolRun['state']
   result: PatrolRunResult | null
   error: string | null
+  token_usage: string | null
+  provider_error: string | null
   recovery_count: number
   last_recovered_at: string | null
   started_at: string
@@ -160,8 +164,20 @@ export interface PatrolAttemptRow {
   state: PatrolAttempt['state']
   result: PatrolAttemptResult | null
   error: string | null
+  token_usage: string | null
+  provider_error: string | null
   started_at: string
   ended_at: string | null
+}
+
+/** Decode telemetry columns shared by Patrol Run and Attempt rows. */
+function rowToPatrolTelemetry(
+  row: Pick<PatrolRunRow, 'token_usage' | 'provider_error'>,
+): { tokenUsage: PatrolTokenUsage | null; providerError: PatrolProviderError | null } {
+  return {
+    tokenUsage: row.token_usage === null ? null : JSON.parse(row.token_usage) as PatrolTokenUsage,
+    providerError: row.provider_error === null ? null : JSON.parse(row.provider_error) as PatrolProviderError,
+  }
 }
 
 /** Stored persistent Session and Git binding row. */
@@ -390,6 +406,8 @@ export function openTaskboardDatabase(
           'no_eligible_issue', 'review_handoff', 'blocked', 'failed', 'skipped_global_busy'
         )),
         error         TEXT,
+        token_usage   TEXT CHECK (token_usage IS NULL OR json_valid(token_usage)),
+        provider_error TEXT CHECK (provider_error IS NULL OR json_valid(provider_error)),
         recovery_count INTEGER NOT NULL DEFAULT 0 CHECK (recovery_count >= 0),
         last_recovered_at TEXT,
         started_at    TEXT NOT NULL,
@@ -439,6 +457,8 @@ export function openTaskboardDatabase(
           'permission_blocked', 'blocked', 'review_handoff', 'failed'
         )),
         error      TEXT,
+        token_usage TEXT CHECK (token_usage IS NULL OR json_valid(token_usage)),
+        provider_error TEXT CHECK (provider_error IS NULL OR json_valid(provider_error)),
         started_at TEXT NOT NULL,
         ended_at   TEXT,
         CHECK (
@@ -658,6 +678,7 @@ export function rowToPatrolRun(row: PatrolRunRow): PatrolRun {
     state: row.state,
     result: row.result,
     error: row.error,
+    ...rowToPatrolTelemetry(row),
     recoveryCount: row.recovery_count,
     lastRecoveredAt: row.last_recovered_at,
     startedAt: row.started_at,
@@ -679,6 +700,7 @@ export function rowToPatrolAttempt(row: PatrolAttemptRow): PatrolAttempt {
     state: row.state,
     result: row.result,
     error: row.error,
+    ...rowToPatrolTelemetry(row),
     startedAt: row.started_at,
     endedAt: row.ended_at,
   }

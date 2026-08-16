@@ -505,6 +505,110 @@ describe('SQLite Taskboard service', () => {
     }
   })
 
+  it('persists Attempt telemetry and aggregates it into permanent Run history', async () => {
+    const path = await databasePath()
+    const workspaceId = WorkspaceId('00000000-0000-4000-8000-00000000005b')
+    const first = await mount(path)
+    let runId = PatrolRunId('')
+    try {
+      await first.ctx.taskboard.ensureWorkspace({ workspaceId, title: 'Patrol Telemetry' })
+      const approvalIssue = await first.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Approval-blocked work',
+        status: 'todo',
+      })
+      const providerIssue = await first.ctx.taskboard.createIssue({
+        workspaceId,
+        title: 'Provider-failed work',
+        status: 'todo',
+      })
+      const run = await first.ctx.taskboard.beginPatrolRun({ workspaceId, trigger: 'manual' })
+      runId = run.id
+      const approvalAttempt = await first.ctx.taskboard.claimPatrolIssue({
+        runId,
+        reference: approvalIssue.id,
+        expectedVersion: approvalIssue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      await first.ctx.taskboard.completePatrolAttempt({
+        attemptId: approvalAttempt.id,
+        result: 'permission_blocked',
+        error: 'Patrol skipped unattended approval: bash',
+        tokenUsage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 5 },
+        actor: patrolActor,
+      })
+      const providerAttempt = await first.ctx.taskboard.claimPatrolIssue({
+        runId,
+        reference: providerIssue.id,
+        expectedVersion: providerIssue.version,
+        dependencyCommits: {},
+        actor: patrolActor,
+      })
+      const providerError = {
+        message: 'Provider is rate limited',
+        code: 'RATE_LIMIT',
+        status: 429,
+        providerRetryAfterMs: 1_500,
+        requestId: 'request-patrol-telemetry' as never,
+      }
+      await first.ctx.taskboard.completePatrolAttempt({
+        attemptId: providerAttempt.id,
+        result: 'failed',
+        error: providerError.message,
+        tokenUsage: { inputTokens: 3, outputTokens: 1, reasoningTokens: 1 },
+        providerError,
+        actor: patrolActor,
+      })
+      const completed = await first.ctx.taskboard.completePatrolRun({ runId, result: 'failed' })
+      expect(completed).toMatchObject({
+        tokenUsage: {
+          inputTokens: 13,
+          outputTokens: 3,
+          cacheReadTokens: 5,
+          reasoningTokens: 1,
+        },
+        providerError,
+      })
+      await expect(first.ctx.taskboard.listPatrolAttempts(runId)).resolves.toMatchObject([
+        {
+          id: approvalAttempt.id,
+          tokenUsage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 5 },
+          providerError: null,
+        },
+        {
+          id: providerAttempt.id,
+          tokenUsage: { inputTokens: 3, outputTokens: 1, reasoningTokens: 1 },
+          providerError,
+        },
+      ])
+    } finally {
+      await first.dispose()
+    }
+
+    const reopened = await mount(path)
+    try {
+      await expect(reopened.ctx.taskboard.listPatrolRuns(workspaceId)).resolves.toMatchObject([{
+        id: runId,
+        tokenUsage: {
+          inputTokens: 13,
+          outputTokens: 3,
+          cacheReadTokens: 5,
+          reasoningTokens: 1,
+        },
+        providerError: {
+          message: 'Provider is rate limited',
+          code: 'RATE_LIMIT',
+          status: 429,
+          providerRetryAfterMs: 1_500,
+          requestId: 'request-patrol-telemetry',
+        },
+      }])
+    } finally {
+      await reopened.dispose()
+    }
+  })
+
   it('audits startup recovery and atomically blocks an unrecoverable active Attempt', async () => {
     const path = await databasePath()
     const workspaceId = WorkspaceId('00000000-0000-4000-8000-00000000005a')
@@ -530,19 +634,33 @@ describe('SQLite Taskboard service', () => {
       expect(recovered).toMatchObject({ recoveryCount: 1 })
       expect(recovered.lastRecoveredAt).toBeTypeOf('string')
 
+      const recoveryProviderError = {
+        message: 'Provider stopped before recovery',
+        code: 'ABORTED',
+      }
       const failed = await mounted.ctx.taskboard.failPatrolRecovery({
         runId: run.id,
         attemptId: attempt.id,
         error: 'bound Session cannot be resumed from persistence',
+        tokenUsage: { inputTokens: 6, outputTokens: 1 },
+        providerError: recoveryProviderError,
         actor: patrolActor,
       })
-      expect(failed).toMatchObject({ state: 'completed', result: 'failed', recoveryCount: 1 })
+      expect(failed).toMatchObject({
+        state: 'completed',
+        result: 'failed',
+        recoveryCount: 1,
+        tokenUsage: { inputTokens: 6, outputTokens: 1 },
+        providerError: recoveryProviderError,
+      })
       await expect(mounted.ctx.taskboard.getActivePatrolRun()).resolves.toBeUndefined()
       await expect(mounted.ctx.taskboard.listPatrolAttempts(run.id)).resolves.toMatchObject([{
         id: attempt.id,
         state: 'completed',
         result: 'failed',
         error: 'bound Session cannot be resumed from persistence',
+        tokenUsage: { inputTokens: 6, outputTokens: 1 },
+        providerError: recoveryProviderError,
       }])
       await expect(mounted.ctx.taskboard.getIssue(issue.id)).resolves.toMatchObject({ status: 'blocked' })
       await expect(mounted.ctx.taskboard.listComments(issue.id)).resolves.toMatchObject([{

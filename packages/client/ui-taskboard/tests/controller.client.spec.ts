@@ -158,6 +158,8 @@ function remote(overrides: Partial<TaskboardClientRemote> = {}): TaskboardClient
       state: 'active',
       result: null,
       error: null,
+      tokenUsage: null,
+      providerError: null,
       recoveryCount: 0,
       lastRecoveredAt: null,
       startedAt: '2026-08-16T00:00:00.000Z',

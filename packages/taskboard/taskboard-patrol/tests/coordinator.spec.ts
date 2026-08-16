@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   IssueId,
   IssueIdentifier,
@@ -12,8 +12,10 @@ import {
   type PatrolAttempt,
   type PatrolDevelopmentContext,
   type PatrolPolicy,
+  type PatrolProviderError,
   type PatrolReview,
   type PatrolRun,
+  type PatrolTokenUsage,
 } from '@deepseek-ai/dsh-taskboard'
 import { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import { PatrolCoordinator } from '../src/coordinator.ts'
@@ -90,10 +92,12 @@ function development(value: Issue): PatrolDevelopmentContext {
 }
 
 function agent(
-  reasons: readonly ('completed' | 'interrupted' | 'none')[] = ['completed'],
+  reasons: readonly ('completed' | 'interrupted' | 'error' | 'none')[] = ['completed'],
   onTurn?: (turn: number) => void,
+  usages: readonly PatrolTokenUsage[] = [],
+  providerError?: PatrolProviderError,
 ): Agent {
-  const events: Array<{ type: 'turn/end'; data: { reason: { kind: 'completed' | 'interrupted' } } }> = []
+  const events: unknown[] = []
   let turn = 0
   const value = {
     id: SessionId('session-agent'),
@@ -103,7 +107,40 @@ function agent(
       turn += 1
       onTurn?.(turn)
       const reason = reasons[turn - 1] ?? reasons.at(-1) ?? 'completed'
-      if (reason !== 'none') events.push({ type: 'turn/end', data: { reason: { kind: reason } } })
+      const usage = usages[turn - 1]
+      if (usage !== undefined) {
+        events.push({
+          type: 'assistant/message',
+          data: { turn, step: 1, message: { role: 'assistant', content: [] }, usage },
+        })
+      }
+      if (reason === 'error') {
+        events.push({
+          type: 'assistant/chunk',
+          data: {
+            turn,
+            step: 1,
+            chunk: {
+              type: 'finish',
+              reason: {
+                kind: 'error',
+                failure: providerError ?? { message: 'Provider failed', code: 'UNKNOWN' },
+              },
+            },
+          },
+        })
+      }
+      if (reason !== 'none') {
+        events.push({
+          type: 'turn/end',
+          data: {
+            turn,
+            reason: reason === 'error'
+              ? { kind: 'error', error: providerError ?? { message: 'Provider failed', code: 'UNKNOWN' } }
+              : { kind: reason },
+          },
+        })
+      }
     },
     whenIdle: () => Promise.resolve(),
     cancel: vi.fn(),
@@ -119,7 +156,9 @@ interface HarnessOptions {
   readonly permissionBlocked?: ReadonlySet<string>
   readonly permissionWithoutReason?: ReadonlySet<string>
   readonly correctionBlocked?: ReadonlySet<string>
-  readonly turnReasons?: readonly ('completed' | 'interrupted' | 'none')[]
+  readonly turnReasons?: readonly ('completed' | 'interrupted' | 'error' | 'none')[]
+  readonly turnUsages?: readonly PatrolTokenUsage[]
+  readonly providerError?: PatrolProviderError
   readonly result?: { readonly clean: boolean; readonly changedFromBase: boolean }
   readonly results?: readonly { readonly clean: boolean; readonly changedFromBase: boolean }[]
   readonly resultHeads?: readonly string[]
@@ -134,6 +173,7 @@ interface HarnessOptions {
   readonly completeRunError?: unknown
   readonly prepareError?: unknown
   readonly reviews?: readonly PatrolReview[]
+  readonly persistedEvents?: Readonly<Record<string, readonly SessionEvent[]>>
 }
 
 function harness(options: HarnessOptions) {
@@ -144,7 +184,13 @@ function harness(options: HarnessOptions) {
   const runs: PatrolRun[] = []
   const attempts: PatrolAttempt[] = []
   const completedRuns: Array<{ result: string; error?: string }> = []
-  const completedAttempts: Array<{ issueId: string; result: string; error?: string }> = []
+  const completedAttempts: Array<{
+    issueId: string
+    result: string
+    error?: string
+    tokenUsage?: PatrolTokenUsage
+    providerError?: PatrolProviderError
+  }> = []
   const released: string[] = []
   const turns: string[] = []
   const storedReviews = [...(options.reviews ?? [])]
@@ -172,6 +218,8 @@ function harness(options: HarnessOptions) {
         state: 'active',
         result: null,
         error: null,
+        tokenUsage: null,
+        providerError: null,
         recoveryCount: 0,
         lastRecoveredAt: null,
         startedAt: NOW,
@@ -195,6 +243,8 @@ function harness(options: HarnessOptions) {
         state: 'active',
         result: null,
         error: null,
+        tokenUsage: null,
+        providerError: null,
         startedAt: NOW,
         endedAt: null,
       }
@@ -202,12 +252,24 @@ function harness(options: HarnessOptions) {
       if (options.disappearAfterClaim?.has(value.id)) issues.splice(issues.indexOf(value), 1)
       return Promise.resolve(attempt)
     },
-    completePatrolAttempt: (input: { attemptId: PatrolAttemptId; result: string; error?: string }) => {
+    completePatrolAttempt: (input: {
+      attemptId: PatrolAttemptId
+      result: string
+      error?: string
+      tokenUsage?: PatrolTokenUsage
+      providerError?: PatrolProviderError
+    }) => {
       const attempt = attempts.find(value => value.id === input.attemptId)!
       const value = issues.find(candidate => candidate.id === attempt.issueId)!
       Object.assign(attempt, { state: 'completed', result: input.result, error: input.error ?? null })
       Object.assign(value, { status: input.result === 'review_handoff' ? 'in_review' : 'blocked' })
-      completedAttempts.push({ issueId: value.id, result: input.result, ...input.error === undefined ? {} : { error: input.error } })
+      completedAttempts.push({
+        issueId: value.id,
+        result: input.result,
+        ...input.error === undefined ? {} : { error: input.error },
+        ...input.tokenUsage === undefined ? {} : { tokenUsage: input.tokenUsage },
+        ...input.providerError === undefined ? {} : { providerError: input.providerError },
+      })
       return Promise.resolve(attempt)
     },
     completePatrolRun: (input: { runId: PatrolRunId; result: string; error?: string }) => {
@@ -223,14 +285,26 @@ function harness(options: HarnessOptions) {
       Object.assign(run, { recoveryCount: run.recoveryCount + 1, lastRecoveredAt: NOW })
       return Promise.resolve(run)
     },
-    failPatrolRecovery: (input: { runId: PatrolRunId; attemptId: PatrolAttemptId; error: string }) => {
+    failPatrolRecovery: (input: {
+      runId: PatrolRunId
+      attemptId: PatrolAttemptId
+      error: string
+      tokenUsage?: PatrolTokenUsage
+      providerError?: PatrolProviderError
+    }) => {
       const run = runs.find(value => value.id === input.runId)!
       const attempt = attempts.find(value => value.id === input.attemptId)!
       const value = issues.find(candidate => candidate.id === attempt.issueId)
       Object.assign(attempt, { state: 'completed', result: 'failed', error: input.error })
       Object.assign(run, { state: 'completed', result: 'failed', error: input.error })
       if (value !== undefined) Object.assign(value, { status: 'blocked' })
-      completedAttempts.push({ issueId: attempt.issueId, result: 'failed', error: input.error })
+      completedAttempts.push({
+        issueId: attempt.issueId,
+        result: 'failed',
+        error: input.error,
+        ...input.tokenUsage === undefined ? {} : { tokenUsage: input.tokenUsage },
+        ...input.providerError === undefined ? {} : { providerError: input.providerError },
+      })
       completedRuns.push({ result: 'failed', error: input.error })
       return Promise.resolve(run)
     },
@@ -248,6 +322,9 @@ function harness(options: HarnessOptions) {
     listDuePatrolPolicies: () => Promise.resolve(options.duePolicies ?? []),
   }
   ctx.provide('taskboard', taskboard as never)
+  ctx.provide('sessionPersistence', {
+    load: (id: SessionId) => Promise.resolve({ events: options.persistedEvents?.[id] ?? [] }),
+  } as never)
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => !options.missingWorkspace && id === workspaceId
       ? { id, path: '/workspace', title: 'Workspace' }
@@ -271,7 +348,7 @@ function harness(options: HarnessOptions) {
         agent: agent(options.turnReasons, (turn) => {
           turns.push(`${value.id}:${turn}`)
           if (turn === 2 && options.correctionBlocked?.has(value.id)) rejectedApprovals.push({ toolName: 'write' })
-        }),
+        }, options.turnUsages, options.providerError),
         context,
         worktree: { root: context.worktreePath, sessionCwd: context.worktreePath },
         rejectedApprovals,
@@ -476,6 +553,54 @@ describe('PatrolCoordinator', () => {
     expect(test.completedRuns[0]?.error).toContain('did not complete')
   })
 
+  it('records model usage from every Attempt turn and retains a terminal Provider error', async () => {
+    const successfulIssue = issue('usage')
+    const successful = harness({
+      issues: [successfulIssue],
+      turnUsages: [
+        { inputTokens: 10, outputTokens: 2, cacheReadTokens: 4 },
+        { inputTokens: 5, outputTokens: 1, reasoningTokens: 1 },
+      ],
+    })
+    await successful.coordinator.trigger({ workspaceId })
+    await vi.waitFor(() => { expect(successful.completedRuns).toHaveLength(1) })
+    expect(successful.completedAttempts).toEqual([{
+      issueId: successfulIssue.id,
+      result: 'review_handoff',
+      tokenUsage: {
+        inputTokens: 15,
+        outputTokens: 3,
+        cacheReadTokens: 4,
+        reasoningTokens: 1,
+      },
+    }])
+
+    const providerIssue = issue('provider-error')
+    const providerError = {
+      message: 'Provider is rate limited',
+      code: 'RATE_LIMIT',
+      status: 429,
+      providerRetryAfterMs: 1_500,
+      requestId: 'request-provider-error' as never,
+    }
+    const failed = harness({
+      issues: [providerIssue],
+      turnReasons: ['error'],
+      turnUsages: [{ inputTokens: 7, outputTokens: 0 }],
+      providerError,
+    })
+    await failed.coordinator.trigger({ workspaceId })
+    await vi.waitFor(() => { expect(failed.completedRuns).toHaveLength(1) })
+    expect(failed.completedAttempts).toEqual([{
+      issueId: providerIssue.id,
+      result: 'failed',
+      error: 'Provider is rate limited',
+      tokenUsage: { inputTokens: 7, outputTokens: 0 },
+      providerError,
+    }])
+    expect(failed.completedRuns).toEqual([{ result: 'failed', error: 'Provider is rate limited' }])
+  })
+
   it('fails when the policy, Workspace, correction commit, or thrown value is invalid', async () => {
     const noPolicy = harness({ issues: [], missingPolicy: true })
     await noPolicy.coordinator.trigger({ workspaceId })
@@ -563,6 +688,7 @@ describe('PatrolCoordinator', () => {
     const begin = vi.fn(() => Promise.resolve({
       id: PatrolRunId('scheduled-skip'), workspaceId, trigger: 'scheduled', scheduledFor: due.nextDueAt,
       state: 'completed', result: 'skipped_global_busy', error: null,
+      tokenUsage: null, providerError: null,
       recoveryCount: 0, lastRecoveredAt: null, startedAt: NOW, endedAt: NOW,
     } satisfies PatrolRun))
     ctx.provide('taskboard', {
@@ -684,6 +810,41 @@ describe('PatrolCoordinator', () => {
       contexts: { [value.id]: context },
       reviews: [review],
       resultHeads: ['corrected456'],
+      turnUsages: [{ inputTokens: 3, outputTokens: 1 }],
+      persistedEvents: {
+        [context.sessionId]: [
+          {
+            type: 'assistant/chunk',
+            seq: 0,
+            time: Date.parse(NOW) - 1,
+            data: {
+              turn: 1,
+              step: 1,
+              chunk: { type: 'usage', usage: { inputTokens: 90, outputTokens: 90 } },
+            },
+          },
+          {
+            type: 'assistant/chunk',
+            seq: 1,
+            time: Date.parse(NOW),
+            data: {
+              turn: 2,
+              step: 1,
+              chunk: { type: 'usage', usage: { inputTokens: 11, outputTokens: 2 } },
+            },
+          },
+        ],
+        [review.sessionId]: [{
+          type: 'assistant/chunk',
+          seq: 0,
+          time: Date.parse(NOW),
+          data: {
+            turn: 1,
+            step: 1,
+            chunk: { type: 'usage', usage: { inputTokens: 7, outputTokens: 1 } },
+          },
+        }],
+      },
     })
     const run = await test.taskboard.beginPatrolRun({ trigger: 'manual' })
     test.attempts.push({
@@ -694,6 +855,8 @@ describe('PatrolCoordinator', () => {
       state: 'active',
       result: null,
       error: null,
+      tokenUsage: null,
+      providerError: null,
       startedAt: NOW,
       endedAt: null,
     })
@@ -705,7 +868,11 @@ describe('PatrolCoordinator', () => {
     expect(run).toMatchObject({ recoveryCount: 1, lastRecoveredAt: NOW })
     expect(test.review).not.toHaveBeenCalled()
     expect(test.turns).toEqual([`${value.id}:1`])
-    expect(test.completedAttempts).toEqual([{ issueId: value.id, result: 'review_handoff' }])
+    expect(test.completedAttempts).toEqual([{
+      issueId: value.id,
+      result: 'review_handoff',
+      tokenUsage: { inputTokens: 21, outputTokens: 4 },
+    }])
   })
 
   it('continues an interrupted implementation in its exact Session before creating Reviewer evidence', async () => {
@@ -724,6 +891,8 @@ describe('PatrolCoordinator', () => {
       state: 'active',
       result: null,
       error: null,
+      tokenUsage: null,
+      providerError: null,
       startedAt: NOW,
       endedAt: null,
     })
@@ -752,6 +921,8 @@ describe('PatrolCoordinator', () => {
         state: 'completed',
         result: checkpoint.result,
         error: checkpoint.error,
+        tokenUsage: null,
+        providerError: null,
         startedAt: NOW,
         endedAt: NOW,
       })
@@ -790,6 +961,8 @@ describe('PatrolCoordinator', () => {
       state: 'active',
       result: null,
       error: null,
+      tokenUsage: null,
+      providerError: null,
       startedAt: NOW,
       endedAt: null,
     })
@@ -810,6 +983,8 @@ describe('PatrolCoordinator', () => {
       state: 'completed',
       result: 'permission_blocked',
       error: 'approval checkpoint',
+      tokenUsage: null,
+      providerError: null,
       startedAt: NOW,
       endedAt: NOW,
     })
@@ -865,6 +1040,8 @@ describe('PatrolCoordinator', () => {
         state: 'active',
         result: null,
         error: null,
+        tokenUsage: null,
+        providerError: null,
         startedAt: NOW,
         endedAt: null,
       })
@@ -886,6 +1063,8 @@ describe('PatrolCoordinator', () => {
       state: 'active',
       result: null,
       error: null,
+      tokenUsage: null,
+      providerError: null,
       startedAt: NOW,
       endedAt: null,
     })

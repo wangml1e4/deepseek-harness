@@ -1,6 +1,6 @@
 /** Fixed-interval Patrol scheduling calculations. */
 
-import type { PatrolInterval } from './types.ts'
+import type { PatrolInterval, PatrolTokenUsage } from './types.ts'
 
 /** Default interval selected before the user enables Patrol. */
 export const DEFAULT_PATROL_INTERVAL: PatrolInterval = '1h'
@@ -53,4 +53,34 @@ export function nextPatrolCadence(
  */
 export function nextPatrolDueAfterSave(savedAt: Date, interval: PatrolInterval): string {
   return new Date(savedAt.getTime() + patrolIntervalMilliseconds(interval)).toISOString()
+}
+
+/**
+ * Add Provider-reported usage while retaining only optional buckets that were reported.
+ * @param left - Earlier usage, or null before any Provider usage was observed.
+ * @param right - Later usage, or null when that execution reported none.
+ * @returns summed usage, or null when both inputs are null.
+ */
+export function addPatrolTokenUsage(
+  left: PatrolTokenUsage | null,
+  right: PatrolTokenUsage | null,
+): PatrolTokenUsage | null {
+  if (left === null) return right
+  if (right === null) return left
+  const total: {
+    inputTokens: number
+    outputTokens: number
+    cacheReadTokens?: number
+    cacheWriteTokens?: number
+    reasoningTokens?: number
+  } = {
+    inputTokens: left.inputTokens + right.inputTokens,
+    outputTokens: left.outputTokens + right.outputTokens,
+  }
+  for (const key of ['cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens'] as const) {
+    if (left[key] !== undefined || right[key] !== undefined) {
+      total[key] = (left[key] ?? 0) + (right[key] ?? 0)
+    }
+  }
+  return total
 }
