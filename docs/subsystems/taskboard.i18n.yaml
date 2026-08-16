@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/taskboard.md
-taskboard.md: b6bcc787901ad471e1605487323560fcc485c699
-taskboard.zh.md: 55806a69ceaf9a92788fc71bf4d4eaaec2079b45
+taskboard.md: 1cebf66fa23e7adf70f60e82c1890e559e9c71f2
+taskboard.zh.md: 16c99294bd77ac72ad6f5ef54943fb8da5be1488

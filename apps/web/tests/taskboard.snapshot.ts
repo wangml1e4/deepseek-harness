@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { installAssembledBootEnv, mountAssembledApp, REFRESHING_GOLDEN } from './assembled-boot.ts'
 
 const EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/taskboard/workspace-taskboard.expected.txt')
+const NARROW_EXPECTED = join(process.cwd(), 'apps/web/tests/snapshots/taskboard/workspace-taskboard-narrow-details.expected.txt')
 
 installAssembledBootEnv()
 
@@ -139,5 +140,39 @@ describe('assembled Workspace Taskboard', () => {
       writeFileSync(EXPECTED, shape)
     }
     await expect(shape).toMatchFileSnapshot(EXPECTED)
+  })
+
+  it('presents Issue details full-frame on a narrow viewport and restores the Taskboard center', async () => {
+    window.innerWidth = 800
+    mountAssembledApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Open sidebar' }, { timeout: 10_000 }))
+    const tree = await screen.findByRole('tree', { name: 'Sessions' }, { timeout: 10_000 })
+    const workspaceRow = (await within(tree).findAllByText('fixture'))
+      .map(node => node.closest<HTMLElement>('[role="treeitem"]'))
+      .find(node => node?.getAttribute('aria-expanded') !== null)
+    if (workspaceRow === undefined || workspaceRow === null) throw new Error('fixture Workspace row missing')
+    fireEvent.mouseEnter(workspaceRow)
+    fireEvent.click(await within(tree).findByRole('button', { name: 'Open Taskboard for fixture, todo: 1' }))
+
+    const surface = await screen.findByRole('main', undefined, { timeout: 10_000 })
+    fireEvent.click(within(surface).getByRole('tab', { name: 'List' }))
+    const table = await within(surface).findByRole('table', { name: 'Issue list' })
+    fireEvent.click(within(table).getByRole('button', { name: /FIX-1/ }))
+    const details = await screen.findByText('Keep the Taskboard scoped to its Workspace.', undefined, { timeout: 10_000 })
+    const detailPanel = details.closest('aside')
+    const frame = detailPanel?.closest<HTMLElement>('[data-details-fullscreen]') ?? null
+    if (detailPanel === null || frame === null) throw new Error('narrow Issue details must fill the application frame')
+    const opened = `opened=${frame.hasAttribute('data-details-fullscreen')}|tracks=${frame.style.gridTemplateColumns}`
+
+    fireEvent.click(within(detailPanel).getByRole('button', { name: 'Close Issue details' }))
+    await waitFor(() => { expect(frame.hasAttribute('data-details-fullscreen')).toBe(false) })
+    const closed = `closed=${frame.hasAttribute('data-details-fullscreen')}|tracks=${frame.style.gridTemplateColumns}`
+    const shape = `${opened}\n${closed}\ncenter=${within(surface).getByRole('heading', { level: 1 }).textContent}\n`
+    if (REFRESHING_GOLDEN) {
+      mkdirSync(dirname(NARROW_EXPECTED), { recursive: true })
+      writeFileSync(NARROW_EXPECTED, shape)
+    }
+    await expect(shape).toMatchFileSnapshot(NARROW_EXPECTED)
   })
 })

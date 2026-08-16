@@ -140,12 +140,15 @@ export function AppFrame({
   // absorbs the squeeze.
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
   useEffect(() => { actions.setNarrow(narrow) }, [actions, narrow])
-  const sidebarCollapsed = narrow ? !panels.narrowExpanded : panels.sidebar === 0
+  const detailsWidth = detailsSession === undefined && surface === null ? 0 : panels.details
+  const detailsFullscreen = narrow && surface !== null && detailsWidth > 0
+  const sidebarCollapsed = detailsFullscreen || (narrow ? !panels.narrowExpanded : panels.sidebar === 0)
   const sidebarPreference = sidebarCollapsed
     ? 0
     : panels.sidebar === 0 ? SIDEBAR_DEFAULT : panels.sidebar
-  const detailsWidth = detailsSession === undefined && surface === null ? 0 : panels.details
-  const cols = computeColumns(viewport, sidebarPreference, detailsWidth)
+  const cols = detailsFullscreen
+    ? { sidebar: 0, center: 0, details: viewport }
+    : computeColumns(viewport, sidebarPreference, detailsWidth)
   const colsRef = useRef(cols)
   colsRef.current = cols
 
@@ -174,6 +177,7 @@ export function AppFrame({
       style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px` }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
+      data-details-fullscreen={detailsFullscreen || undefined}
       data-dragging={dragging || undefined}
     >
       <div className={css.sidebarCol}>
@@ -209,7 +213,15 @@ export function AppFrame({
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {cols.details > 0 && <DragHandle side="details" left={viewport - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {!detailsFullscreen && cols.details > 0 && (
+        <DragHandle
+          side="details"
+          left={viewport - cols.details}
+          onStart={onDetailsStart}
+          onDrag={onDetailsDrag}
+          onEnd={onDragEnd}
+        />
+      )}
     </div>
   )
 }
