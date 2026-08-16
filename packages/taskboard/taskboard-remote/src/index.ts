@@ -44,6 +44,8 @@ import type {
   TaskboardPatrolIssueValue,
   TaskboardPatrolTriggerInput,
   TaskboardPatrolValue,
+  TaskboardPatrolWorktreeRemovalInput,
+  TaskboardPatrolWorktreeRemovalValue,
   TaskboardRemoteResult,
 } from './types.ts'
 
@@ -391,12 +393,25 @@ export class TaskboardRemote extends TypertRemoteService {
       const context = await this.ctx.taskboard.getPatrolDevelopmentContext(reference) ?? null
       return {
         context,
+        worktreePresent: context === null ? false : await this.ctx.taskboardPatrol.worktreePresent(context),
         diff: context === null || context.resultCommit === null
           ? null
           : await this.ctx.taskboardPatrol.diff(context, context.resultCommit),
         reviews: await this.ctx.taskboard.listPatrolReviews(reference),
       }
     })
+  }
+
+  /**
+   * Remove one explicitly confirmed, clean, integrated Issue worktree.
+   * @param input - Workspace, Issue lookup, and confirmation.
+   * @returns preserved Development Context identities.
+   */
+  @Remote('removePatrolWorktree')
+  removePatrolWorktree(
+    input: TaskboardPatrolWorktreeRemovalInput,
+  ): Promise<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>> {
+    return this.result(() => this.ctx.taskboardPatrol.removeWorktree(input))
   }
 
   /** Resolve one registered Workspace or return the shared Taskboard failure. */

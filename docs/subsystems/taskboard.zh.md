@@ -44,7 +44,7 @@ Host 启动时会在调度任何新的到期触发前，不依赖 Workspace 枚�
 
 `@deepseek-ai/dsh-taskboard-patrol` 会根据持久到期时间调度已启用策略，并只按手工顺序扫描 `todo` Issue。它会跳过用户指派、明确等待，以及缺少已集成到该 Issue 固定 Base Branch 的 `done` 结果 commit 的依赖。一个已审查 Issue 交接到 `in_review` 后会结束 Run；只有因工具审批被拒而阻塞的 Attempt 才能继续扫描。其他故障会阻塞已领取 Issue 并结束 Run。
 
-Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。它会恢复准确 Session，挂载已保存的 Agent 与 Permission Preset，并拒绝无人值守审批。实现 Agent 必须留下干净且已提交的变更。独立的持久 Reviewer Session 会接收受限的已提交 diff，只暴露结构化提交工具，并固定使用只读沙箱和 `never` 审批策略；原 Session 随后接收其持久结论，执行一轮修正，再进入人工审查。
+Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git 命令集合，绝不执行 fetch、pull、push、PR、merge、reset、删除分支或自动移除 worktree，并在 Issue worktree 内保留 Workspace 相对 Session 目录。手工移除必须经过确认；除非准确物理 worktree 干净且已记录结果 commit 已集成到 Base Branch，否则操作会被拒绝。移除后仍保留分支、Session 绑定、Development Context 和历史。Patrol 会恢复准确 Session，挂载已保存的 Agent 与 Permission Preset，并拒绝无人值守审批。实现 Agent 必须留下干净且已提交的变更。独立的持久 Reviewer Session 会接收受限的已提交 diff，只暴露结构化提交工具，并固定使用只读沙箱和 `never` 审批策略；原 Session 随后接收其持久结论，执行一轮修正，再进入人工审查。
 
 被中断的活跃 Attempt 只能通过已存储的 Development Context 恢复。恢复会重新打开准确 Session 与 worktree，复用已为该 Attempt 落库的 Reviewer 证据；否则要求实现 Session 先检查此前 transcript 与当前分支再继续。Context、Session 或 worktree 缺失或不匹配时，Attempt 与 Run 会原子地结束为失败，Issue 移至 `blocked`，原因被追加记录，并且绝不会创建替代 Session。
 
@@ -56,7 +56,7 @@ Patrol 消费方通过受管理 subprocess 服务执行固定的纯本地 Git �
 
 `@deepseek-ai/dsh-taskctl` 是该 Remote 之上的 JSON CLI。`@deepseek-ai/dsh-skill-manage-taskboard` 注册内置且允许模型与用户调用的工作流，要求 Agent 读取当前 Issue 上下文、只认领 `todo`、使用乐观版本、在把工作移至 `in_review` 前完成审查与 commit，并把 `done` 留给人工验收。标准 Web Host 会把 Provider、Remote 和 skill 一起挂载。
 
-Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、附件上传、图片预览、受控下载与确认删除、Patrol 设置与历史、Development Context 与审查证据，以及人工接受或退回操作。每个 Workspace 行会显示实时 `todo` 数量；点击已绑定的实现 Session 会返回普通对话视图；人工审查会显示已提交的 Base Branch diff。Dashboard 会推导完成率、生命周期数量、逾期工作、14 天内到期工作和最新五条 Workspace 活动记录，并把每项摘要链接到对应的筛选 List。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset，并显示 Run 恢复证据、聚合 token 用量和结构化 Provider 诊断。版本一不会发布或同步任何 GitHub Issue，包括 `deepseek-ai/deepseek-harness` 中的 Issue。
+Web 消费方提供双语仪表盘、看板、列表、甘特图、Issue 详情、附件上传、图片预览、受控下载与确认删除、Patrol 设置与历史、Development Context 与审查证据、经过确认的物理 worktree 移除，以及人工接受或退回操作。每个 Workspace 行会显示实时 `todo` 数量；点击已绑定的实现 Session 会返回普通对话视图；人工审查会显示已提交的 Base Branch diff。Dashboard 会推导完成率、生命周期数量、逾期工作、14 天内到期工作和最新五条 Workspace 活动记录，并把每项摘要链接到对应的筛选 List。甘特图会以规范 `blocks` 方向一次读取全部 Workspace 依赖，在表格中保留未排期 Issue，并持久化手工条形变更而不移动依赖项。Patrol 设置复用详情栏，从 Host 发现本地分支、Agent Preset、provider／model／reasoning 选项和 Permission Preset，并显示 Run 恢复证据、聚合 token 用量和结构化 Provider 诊断。版本一不会发布或同步任何 GitHub Issue，包括 `deepseek-ai/deepseek-harness` 中的 Issue。
 
 ## 版本一之后的 GitHub 计划
 
@@ -422,6 +422,21 @@ result(context: PatrolDevelopmentContext): Promise<PatrolGitResult>
 diff(context: PatrolDevelopmentContext, commit: string): Promise<PatrolGitDiff>
 
 /**
+ * Read whether one recorded physical Issue worktree is currently present.
+ * @param context - persistent Development Context.
+ * @returns true only for the exact physical directory.
+ */
+worktreePresent(context: PatrolDevelopmentContext): Promise<boolean>
+
+/**
+ * Remove one exact physical Issue worktree while preserving its branch and durable binding.
+ * @param input - Workspace, Issue lookup, and explicit confirmation.
+ * @returns preserved branch, path, and result-commit identities; rejects unless the worktree is
+ * clean and its result commit is integrated.
+ */
+async removeWorktree(input: RemovePatrolWorktreeInput): Promise<PatrolWorktreeRemoval>
+
+/**
  * Start one manual background Run under Host-wide exclusivity.
  * @param input - Workspace and optional exact todo Issue.
  * @returns active durable Run accepted by the Taskboard Provider.
@@ -431,7 +446,7 @@ trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:169`](../../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:190`](../../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="ctxtaskboardremote--taskboardremote"></a>
 
@@ -621,11 +636,18 @@ Host Remote adapter that keeps Workspace identity authoritative.
  * @returns explicit nullable binding and append-only reviews.
  */
 @Remote('patrolIssue') patrolIssue(reference: IssueReference): Promise<TaskboardRemoteResult<TaskboardPatrolIssueValue>>
+
+/**
+ * Remove one explicitly confirmed, clean, integrated Issue worktree.
+ * @param input - Workspace, Issue lookup, and confirmation.
+ * @returns preserved Development Context identities.
+ */
+@Remote('removePatrolWorktree') removePatrolWorktree( input: TaskboardPatrolWorktreeRemovalInput, ): Promise<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>>
 ```
 
 Types: [WorkspaceId](workspace.md)
 
-Source: [`packages/taskboard/taskboard-remote/src/index.ts:59`](../../packages/taskboard/taskboard-remote/src/index.ts)
+Source: [`packages/taskboard/taskboard-remote/src/index.ts:61`](../../packages/taskboard/taskboard-remote/src/index.ts)
 
 <a id="taskboard-events"></a>
 

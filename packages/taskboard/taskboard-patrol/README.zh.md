@@ -5,8 +5,8 @@
 Workspace Taskboard Patrol 的 Host 执行支持。`ctx.taskboardPatrol` 将已经持久化的 `PatrolAttempt` 转换为一份永久 Development Context 和一个普通、可见的 Harness Session。
 
 - 从未绑定的 Issue 会固定所选本地 Base Branch、Agent Preset、provider、model、reasoning effort 和 Permission Preset。退回的 Issue 复用这些值，不读取后续 Policy 变更。
-- 每个 Issue 拥有一个 `dsh-task/<issue-identifier>` 分支和一个由 Host 管理且永久保留的 worktree。Workspace 位于仓库根目录下层时，Session cwd 会保留其相对目录。
-- Git 适配器只使用参数数组执行本地命令：仓库／ref 检查、`worktree add`、祖先检查、status、diff 和 commit 读取。它不包含 fetch、pull、push、merge、reset、分支删除、worktree 移除或 PR 操作。
+- 每个 Issue 拥有一个 `dsh-task/<issue-identifier>` 分支和一个由 Host 管理的持久 worktree 绑定。Patrol 恢复该 Issue 时，会在原路径创建或还原物理 worktree。Workspace 位于仓库根目录下层时，Session cwd 会保留其相对目录。
+- Git 适配器只使用参数数组执行本地命令：仓库／ref 检查、`worktree add`、受保护的 `worktree remove`、祖先检查、status、diff 和 commit 读取。它不包含 fetch、pull、push、merge、reset、分支删除、自动移除 worktree 或 PR 操作。
 - 首次持久化前配置失败时，可以继续创建已经预留 id 的 Session。首次持久化一旦记录，冷 Session 只恢复该确切 id，Session 缺失时会失败且不创建替代对象。已存活的绑定 Session 仅在 idle 且 cwd 与 Agent Preset 仍匹配时借用。
 - 新 Session 在发布前加入所选 Agent Preset，记录 Permission Preset；恢复时保留日志中的模型选择；随后挂接到所属 Workspace，并在执行前 flush。
 - 每个执行 lease 会以 `rejected` 回答全部工具审批请求，记录请求工具及原因，并取消该轮。Patrol 协调器负责随后写回 Attempt 和 Issue。
@@ -16,6 +16,7 @@ Workspace Taskboard Patrol 的 Host 执行支持。`ctx.taskboardPatrol` 将已�
 - 实现 Agent 必须留下干净且已提交的 Base Branch diff。独立的持久 Reviewer Session 会接收该已提交 diff，继承已保存的模型组合，只暴露结构化审查提交工具，并固定使用只读沙箱与 `never` 审批策略。实现 Session 随后接收持久审查结论，执行一轮修正与验证，再交给人工审查。
 - 实现、Reviewer、修正和恢复轮次会从规范 Session 事件收集 Provider 报告的用量，且不会重复计算原始记录与组装记录。模型流的终态 `finish` 故障会与编排错误分别保留，Taskboard Provider 会把已完成 Attempt 的用量聚合到永久 Run 历史中。
 - `configuration()` 会发现本地分支、可挂载 Agent Preset、在线 provider／model／reasoning 选项和现有 Permission Preset。`updatePolicy()` 在乐观版本保存前校验这些 Host 所属选项。`trigger()` 可在不启用固定调度的情况下启动手工 Run。
+- `removeWorktree()` 要求显式确认、干净的物理 worktree，以及已集成到固定 Base Branch 的已记录结果 commit。它只移除物理目录；Issue 分支、Session 绑定、Development Context 和 Patrol 历史都会保留，之后退回的 Issue 可以恢复同一路径。
 
 调度器在 Host 进程内运行，Host 停止期间不能执行。Taskboard Policy 会保留固定节拍；启动时会先完成活跃 Run 恢复，再最多消费一次已到期触发。
 
@@ -79,5 +80,5 @@ Reviewer 会收到准确的初步 commit 及其受限 Base Branch diff，再通�
 
 ## 已知限制与延后工作
 
-- 本包只支持本地 Git 仓库和永久本地 worktree；特意不提供远程 fetch、push、PR、merge 或清理操作。
+- 本包只支持本地 Git 仓库；特意不提供远程 fetch、push、PR、merge 或分支清理操作。物理 worktree 移除是受保护的显式用户操作，绝不会由 Patrol 调度或人工审查通过自动执行。
 - 版本一绝不会把 Taskboard Issue 发布到 `deepseek-ai/deepseek-harness` GitHub Issues。

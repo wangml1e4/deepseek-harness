@@ -8,7 +8,7 @@
 
 该 skill 指示 Agent 使用 `taskctl` 执行持久 Issue、评论、活动记录、附件和关系操作。它要求 Agent 先读取 Issue 及其最新评论，只能通过移至 `in_progress` 认领 `todo` 工作；发生一次乐观冲突后，只有重新读取当前状态才能重试一次；同时保留无关工作，且绝不删除 Issue。
 
-CLI 参考也覆盖 Patrol 策略、Run 和 Issue 证据读取。只有用户明确要求时，该 skill 才允许修改 Patrol 设置或启动手工 Run；资格判定、认领、Session 绑定、审批处理、审查和生命周期回写仍由 Host 持有。
+CLI 参考也覆盖 Patrol 策略、Run、Issue 证据和受保护的 worktree 清理。只有用户明确要求时，该 skill 才允许修改 Patrol 设置、启动手工 Run 或移除 worktree；资格判定、认领、Session 绑定、审批处理、审查、生命周期回写和清理前提仍由 Host 持有。
 
 提交人工审查前，Agent 必须审查变更、应用必要修正、运行验证、创建 commit、追加结果和剩余风险，把 Issue 移至 `in_review`，并结束当前执行轮次。该 skill 绝不授权 Agent 把工作移至 `done`；完成状态由人工验收持有。
 

@@ -55,7 +55,8 @@ async function bench() {
       }),
       updatePatrol: () => ok({}),
       runPatrol: () => ok({}),
-      patrolIssue: () => ok({ context: null, diff: null, reviews: [] }),
+      patrolIssue: () => ok({ context: null, worktreePresent: false, diff: null, reviews: [] }),
+      removePatrolWorktree: () => ok({ worktreePath: '/tmp/taskboard', branch: 'dsh-task/WS-1', resultCommit: 'commit' }),
     },
   }
   ctx.provide('layout', layout as never)

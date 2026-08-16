@@ -17,6 +17,7 @@ permissions=Workspace Write|Full Access
 run=no_eligible_issue
 recovery=visible
 session=fx-beta
+worktree=/tmp/dsh-taskboard/fx-ws-fixture/fix-2|cleanup=removed
 diff=Base Branch diff ·  packages/taskboard/taskboard-sqlite/src/index.ts | 4 ++++|patch=visible
 review=Reviewer requested changes|Verification:|Remaining risks:
 human=Return to todo|Mark done

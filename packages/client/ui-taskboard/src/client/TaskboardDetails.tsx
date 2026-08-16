@@ -60,6 +60,7 @@ export function TaskboardDetails({
   removeRelation,
   updatePatrol,
   runPatrol,
+  removePatrolWorktree,
   openSession,
   close,
   t,
@@ -247,8 +248,15 @@ export function TaskboardDetails({
               ><code>{patrolContext.sessionId}</code></button></dd></div>
               <div><dt>{t('details.branch')}</dt><dd><code>{patrolContext.branch}</code></dd></div>
               <div><dt>{t('details.baseBranch')}</dt><dd><code>{patrolContext.baseBranch}</code></dd></div>
+              <div><dt>{t('details.worktree')}</dt><dd><code>{patrolContext.worktreePath}</code></dd></div>
               <div><dt>{t('details.commit')}</dt><dd><code>{patrolContext.resultCommit ?? t('details.commitPending')}</code></dd></div>
             </dl>
+            {snapshot.patrolIssue.worktreePresent
+              ? <button type="button" className={css.secondaryButton} onClick={() => {
+                if (!window.confirm(t('details.worktree.confirm'))) return
+                void removePatrolWorktree(true)
+              }}><IconTrashOutline16 />{t('details.worktree.remove')}</button>
+              : <p className={css.muted}>{t('details.worktree.removed')}</p>}
             {snapshot.patrolIssue.diff !== null && <details className={css.diffEvidence} open>
               <summary>{t('details.diff')} · {snapshot.patrolIssue.diff.stat}</summary>
               <pre>{snapshot.patrolIssue.diff.patch}</pre>

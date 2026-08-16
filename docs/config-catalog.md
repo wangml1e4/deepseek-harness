@@ -2268,7 +2268,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/taskboard/taskboard-patrol/src/index.ts:48`](../packages/taskboard/taskboard-patrol/src/index.ts)
+Source: [`packages/taskboard/taskboard-patrol/src/index.ts:69`](../packages/taskboard/taskboard-patrol/src/index.ts)
 
 <a id="deepseek-aidsh-taskboard-sqlite"></a>
 

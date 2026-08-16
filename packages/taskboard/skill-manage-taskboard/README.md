@@ -8,7 +8,7 @@ The bundled `manage-taskboard` skill Provider. It makes the Workspace Taskboard 
 
 The skill instructs an Agent to use `taskctl` for durable Issue, Comment, Activity, attachment, and relation operations. It requires the Agent to read an Issue and its latest Comments first, claim only `todo` work by moving it to `in_progress`, retry one optimistic conflict only after rereading current state, preserve unrelated work, and never delete an Issue.
 
-The CLI reference also covers Patrol policy, Run, and Issue evidence reads. The skill permits changing Patrol settings or starting a manual Run only after an explicit user request; eligibility, claim, Session binding, approval handling, review, and lifecycle writeback remain Host-owned operations.
+The CLI reference also covers Patrol policy, Run, Issue evidence, and guarded worktree cleanup. The skill permits changing Patrol settings, starting a manual Run, or removing a worktree only after an explicit user request; eligibility, claim, Session binding, approval handling, review, lifecycle writeback, and cleanup preconditions remain Host-owned operations.
 
 Before a review handoff, the Agent must review the change, apply required fixes, run verification, create a commit, append the outcome and remaining risks, move the Issue to `in_review`, and end the current execution round. The skill never authorizes an Agent to move work to `done`; human acceptance owns completion.
 

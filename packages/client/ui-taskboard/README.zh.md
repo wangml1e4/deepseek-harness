@@ -8,7 +8,7 @@
 
 详情界面可编辑标题、Markdown 描述、状态、优先级、负责人、标签和按天记录的日期。它会列出仅追加的评论与活动记录、管理有向依赖关系，并在不提供永久删除的前提下归档 Issue。附件支持单个不超过 25 MB 的任意文件类型；界面会列出元数据、预览图片、通过受控 Host Remote 下载字节，并且只会在浏览器确认后调用永久附件删除。把 `in_review`、`blocked` 或 `done` Issue 退回 `todo` 时，提交前会显示必填的原因字段。
 
-Taskboard 顶栏会在现有右侧详情栏中打开 Patrol 设置。开关默认关闭；面板可保存 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h` 固定间隔，以及 Base Branch、Agent Preset、provider、model、reasoning effort 和 Permission Preset 选项。它会显示下次到期时间、活跃状态、永久 Run／Attempt 历史、聚合 token 用量、结构化 Provider 诊断和手工 `Run now` 操作。合格的 `todo` Issue 也提供定向运行操作。Issue 详情会链接到已绑定 Session，并显示其分支、Base Branch、结果 commit、受限的已提交 diff 和独立 Reviewer 结论。人工审查可把 `in_review` 移至 `done`，或在提供必填原因后退回 `todo`；它绝不合并代码。
+Taskboard 顶栏会在现有右侧详情栏中打开 Patrol 设置。开关默认关闭；面板可保存 `5m`、`30m`、`1h`、`2h`、`6h`、`12h` 或 `24h` 固定间隔，以及 Base Branch、Agent Preset、provider、model、reasoning effort 和 Permission Preset 选项。它会显示下次到期时间、活跃状态、永久 Run／Attempt 历史、聚合 token 用量、结构化 Provider 诊断和手工 `Run now` 操作。合格的 `todo` Issue 也提供定向运行操作。Issue 详情会链接到已绑定 Session，并显示其分支、Base Branch、worktree 路径与存在状态、结果 commit、受限的已提交 diff 和独立 Reviewer 结论。物理目录存在时才会显示需要确认的 worktree 移除操作；Host 会执行干净状态与 Base Branch 集成检查，操作后详情仍会保留 Session、分支、diff 和审查证据。人工审查可把 `in_review` 移至 `done`，或在提供必填原因后退回 `todo`；它绝不合并代码。
 
 该包注册到 `sidebar.workspace.action`、`shell.center` 和 `shell.details`。`ui-layout` 持有通用替代界面选择，`ui-workspace` 提供 Workspace 行的 owner 数据。生成的 `taskboard` Remote 命名空间以 `remote.taskboard` 形式显式声明为依赖，因此该插件只会在对应描述符挂载后激活。Workspace 行操作共享一份数量投影，只加载各 Workspace 推导出的 `todo` 数量。一次 Workspace 级关系读取会提供规范方向的依赖连线，避免逐 Issue RPC 调用。Host 的 `taskboard/changed` 事件会刷新受影响的数量和当前 Workspace；代际围栏则阻止较早的数量、Workspace 或 Issue 响应覆盖较新的状态。
 

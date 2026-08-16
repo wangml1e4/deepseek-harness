@@ -34,6 +34,8 @@ import type {
   TaskboardPatrolIssueValue,
   TaskboardPatrolTriggerInput,
   TaskboardPatrolValue,
+  TaskboardPatrolWorktreeRemovalInput,
+  TaskboardPatrolWorktreeRemovalValue,
   TaskboardRelationListValue,
   TaskboardRemoteResult,
   TaskboardTodoCountValue,
@@ -80,6 +82,9 @@ export interface TaskboardClientRemote {
   updatePatrol: (input: UpdatePatrolPolicyInput) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolValue['policy']>>>
   runPatrol: (input: TaskboardPatrolTriggerInput) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolValue['runs'][number]['run']>>>
   patrolIssue: (reference: IssueReference) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolIssueValue>>>
+  removePatrolWorktree: (
+    input: TaskboardPatrolWorktreeRemovalInput,
+  ) => Promise<RemoteResult<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>>>
 }
 
 /** Load phase for the active Taskboard. */
@@ -427,6 +432,33 @@ export class TaskboardController implements HostObservable<TaskboardSnapshot> {
             ...this.snapshot.patrol,
             runs: [{ run, attempts: [] }, ...this.snapshot.patrol.runs.filter(value => value.run.id !== run.id)],
           },
+          actionError: null,
+        })
+      },
+    )
+  }
+
+  /**
+   * Remove the selected Issue's explicitly confirmed physical worktree.
+   * @param confirmed - explicit user confirmation.
+   * @returns settled mutation result.
+   */
+  async removePatrolWorktree(confirmed: boolean): Promise<TaskboardActionResult> {
+    const selected = this.snapshot.selectedIssue
+    const workspaceId = this.snapshot.workspaceId
+    const patrolIssue = this.snapshot.patrolIssue
+    if (selected === null || workspaceId === null || patrolIssue === null
+      || patrolIssue.context === null || !patrolIssue.worktreePresent) {
+      return this.fail('patrol_context_missing', 'The selected Issue has no physical Patrol worktree')
+    }
+    const generation = this.detailLoad
+    return await this.mutate(
+      () => this.remote.removePatrolWorktree({ workspaceId, reference: selected.id, confirmed }),
+      () => this.isSelectedIssue(generation),
+      () => {
+        this.publish({
+          ...this.snapshot,
+          patrolIssue: { ...patrolIssue, worktreePresent: false },
           actionError: null,
         })
       },

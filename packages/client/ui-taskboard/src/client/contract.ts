@@ -34,6 +34,7 @@ export interface TaskboardInjected {
     patch: Omit<UpdatePatrolPolicyInput, 'workspaceId' | 'expectedVersion'>,
   ) => Promise<TaskboardActionResult>
   runPatrol: (issue?: IssueReference) => Promise<TaskboardActionResult>
+  removePatrolWorktree: (confirmed: boolean) => Promise<TaskboardActionResult>
   close: () => void
 }
 

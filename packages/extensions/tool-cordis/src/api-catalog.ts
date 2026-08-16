@@ -2031,6 +2031,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'bounded patch and summary.',
       },
       {
+        signature: 'worktreePresent(context: PatrolDevelopmentContext): Promise<boolean>',
+        description: 'Read whether one recorded physical Issue worktree is currently present.',
+        parameters: [{ name: 'context', description: 'persistent Development Context.' }],
+        returns: 'true only for the exact physical directory.',
+      },
+      {
+        signature: 'async removeWorktree(input: RemovePatrolWorktreeInput): Promise<PatrolWorktreeRemoval>',
+        description: 'Remove one exact physical Issue worktree while preserving its branch and durable binding.',
+        parameters: [{ name: 'input', description: 'Workspace, Issue lookup, and explicit confirmation.' }],
+        returns: 'preserved branch, path, and result-commit identities; rejects unless the worktree is clean and its result commit is integrated.',
+      },
+      {
         signature: 'trigger(input: TriggerPatrolRunInput): Promise<PatrolRun>',
         description: 'Start one manual background Run under Host-wide exclusivity.',
         parameters: [{ name: 'input', description: 'Workspace and optional exact todo Issue.' }],
@@ -2198,6 +2210,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Read one Issue\'s persistent implementation binding and Reviewer evidence.',
         parameters: [{ name: 'reference', description: 'opaque id or human-readable identifier.' }],
         returns: 'explicit nullable binding and append-only reviews.',
+      },
+      {
+        signature: '@Remote(\'removePatrolWorktree\') removePatrolWorktree( input: TaskboardPatrolWorktreeRemovalInput, ): Promise<TaskboardRemoteResult<TaskboardPatrolWorktreeRemovalValue>>',
+        description: 'Remove one explicitly confirmed, clean, integrated Issue worktree.',
+        parameters: [{ name: 'input', description: 'Workspace, Issue lookup, and confirmation.' }],
+        returns: 'preserved Development Context identities.',
       },
     ],
   },
@@ -4179,6 +4197,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface PatrolWorktree {\n    readonly root: string;\n    readonly sessionCwd: string;\n}',
   },
   {
+    name: 'PatrolWorktreeRemoval',
+    declaration: 'export interface PatrolWorktreeRemoval {\n    readonly worktreePath: string;\n    readonly branch: string;\n    readonly resultCommit: string;\n}',
+  },
+  {
     name: 'PermissionSelect',
     declaration: 'export interface PermissionSelect {\n    options: PresetOption[];\n    currentValue: string;\n}',
   },
@@ -4301,6 +4323,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RemoveIssueRelationInput',
     declaration: 'export interface RemoveIssueRelationInput extends VersionedIssueInput {\n    readonly relationId: RelationId;\n}',
+  },
+  {
+    name: 'RemovePatrolWorktreeInput',
+    declaration: 'export interface RemovePatrolWorktreeInput {\n    readonly workspaceId: WorkspaceId;\n    readonly reference: IssueReference;\n    readonly confirmed: boolean;\n}',
   },
   {
     name: 'RequestContext',
@@ -5020,7 +5046,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskboardErrorCode',
-    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'attachment_not_found\' | \'attachment_too_large\' | \'attachment_invalid\' | \'attachment_confirmation_required\' | \'attachment_storage_unavailable\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_review_exists\' | \'patrol_policy_invalid\';',
+    declaration: 'export type TaskboardErrorCode = \'workspace_not_found\' | \'issue_not_found\' | \'issue_not_archived\' | \'issue_archived\' | \'attachment_not_found\' | \'attachment_too_large\' | \'attachment_invalid\' | \'attachment_confirmation_required\' | \'attachment_storage_unavailable\' | \'relation_self\' | \'relation_exists\' | \'relation_cross_workspace\' | \'relation_cycle\' | \'relation_not_found\' | \'reason_required\' | \'version_conflict\' | \'prefix_frozen\' | \'invalid_prefix\' | \'prefix_exists\' | \'patrol_busy\' | \'patrol_not_due\' | \'patrol_run_not_active\' | \'patrol_attempt_not_active\' | \'patrol_issue_ineligible\' | \'patrol_context_exists\' | \'patrol_context_missing\' | \'patrol_worktree_confirmation_required\' | \'patrol_worktree_missing\' | \'patrol_worktree_not_clean\' | \'patrol_worktree_not_integrated\' | \'patrol_review_exists\' | \'patrol_policy_invalid\';',
   },
   {
     name: 'TaskboardIssueListValue',
@@ -5044,7 +5070,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'TaskboardPatrolIssueValue',
-    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly diff: TaskboardPatrolDiffValue | null;\n    readonly reviews: readonly PatrolReview[];\n}',
+    declaration: 'export interface TaskboardPatrolIssueValue {\n    readonly context: PatrolDevelopmentContext | null;\n    readonly worktreePresent: boolean;\n    readonly diff: TaskboardPatrolDiffValue | null;\n    readonly reviews: readonly PatrolReview[];\n}',
   },
   {
     name: 'TaskboardPatrolModelOption',
@@ -5073,6 +5099,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'TaskboardPatrolValue',
     declaration: 'export interface TaskboardPatrolValue {\n    readonly policy: PatrolPolicy;\n    readonly defaults: TaskboardPatrolDefaultsValue;\n    readonly branches: readonly string[];\n    readonly agentPresets: readonly TaskboardPatrolAgentPresetOption[];\n    readonly providers: readonly TaskboardPatrolProviderOption[];\n    readonly permissionPresets: readonly TaskboardPatrolPermissionOption[];\n    readonly runs: readonly TaskboardPatrolRunValue[];\n}',
+  },
+  {
+    name: 'TaskboardPatrolWorktreeRemovalInput',
+    declaration: 'export interface TaskboardPatrolWorktreeRemovalInput {\n    readonly workspaceId: WorkspaceId;\n    readonly reference: IssueReference;\n    readonly confirmed: boolean;\n}',
+  },
+  {
+    name: 'TaskboardPatrolWorktreeRemovalValue',
+    declaration: 'export interface TaskboardPatrolWorktreeRemovalValue {\n    readonly worktreePath: string;\n    readonly branch: string;\n    readonly resultCommit: string;\n}',
   },
   {
     name: 'TaskboardRelationListValue',

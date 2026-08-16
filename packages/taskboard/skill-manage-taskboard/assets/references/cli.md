@@ -73,6 +73,7 @@ taskctl patrol get WORKSPACE_ID
 taskctl patrol update WORKSPACE_ID --if-version N [--enabled true|false] [--interval 5m|30m|1h|2h|6h|12h|24h] [--base-branch BRANCH] [--agent-preset PRESET] [--provider PROVIDER] [--model MODEL] [--reasoning-effort EFFORT] [--permission-preset PRESET]
 taskctl patrol run WORKSPACE_ID [--issue ISSUE_ID]
 taskctl patrol issue ISSUE_ID
+taskctl patrol cleanup ISSUE_ID --workspace WORKSPACE_ID --confirm
 ```
 
-An empty `--agent-preset=`, `--provider=`, `--model=`, or `--reasoning-effort=` restores the Host or model default for later unbound Issues. `patrol run` starts one manual Run without enabling the saved schedule. Critical eligibility, claim, Session binding, approval handling, review, and lifecycle writes remain Host-owned operations.
+An empty `--agent-preset=`, `--provider=`, `--model=`, or `--reasoning-effort=` restores the Host or model default for later unbound Issues. `patrol run` starts one manual Run without enabling the saved schedule. `patrol cleanup` requires an explicit user request and `--confirm`; the Host removes only a clean worktree whose result commit is integrated into Base Branch, and it preserves the branch, Session binding, Issue history, and Patrol history. Critical eligibility, claim, Session binding, approval handling, review, and lifecycle writes remain Host-owned operations.
