@@ -82,6 +82,7 @@
 }
 .iconButton:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .sidebarAction {
+  position: relative;
   display: inline-flex;
   width: 16px;
   height: 16px;
@@ -95,6 +96,21 @@
   cursor: pointer;
 }
 .sidebarAction:hover { color: var(--dsw-alias-label-primary); }
+.sidebarBadge {
+  position: absolute;
+  top: -7px;
+  right: -9px;
+  min-width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-bg-layer-1);
+  border-radius: 6px;
+  padding: 0 2px;
+  background: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  font: 8px/10px var(--ds-font-family-code);
+  text-align: center;
+}
 
 .toolbar {
   display: flex;
@@ -342,8 +358,13 @@
 .evidenceGrid div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: 8px; }
 .evidenceGrid dt { color: var(--dsw-alias-label-tertiary); }
 .evidenceGrid dd { min-width: 0; margin: 0; }
+.evidenceLink { max-width: 100%; border: 0; padding: 0; background: transparent; color: var(--dsw-alias-brand-primary); cursor: pointer; }
+.evidenceLink:hover { text-decoration: underline; }
 .evidenceGrid code,
 .reviewCard > code { display: block; overflow: hidden; color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.diffEvidence { margin-top: 12px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
+.diffEvidence summary { padding: 10px; color: var(--dsw-alias-label-secondary); cursor: pointer; font: var(--dsw-font-xxs-strong-12); }
+.diffEvidence pre { max-height: 320px; margin: 0; overflow: auto; border-top: 1px solid var(--dsw-alias-border-l1); padding: 10px; color: var(--dsw-alias-label-primary); font: 12px/18px var(--ds-font-family-code); white-space: pre; }
 .reviewCard { margin-top: 12px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 10px; background: var(--dsw-alias-bg-layer-1); }
 .reviewCard header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .reviewCard time { color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xxxs-11); }

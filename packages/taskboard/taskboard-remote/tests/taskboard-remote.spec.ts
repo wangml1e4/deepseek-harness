@@ -84,6 +84,10 @@ async function harness() {
       ctx.taskboard.updatePatrolPolicy(input),
     trigger: (input: { workspaceId: WorkspaceId }) =>
       ctx.taskboard.beginPatrolRun({ workspaceId: input.workspaceId, trigger: 'manual' }),
+    diff: vi.fn(() => Promise.resolve({
+      stat: ' src/index.ts | 1 +',
+      patch: 'diff --git a/src/index.ts b/src/index.ts\n+export const ready = true',
+    })),
   } as never)
   await ctx.plugin(TaskboardRemote)
   return ctx
@@ -146,6 +150,7 @@ describe('Taskboard Remote Consumer', () => {
       { method: 'workspace', invocation: { kind: 'direct' } },
       { method: 'setPrefix', invocation: { kind: 'direct' } },
       { method: 'listIssues', invocation: { kind: 'direct' } },
+      { method: 'todoCount', invocation: { kind: 'direct' } },
       { method: 'getIssue', invocation: { kind: 'direct' } },
       { method: 'createIssue', invocation: { kind: 'direct' } },
       { method: 'updateIssue', invocation: { kind: 'direct' } },
@@ -401,6 +406,17 @@ describe('Taskboard Remote Consumer', () => {
     await expect(ctx.taskboardRemote.getIssue('UNKNOWN-1' as never)).rejects.toThrow('storage unavailable')
   })
 
+  it('projects the current todo count for one registered Workspace', async () => {
+    const ctx = await harness()
+    await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Approved work', status: 'todo' })
+    await ctx.taskboardRemote.createIssue({ workspaceId, title: 'Unapproved work' })
+
+    await expect(ctx.taskboardRemote.todoCount(workspaceId)).resolves.toEqual({
+      ok: true,
+      value: { count: 1 },
+    })
+  })
+
   it('exposes Patrol choices, policy saves, manual Runs, and Issue evidence', async () => {
     const ctx = await harness()
     await ctx.taskboardRemote.workspace(workspaceId)
@@ -426,7 +442,29 @@ describe('Taskboard Remote Consumer', () => {
     if (!issue.ok) throw new Error(issue.error.message)
     await expect(ctx.taskboardRemote.patrolIssue(issue.value.id)).resolves.toEqual({
       ok: true,
-      value: { context: null, reviews: [] },
+      value: { context: null, diff: null, reviews: [] },
     })
+
+    vi.spyOn(ctx.taskboard, 'getPatrolDevelopmentContext').mockResolvedValueOnce({
+      issueId: issue.value.id,
+      sessionId: 'session-implementation' as never,
+      sessionStartedAt: '2026-08-16T00:00:00.000Z',
+      baseBranch: 'main',
+      branch: 'dsh-task/alpha-1',
+      worktreePath: '/worktrees/alpha-1',
+      agentPreset: 'coding',
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      reasoningEffort: null,
+      permissionPreset: 'workspace-write',
+      resultCommit: 'abc123',
+      createdAt: '2026-08-16T00:00:00.000Z',
+      updatedAt: '2026-08-16T00:10:00.000Z',
+    })
+    const evidence = await ctx.taskboardRemote.patrolIssue(issue.value.id)
+    expect(evidence.ok).toBe(true)
+    if (!evidence.ok) throw new Error(evidence.error.message)
+    expect(evidence.value.diff?.stat).toBe(' src/index.ts | 1 +')
+    expect(evidence.value.diff?.patch).toContain('+export const ready = true')
   })
 })

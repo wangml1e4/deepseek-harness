@@ -12,8 +12,9 @@ async function bench() {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry).await()
   const layout = {
-    openSurface: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
+    openSurface: vi.fn(), showConversation: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
   }
+  const sessions = { open: vi.fn() }
   const one = {
     id: 'issue-1', identifier: 'WS-1', workspaceId: 'ws', title: 'Issue', description: '',
     status: 'todo', priority: 'none', labels: [], assignee: 'unassigned', startDate: null,
@@ -31,6 +32,7 @@ async function bench() {
     taskboard: {
       workspace: () => ok({ workspaceId: 'ws', title: 'Workspace', prefix: 'WS', version: 1, createdAt: '', updatedAt: '' }),
       listIssues,
+      todoCount: () => ok({ count: 1 }),
       getIssue: () => ok({ issue: one }),
       listComments: () => ok({ items: [] }),
       listAttachments: () => ok({ items: [] }),
@@ -53,10 +55,11 @@ async function bench() {
       }),
       updatePatrol: () => ok({}),
       runPatrol: () => ok({}),
-      patrolIssue: () => ok({ context: null, reviews: [] }),
+      patrolIssue: () => ok({ context: null, diff: null, reviews: [] }),
     },
   }
   ctx.provide('layout', layout as never)
+  ctx.provide('sessions', sessions as never)
   ctx.provide('remote', remote as never)
   ctx.provide('remote.taskboard', remote.taskboard as never)
   ctx.provide('locale', new LocaleRuntime(ctx))
@@ -69,12 +72,12 @@ async function bench() {
       'sidebar.workspace.action': { kind: 'list', scope: 'root' },
     },
   } as never, () => null)
-  return { ctx, slots, layout, listIssues, dispatchChanged: (workspaceId: string) => { taskboardChanged?.(workspaceId) } }
+  return { ctx, slots, layout, sessions, listIssues, dispatchChanged: (workspaceId: string) => { taskboardChanged?.(workspaceId) } }
 }
 
 describe('ui-taskboard apply', () => {
   it('declares only the services it uses', () => {
-    expect(inject).toEqual(['slots', 'layout', 'locale', 'remote', 'remote.taskboard'])
+    expect(inject).toEqual(['slots', 'layout', 'sessions', 'locale', 'remote', 'remote.taskboard'])
   })
 
   it('registers a Workspace action and paired generic shell chain entries', async () => {
@@ -94,10 +97,18 @@ describe('ui-taskboard apply', () => {
     expect(details.select?.({ surface: { id: 'settings', context: 'general' } } as never)).toBeNull()
 
     const sidebarInjected = (sidebar.inject as unknown as () => TaskboardSidebarInjected)()
+    await sidebarInjected.loadTodoCount('ws' as never)
+    expect(sidebarInjected.hooks.taskboardTodoCounts.getSnapshot()).toEqual({ ws: 1 })
     sidebarInjected.openTaskboard('ws' as never)
     expect(b.layout.openSurface).toHaveBeenCalledWith({ id: 'taskboard', context: 'ws' })
 
     const taskboard = (center.inject as unknown as () => TaskboardInjected)()
+    taskboard.openSession('session-implementation' as never)
+    expect(b.sessions.open).toHaveBeenCalledWith('session-implementation')
+    expect(b.layout.showConversation).toHaveBeenCalledOnce()
+    expect(b.layout.showConversation.mock.invocationCallOrder[0]!).toBeLessThan(
+      b.sessions.open.mock.invocationCallOrder[0]!,
+    )
     taskboard.openIssue('issue-1' as never)
     expect(b.layout.openDetails).toHaveBeenCalledOnce()
     await vi.waitFor(() => {

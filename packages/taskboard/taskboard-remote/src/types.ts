@@ -49,6 +49,11 @@ export interface TaskboardIssueListValue {
   readonly items: readonly Issue[]
 }
 
+/** Current number of todo Issues shown beside one Workspace. */
+export interface TaskboardTodoCountValue {
+  readonly count: number
+}
+
 /** Ordered Comment list result. */
 export interface TaskboardCommentListValue {
   readonly items: readonly Comment[]
@@ -158,5 +163,13 @@ export interface TaskboardPatrolTriggerInput {
 /** Persistent Session/Git binding and independent review evidence for one Issue. */
 export interface TaskboardPatrolIssueValue {
   readonly context: PatrolDevelopmentContext | null
+  /** Base Branch to result-commit evidence, or null before a committed handoff. */
+  readonly diff: TaskboardPatrolDiffValue | null
   readonly reviews: readonly PatrolReview[]
+}
+
+/** Bounded committed diff presented during human review. */
+export interface TaskboardPatrolDiffValue {
+  readonly patch: string
+  readonly stat: string
 }

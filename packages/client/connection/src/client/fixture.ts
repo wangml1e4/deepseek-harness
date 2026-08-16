@@ -3590,6 +3590,13 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           })),
       })
     },
+    todoCount(workspaceId: WorkspaceId) {
+      return taskboardOk({
+        count: taskboardIssues.filter(issue => (
+          issue.workspaceId === workspaceId && issue.archivedAt === null && issue.status === 'todo'
+        )).length,
+      })
+    },
     listWorkspaceRelations(workspaceId: WorkspaceId) {
       const workspaceIssueIds = new Set(
         taskboardIssues.filter(issue => issue.workspaceId === workspaceId).map(issue => issue.id),
@@ -3736,7 +3743,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     patrolIssue(reference: string) {
       const issue = findTaskboardIssue(reference)
       if (issue === undefined) return taskboardReject('issue_not_found', `Issue '${reference}' does not exist`)
-      if (issue.id !== 'fx-issue-2') return taskboardOk({ context: null, reviews: [] })
+      if (issue.id !== 'fx-issue-2') return taskboardOk({ context: null, diff: null, reviews: [] })
       return taskboardOk({
         context: {
           issueId: issue.id,
@@ -3753,6 +3760,10 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
           resultCommit: '0123456789abcdef',
           createdAt: '2026-08-15T08:20:00.000Z',
           updatedAt: '2026-08-15T09:00:00.000Z',
+        },
+        diff: {
+          stat: ' packages/taskboard/taskboard-sqlite/src/index.ts | 4 ++++',
+          patch: 'diff --git a/packages/taskboard/taskboard-sqlite/src/index.ts b/packages/taskboard/taskboard-sqlite/src/index.ts\n+// Keep the mutation and Activity write in one transaction.',
         },
         reviews: [{
           attemptId: 'fx-attempt-1',
@@ -3801,6 +3812,7 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         case 'taskboard/workspace': return Promise.resolve(taskboardRemotes.workspace(args.workspaceId as WorkspaceId))
         case 'taskboard/setPrefix': return Promise.resolve(taskboardRemotes.setPrefix(args.input as never))
         case 'taskboard/listIssues': return Promise.resolve(taskboardRemotes.listIssues(args.input as never))
+        case 'taskboard/todoCount': return Promise.resolve(taskboardRemotes.todoCount(args.workspaceId as WorkspaceId))
         case 'taskboard/getIssue': return Promise.resolve(taskboardRemotes.getIssue(args.reference as string))
         case 'taskboard/createIssue': return Promise.resolve(taskboardRemotes.createIssue(args.input as never))
         case 'taskboard/updateIssue': return Promise.resolve(taskboardRemotes.updateIssue(args.input as never))

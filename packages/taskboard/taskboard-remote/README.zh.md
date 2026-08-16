@@ -6,7 +6,7 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 ## Remote 方法
 
-`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、按 Issue 与 Workspace 读取的活动记录、附件、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。`listWorkspaceActivities` 会先校验已注册 Workspace，再按从新到旧返回其活跃 Issue 的活动记录。
+`taskboard` namespace 提供 Workspace 元数据、Issue 生命周期、评论、按 Issue 与 Workspace 读取的活动记录、附件、关系，以及四项 Patrol 操作：`patrol`、`updatePatrol`、`runPatrol` 和 `patrolIssue`。`todoCount` 会推导一个 Workspace 当前的 `todo` 数量而不返回 Issue 记录；`listWorkspaceActivities` 会先校验已注册 Workspace，再按从新到旧返回其活跃 Issue 的活动记录。
 
 附件元数据与字节分开列出。上传和读取方法通过受控 Host namespace 传输规范 base64，在持久化前执行 25 MB 上限，并把每次读取限定到所属 Issue，且绝不返回受管文件系统路径。删除操作把显式确认与乐观版本校验委托给 Taskboard Service。
 
@@ -16,7 +16,7 @@ Workspace 所属 Taskboard 能力的 Host Remote 消费方。它通过 Typert RP
 
 每个方法都返回 `TaskboardRemoteResult<T>`。领域失败会保留为带有 `TaskboardError.code` 的稳定业务结果；格式错误的请求在生成的 Typert 载体中失败，基础设施故障则直接拒绝，不会被错误标记为领域错误。`getIssue` 使用显式可空值，因此 Issue 不存在与调用失败是两种不同结果。
 
-`patrol` 会组合已保存策略、当前 Host 选项以及永久 Run／Attempt 历史。`updatePatrol` 把 Host 所属选项校验委托给 Patrol 消费方，`runPatrol` 启动一轮手工后台 Run，`patrolIssue` 则为详情栏返回永久 Development Context 与独立 Reviewer 证据。
+`patrol` 会组合已保存策略、当前 Host 选项以及永久 Run／Attempt 历史。`updatePatrol` 把 Host 所属选项校验委托给 Patrol 消费方，`runPatrol` 启动一轮手工后台 Run，`patrolIssue` 则为详情栏返回永久 Development Context、结果 commit 相对 Base Branch 的受限 diff，以及独立 Reviewer 证据。
 
 生成的 `./remote` 入口由 [`@deepseek-ai/dsh-api-remotes`](../../api/remotes/README.md) 挂载给浏览器消费方。Web Host 会把本包与 Taskboard Service Definition 和 SQLite Provider 一起挂载。
 
